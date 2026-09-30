@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PhoneAPI</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #111; color: #ddd; font: 14px sans-serif; }
+    body { display: flex; flex-direction: column; align-items: center; }
+    canvas { max-width: 100%; max-height: calc(100% - 2.5rem); background: #000; }
+    p { margin: 0.5rem; }
+  </style>
+</head>
+<body>
+<canvas id="screen" width="2" height="2"></canvas>
+<p id="status">Connecting</p>
+<script>
+const status = document.getElementById("status");
+const canvas = document.getElementById("screen");
+const ctx = canvas.getContext("2d");
+const params = new URLSearchParams(location.search);
+const token = params.get("access_token") || "";
+const auth = "access_token=" + encodeURIComponent(token);
+
+function socket(path) {
+  return new WebSocket("wss://" + location.host + path + "?" + auth);
+}
+
+function startCodes(bytes) {
+  const nals = [];
+  let i = 0;
+  while (i + 3 < bytes.length) {
+    let start = -1;
+    let mark = 0;
+    if (bytes[i] === 0 && bytes[i + 1] === 0 && bytes[i + 2] === 1) {
+      start = i + 3;
+      mark = 3;
+    } else if (i + 4 < bytes.length && bytes[i] === 0 && bytes[i + 1] === 0 && bytes[i + 2] === 0 && bytes[i + 3] === 1) {
+      start = i + 4;
+      mark = 4;
+    }
+    if (start < 0) { i += 1; continue; }
+    let end = bytes.length;
+    for (let j = start; j + 3 < bytes.length; j++) {
+      if (bytes[j] === 0 && bytes[j + 1] === 0 && (bytes[j + 2] === 1 || (bytes[j + 2] === 0 && bytes[j + 3] === 1))) {
+        end = j;
+        break;
+      }
+    }
+    nals.push(bytes.subarray(start, end));
+    i = end;
+  }
+  return nals;
+}
+
+function avcc(nals) {
+  let size = 0;
+  for (const nal of nals) size += 4 + nal.length;
+  const out = new Uint8Array(size);
+  let offset = 0;
+  for (const nal of nals) {
+    out[offset] = (nal.length >>> 24) & 255;
+    out[offset + 1] = (nal.length >>> 16) & 255;
+    out[offset + 2] = (nal.length >>> 8) & 255;
+    out[offset + 3] = nal.length & 255;
+    out.set(nal, offset + 4);
+    offset += 4 + nal.length;
+  }
+  return out;
+}
+
+function decoderConfig(nals) {
+  const sps = nals.find((nal) => (nal[0] & 31) === 7);
+  const pps = nals.find((nal) => (nal[0] & 31) === 8);
+  if (!sps || !pps) return null;
+  const hex = (n) => n.toString(16).padStart(2, "0");
+  const codec = "avc1." + hex(sps[1]) + hex(sps[2]) + hex(sps[3]);
+  const description = new Uint8Array(11 + sps.length + pps.length);
+  description.set([1, sps[1], sps[2], sps[3], 255, 225, (sps.length >> 8) & 255, sps.length & 255]);
+  description.set(sps, 8);
+  let at = 8 + sps.length;
+  description[at] = 1;
+  description[at + 1] = (pps.length >> 8) & 255;
+  description[at + 2] = pps.length & 255;
+  description.set(pps, at + 3);
+  return { codec, description };
+}
+
+const video = new VideoDecoder({
+  output(frame) {
+    if (canvas.width !== frame.displayWidth) canvas.width = frame.displayWidth;
+    if (canvas.height !== frame.displayHeight) canvas.height = frame.displayHeight;
+    ctx.drawImage(frame, 0, 0);
+    frame.close();
+    status.textContent = canvas.width + "×" + canvas.height;
+  },
+  error(e) { status.textContent = String(e); }
+});
+let configured = false;
+
+function configureVideo(payload) {
+  const config = decoderConfig(startCodes(payload));
+  if (!config || configured) return;
+  video.configure({ codec: config.codec, description: config.description, optimizeForLatency: true });
+  configured = true;
+}
+
+function onVideo(data) {
+  const bytes = new Uint8Array(data);
+  const type = bytes[0];
+  const payload = bytes.subarray(9);
+  if (type === 1) { configureVideo(payload); return; }
+  if (!configured) configureVideo(payload);
+  if (!configured || video.state !== "configured") return;
+  const nals = startCodes(payload);
+  if (!nals.length) return;
+  let ts = 0n;
+  for (let i = 1; i <= 8; i++) ts = (ts << 8n) + BigInt(bytes[i]);
+  video.decode(new EncodedVideoChunk({
+    type: type === 2 ? "key" : "delta",
+    timestamp: Number(ts),
+    data: avcc(nals)
+  }));
+}
+
+const vs = socket("/v1/stream/video");
+vs.binaryType = "arraybuffer";
+vs.onmessage = (event) => {
+  if (typeof event.data === "string") {
+    const info = JSON.parse(event.data);
+    status.textContent = info.width + "×" + info.height;
+    return;
+  }
+  onVideo(event.data);
+};
+vs.onerror = () => { status.textContent = "Video socket failed"; };
+
+let audioDecoder = null;
+let audioCtx = null;
+let nextAt = 0;
+
+function playAudio(data) {
+  if (!audioCtx) return;
+  const channels = [];
+  for (let c = 0; c < data.numberOfChannels; c++) {
+    const samples = new Float32Array(data.numberOfFrames);
+    data.copyTo(samples, { planeIndex: c, format: "f32-planar" });
+    channels.push(samples);
+  }
+  const buffer = audioCtx.createBuffer(data.numberOfChannels, data.numberOfFrames, data.sampleRate);
+  for (let c = 0; c < channels.length; c++) buffer.copyToChannel(channels[c], c);
+  const source = audioCtx.createBufferSource();
+  source.buffer = buffer;
+  source.connect(audioCtx.destination);
+  const when = Math.max(audioCtx.currentTime, nextAt);
+  source.start(when);
+  nextAt = when + buffer.duration;
+  data.close();
+}
+
+function onAudio(data) {
+  const bytes = new Uint8Array(data);
+  const payload = bytes.subarray(9);
+  if (bytes[0] === 1) {
+    if (audioDecoder) return;
+    const codec = window.__audioCodec === "aac" ? "mp4a.40.2" : "opus";
+    audioDecoder = new AudioDecoder({
+      output: playAudio,
+      error(e) { status.textContent = String(e); }
+    });
+    audioDecoder.configure({ codec, sampleRate: 48000, numberOfChannels: 2, description: payload });
+    return;
+  }
+  if (!audioDecoder || audioDecoder.state !== "configured") return;
+  let ts = 0n;
+  for (let i = 1; i <= 8; i++) ts = (ts << 8n) + BigInt(bytes[i]);
+  audioDecoder.decode(new EncodedAudioChunk({ type: "key", timestamp: Number(ts), data: payload }));
+}
+
+const as = socket("/v1/stream/audio");
+as.binaryType = "arraybuffer";
+as.onmessage = (event) => {
+  if (typeof event.data === "string") {
+    window.__audioCodec = JSON.parse(event.data).codec;
+    return;
+  }
+  onAudio(event.data);
+};
+
+document.body.addEventListener("click", () => {
+  if (!audioCtx) audioCtx = new AudioContext();
+  audioCtx.resume();
+}, { once: true });
+</script>
+</body>
+</html>

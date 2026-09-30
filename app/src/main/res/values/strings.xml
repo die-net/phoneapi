@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">PhoneAPI</string>
+    <string name="a11y_summary">Lets paired test clients read the screen and send input.</string>
+    <string name="a11y_description">PhoneAPI exposes this device\'s UI to paired, authenticated test clients over the local network so they can read screens and perform taps, swipes and typing. Only clients holding a token you created can connect.</string>
+</resources>

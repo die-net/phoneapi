@@ -1,0 +1,108 @@
+package net.die.phoneapi.core
+
+import net.die.phoneapi.model.ActionResult
+import net.die.phoneapi.model.AppInfo
+import net.die.phoneapi.model.BrowserSnapshot
+import net.die.phoneapi.model.BrowserTapRequest
+import net.die.phoneapi.model.BrowserTarget
+import net.die.phoneapi.model.ConsoleRequest
+import net.die.phoneapi.model.ConsoleResult
+import net.die.phoneapi.model.EvalRequest
+import net.die.phoneapi.model.EvalResult
+import net.die.phoneapi.model.FindRequest
+import net.die.phoneapi.model.FindResult
+import net.die.phoneapi.model.GestureRequest
+import net.die.phoneapi.model.IntentRequest
+import net.die.phoneapi.model.KeyRequest
+import net.die.phoneapi.model.LaunchRequest
+import net.die.phoneapi.model.NodeActionRequest
+import net.die.phoneapi.model.SnapshotFormat
+import net.die.phoneapi.model.SwipeRequest
+import net.die.phoneapi.model.TapRequest
+import net.die.phoneapi.model.TextRequest
+import net.die.phoneapi.model.UiSnapshot
+import net.die.phoneapi.model.UnlockRequest
+import net.die.phoneapi.model.WaitRequest
+import net.die.phoneapi.model.WaitResult
+
+// Shared by the REST routes and the MCP tools. Implementations throw ApiException for
+// client-visible failures.
+
+data class SnapshotOptions(
+    val format: SnapshotFormat = SnapshotFormat.COMPACT,
+    val windowId: Int? = null,
+    val maxDepth: Int? = null,
+    val includeInvisible: Boolean = false,
+    /** Include every window, not just the ones that are interesting to act on. */
+    val allWindows: Boolean = false,
+    val autoWake: Boolean = true,
+)
+
+interface UiService {
+    suspend fun snapshot(options: SnapshotOptions): UiSnapshot
+
+    suspend fun find(request: FindRequest): FindResult
+
+    suspend fun act(ref: String, request: NodeActionRequest): ActionResult
+}
+
+interface InputService {
+    suspend fun tap(request: TapRequest): ActionResult
+
+    suspend fun swipe(request: SwipeRequest): ActionResult
+
+    suspend fun gesture(request: GestureRequest): ActionResult
+
+    suspend fun key(request: KeyRequest): ActionResult
+
+    suspend fun text(request: TextRequest): ActionResult
+
+    suspend fun hideIme(): ActionResult
+}
+
+interface PowerService {
+    suspend fun wake(): ActionResult
+
+    suspend fun unlock(request: UnlockRequest): ActionResult
+
+    suspend fun lock(): ActionResult
+
+    /**
+     * Called before every action. Wakes (and unlocks, if possible) when [autoWake] is set and the
+     * screen is off, extends the awake lease, and returns whether the device was woken. Throws `409
+     * device_locked` when the device stays locked.
+     */
+    suspend fun prepareForAction(autoWake: Boolean, allowLocked: Boolean = false): Boolean
+}
+
+interface AppsService {
+    suspend fun list(launchableOnly: Boolean): List<AppInfo>
+
+    suspend fun launch(packageName: String, request: LaunchRequest): ActionResult
+
+    suspend fun stop(packageName: String): ActionResult
+
+    suspend fun clear(packageName: String): ActionResult
+
+    suspend fun intent(request: IntentRequest): ActionResult
+}
+
+interface WaitService {
+    suspend fun wait(request: WaitRequest): WaitResult
+}
+
+interface BrowserService {
+    suspend fun targets(): List<BrowserTarget>
+
+    suspend fun openTab(url: String): BrowserTarget
+
+    suspend fun navigate(id: String, url: String): BrowserTarget
+
+    suspend fun snapshot(id: String): BrowserSnapshot
+
+    suspend fun tap(id: String, request: BrowserTapRequest): ActionResult
+
+    suspend fun evaluate(id: String, request: EvalRequest): EvalResult
+
+    suspend fun console(id: String, request: ConsoleRequest): ConsoleResult
+}

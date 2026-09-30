@@ -1,0 +1,71 @@
+# Built on the default config with every rule enabled (allRules), minus rules that are
+# noise for this codebase, conflict with ktfmt, or fight `explicitApi()`.
+comments:
+  active: false
+
+complexity:
+  TooManyFunctions:
+    active: false
+  LongParameterList:
+    active: false
+  StringLiteralDuplication:
+    active: false
+  LabeledExpression:
+    active: false
+  NamedArguments:
+    active: false
+  ReplaceSafeCallChainWithRun:
+    active: false
+
+naming:
+  # API field names like `visible` / `locked` are part of the wire format.
+  BooleanPropertyNaming:
+    active: false
+  MemberNameEqualsClassName:
+    active: false
+
+potential-bugs:
+  # Required by Android lifecycles (views created in onCreate, etc.).
+  LateinitUsage:
+    active: false
+  UnnamedParameterUse:
+    active: false
+
+style:
+  MagicNumber:
+    active: false
+  MaxLineLength:
+    active: false
+  WildcardImport:
+    active: false
+  ReturnCount:
+    active: false
+  ThrowsCount:
+    active: false
+  # Conflicts with explicitApi() in api-model.
+  RedundantVisibilityModifier:
+    active: false
+  # Formatting-adjacent; ktfmt owns layout.
+  BracesOnIfStatements:
+    active: false
+  BracesOnWhenStatements:
+    active: false
+  CascadingCallWrapping:
+    active: false
+  UnnecessaryParentheses:
+    active: false
+  ClassOrdering:
+    active: false
+  MultilineLambdaItParameter:
+    active: false
+  UseIfInsteadOfWhen:
+    active: false
+  AlsoCouldBeApply:
+    active: false
+  ForbiddenComment:
+    active: true
+    comments:
+      - value: 'TODO:'
+        reason: 'Track work in issues, not TODO comments.'
+      - value: 'FIXME:'
+        reason: 'Fix it or file an issue.'

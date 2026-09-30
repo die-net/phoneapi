@@ -1,0 +1,15 @@
+version: 2
+updates:
+  - package-ecosystem: gradle
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      kotlin-and-agp:
+        patterns: ["org.jetbrains.kotlin*", "com.android.tools.build*"]
+      ktor:
+        patterns: ["io.ktor*"]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Minimal API client for development, using .dev/pairing.json from scripts/dev-setup.sh.
+#
+#   scripts/papi GET /v1/device
+#   scripts/papi POST /v1/input/tap '{"x":100,"y":200}'
+#   scripts/papi WS /v1/events            (requires websocat)
+set -euo pipefail
+cd "$(dirname "$0")/.."
+method="$1"; path="$2"; body="${3:-}"
+port="$(jq -r .port .dev/pairing.json)"
+token="$(jq -r .token .dev/pairing.json)"
+base="127.0.0.1:$port"
+if [[ "$method" == WS ]]; then
+  # Prints each text frame on its own line; stops after $PAPI_WS_SECONDS (default 10).
+  exec uv run -q --with websockets python3 - "wss://$base$path" "$token" "${PAPI_WS_SECONDS:-10}" <<'PY'
+import asyncio, ssl, sys, websockets
+url, token, secs = sys.argv[1], sys.argv[2], float(sys.argv[3])
+ctx = ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
+async def main():
+    async with websockets.connect(url, ssl=ctx, additional_headers={"Authorization": f"Bearer {token}"}) as ws:
+        try:
+            async with asyncio.timeout(secs):
+                async for msg in ws:
+                    print(msg, flush=True)
+        except TimeoutError:
+            pass
+asyncio.run(main())
+PY
+fi
+args=(-sk -X "$method" -H "Authorization: Bearer $token" -w '\n%{http_code}\n')
+if [[ -n "$body" ]]; then args+=(-H 'Content-Type: application/json' -d "$body"); fi
+curl "${args[@]}" "https://$base$path"

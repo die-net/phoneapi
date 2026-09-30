@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<lint>
+    <issue id="NewApi" severity="fatal" />
+    <issue id="InlinedApi" severity="error" />
+    <issue id="GradleDependency" severity="ignore" />
+    <issue id="NewerVersionAvailable" severity="ignore" />
+    <issue id="AndroidGradlePluginVersion" severity="ignore" />
+    <!-- Newer attributes are intentionally declared and simply ignored on older releases. -->
+    <issue id="UnusedAttribute" severity="ignore" />
+    <!-- BouncyCastle ships a trust-all manager for its own tooling; we never use it.
+         Kadb trusts adbd's self-signed certificate and authenticates with the paired key. -->
+    <issue id="TrustAllX509TrustManager">
+        <ignore regexp="bcpkix-jdk18on" />
+        <ignore regexp="/kadb/" />
+    </issue>
+    <!-- The helper intentionally calls hidden framework APIs via reflection, isolated in compat/. -->
+    <issue id="PrivateApi">
+        <ignore path="**/helper/src/main/kotlin/net/die/phoneapi/helper/compat/**" />
+    </issue>
+    <issue id="DiscouragedPrivateApi">
+        <ignore path="**/helper/src/main/kotlin/net/die/phoneapi/helper/compat/**" />
+    </issue>
+    <issue id="SoonBlockedPrivateApi">
+        <ignore path="**/helper/src/main/kotlin/net/die/phoneapi/helper/compat/**" />
+    </issue>
+</lint>

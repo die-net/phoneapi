@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  security-events: write
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      - name: Check, lint, test, build
+        run: ./gradlew spotlessCheck detektMain lint testDebugUnitTest :api-model:test assembleDebug --continue
+
+      - name: Upload detekt SARIF
+        if: always() && hashFiles('build/reports/detekt/merge.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: build/reports/detekt/merge.sarif
+          category: detekt
+
+      - name: Upload Lint SARIF
+        if: always() && hashFiles('app/build/reports/lint-results-debug.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: app/build/reports/lint-results-debug.sarif
+          category: android-lint
+
+      - name: Upload reports
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: reports
+          path: |
+            **/build/reports/
+            !**/build/reports/configuration-cache/
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: phoneapi-debug
+          path: app/build/outputs/apk/debug/*.apk
