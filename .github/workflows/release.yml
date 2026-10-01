@@ -45,7 +45,9 @@ jobs:
           cp app/build/outputs/apk/release/app-release.apk "dist/phoneapi-${GITHUB_REF_NAME}.apk"
           cd dist && sha256sum *.apk > SHA256SUMS
 
+      # Attestations on a private repository need GitHub Enterprise Cloud.
       - uses: actions/attest-build-provenance@v4
+        if: ${{ !github.event.repository.private }}
         with:
           subject-path: dist/*.apk
 
