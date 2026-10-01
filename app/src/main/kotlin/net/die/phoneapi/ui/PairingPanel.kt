@@ -110,10 +110,6 @@ internal class PairingPanel(
         if (on) activity.window.addFlags(flag) else activity.window.clearFlags(flag)
     }
 
-    private fun View.shownIf(shown: Boolean) {
-        visibility = if (shown) View.VISIBLE else View.GONE
-    }
-
     private fun ask(pending: PairingManager.Pending) {
         if (dialogFor == pending.id) return
         dismiss()

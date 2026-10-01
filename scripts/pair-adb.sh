@@ -7,9 +7,11 @@
 #
 # --forward also makes the server listen on loopback and forwards its port, so the JSON points at
 # 127.0.0.1. Use it for emulators, or when the phone's Wi-Fi address isn't reachable.
+# Defaults to the debug application id (net.die.phoneapi.dev). For a release install:
+#   PHONEAPI_PKG=net.die.phoneapi scripts/pair-adb.sh
 set -euo pipefail
 
-PKG="${PHONEAPI_PKG:-net.die.phoneapi}"
+PKG="${PHONEAPI_PKG:-net.die.phoneapi.dev}"
 RECEIVER="$PKG/net.die.phoneapi.ShellCommandReceiver"
 name="$(hostname -s 2>/dev/null || hostname)"
 forward=0

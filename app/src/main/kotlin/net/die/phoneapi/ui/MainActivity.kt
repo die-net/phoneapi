@@ -1,6 +1,7 @@
 package net.die.phoneapi.ui
 
 import android.Manifest
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Typeface
@@ -8,13 +9,11 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
-import android.text.InputType
+import android.util.Log
 import android.view.Gravity
 import android.view.View
-import android.view.ViewGroup
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.view.Window
-import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -31,6 +30,7 @@ import net.die.phoneapi.PhoneApiApp
 import net.die.phoneapi.R
 import net.die.phoneapi.ShellCommandReceiver
 import net.die.phoneapi.helperclient.HelperLaunch
+import net.die.phoneapi.helperclient.notificationsAllowed
 import net.die.phoneapi.model.HelperStatus
 import net.die.phoneapi.model.TokenInfo
 import net.die.phoneapi.server.ServerController
@@ -53,6 +53,12 @@ class MainActivity : ComponentActivity() {
     private lateinit var a11yRestricted: List<View>
     private lateinit var tokenList: LinearLayout
     private lateinit var pairing: PairingPanel
+    private lateinit var helperShizuku: List<View>
+    private lateinit var helperWireless: List<View>
+    private lateinit var helperWirelessHow: TextView
+    private lateinit var helperUsbHow: TextView
+    private lateinit var helperAdb: List<View>
+    private lateinit var helperMessage: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -77,9 +83,6 @@ class MainActivity : ComponentActivity() {
                 // Android 15+ draws this activity edge to edge.
                 fitsSystemWindows = true
                 clipToPadding = false
-                // Holds initial focus so the view doesn't scroll down to the first text field.
-                isFocusableInTouchMode = true
-                descendantFocusability = ViewGroup.FOCUS_BEFORE_DESCENDANTS
                 addView(column)
             }
         )
@@ -128,34 +131,61 @@ class MainActivity : ComponentActivity() {
     private fun addHelper(column: LinearLayout) {
         column.addView(heading(R.string.helper_title))
         column.addView(body(R.string.helper_why))
-        column.addView(body(R.string.helper_usb))
+        helperMessage = TextView(this)
+        helperShizuku = shizukuHelperViews()
+        helperWireless = wirelessHelperViews()
+        helperUsbHow = body(R.string.helper_usb)
+        helperAdb = usbHelperViews()
+        helperShizuku.forEach(column::addView)
+        helperWireless.forEach(column::addView)
+        column.addView(helperUsbHow)
+        helperAdb.forEach(column::addView)
+        column.addView(helperMessage)
+        showHelperPaths()
+    }
+
+    private fun shizukuHelperViews() =
+        listOf(
+            body(R.string.helper_shizuku),
+            button(R.string.shizuku_start) {
+                helperMessage.text = graph.helperSupervisor.requestShizuku()
+            },
+        )
+
+    private fun wirelessHelperViews(): List<View> {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return emptyList()
+        helperWirelessHow = body(R.string.helper_wireless)
+        return listOf(
+            helperWirelessHow,
+            button(R.string.wireless_pair) { helperMessage.text = pairWireless() },
+        )
+    }
+
+    private fun usbHelperViews(): List<View> {
         val command = HelperLaunch.command(packageName)
-        column.addView(code(command))
-        column.addView(copyButton(R.string.copy_helper) { command })
-        val message = TextView(this)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            column.addView(body(R.string.helper_wireless))
-            val code = input(R.string.wireless_code_hint)
-            val port = input(R.string.wireless_port_hint)
-            column.addView(code)
-            column.addView(port)
-            column.addView(
-                button(R.string.wireless_pair) {
-                    lifecycleScope.launch {
-                        val typed = port.text.toString().trim().toIntOrNull()
-                        message.text =
-                            graph.helperSupervisor.pair(code.text.toString().trim(), typed)
-                    }
-                }
+        return listOf(code(command), copyButton(R.string.copy_helper) { command })
+    }
+
+    private fun showHelperPaths() {
+        val shizuku = graph.helperSupervisor.shizukuInstalled()
+        val wirelessOn = graph.helperSupervisor.wirelessEnabled()
+        val showWireless =
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && (wirelessOn || !shizuku)
+        helperShizuku.forEach { it.shownIf(shizuku) }
+        helperWireless.forEach { it.shownIf(showWireless) }
+        if (showWireless) {
+            helperWirelessHow.setText(
+                if (wirelessOn) R.string.helper_wireless_on else R.string.helper_wireless
             )
         }
-        column.addView(body(R.string.helper_shizuku))
-        column.addView(
-            button(R.string.shizuku_start) {
-                message.text = graph.helperSupervisor.requestShizuku()
-            }
-        )
-        column.addView(message)
+        val showUsb = !wirelessOn
+        helperUsbHow.shownIf(showUsb)
+        helperAdb.forEach { it.shownIf(showUsb) }
+        if (showUsb) {
+            helperUsbHow.setText(
+                if (shizuku || showWireless) R.string.helper_usb_alt else R.string.helper_usb
+            )
+        }
     }
 
     private fun observeStatus() {
@@ -163,6 +193,7 @@ class MainActivity : ComponentActivity() {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 graph.serverController.acquire(HOLDER)
                 try {
+                    showHelperPaths()
                     launch { showTokens() }
                     launch { pairing.run() }
                     launch { graph.a11y.collect { showAccessibility(it != null) } }
@@ -227,11 +258,35 @@ class MainActivity : ComponentActivity() {
         requestNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 
-    private fun input(hintText: Int) =
-        EditText(this).apply {
-            setHint(hintText)
-            inputType = InputType.TYPE_CLASS_NUMBER
+    /**
+     * Watches for the system pairing dialog, then opens Developer options at Wireless debugging.
+     */
+    private fun pairWireless(): String {
+        val developer =
+            Settings.Global.getInt(contentResolver, Settings.Global.DEVELOPMENT_SETTINGS_ENABLED, 0)
+        if (developer != 1) return getString(R.string.wireless_needs_developer)
+        if (!notificationsAllowed()) {
+            requestNotificationPermission()
+            return getString(R.string.wireless_needs_notifications)
         }
+        graph.wirelessPairing.start()
+        return if (openWirelessSettings()) "" else getString(R.string.wireless_needs_developer)
+    }
+
+    private fun openWirelessSettings(): Boolean {
+        val highlight = Bundle().apply { putString(FRAGMENT_ARG_KEY, WIRELESS_DEBUGGING_KEY) }
+        val intent =
+            Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)
+                .putExtra(FRAGMENT_ARG_KEY, WIRELESS_DEBUGGING_KEY)
+                .putExtra(SHOW_FRAGMENT_ARGS, highlight)
+        return try {
+            startActivity(intent)
+            true
+        } catch (e: ActivityNotFoundException) {
+            Log.w(TAG, "No developer options screen", e)
+            false
+        }
+    }
 
     private suspend fun showTokens() {
         val infos = withContext(graph.ioDispatcher) { graph.tokens.list() }
@@ -262,5 +317,11 @@ class MainActivity : ComponentActivity() {
 
     private companion object {
         const val HOLDER = "ui"
+        const val TAG = "PhoneApi"
+
+        // Settings extras that scroll to and highlight a preference; not public API.
+        const val FRAGMENT_ARG_KEY = ":settings:fragment_args_key"
+        const val SHOW_FRAGMENT_ARGS = ":settings:show_fragment_args"
+        const val WIRELESS_DEBUGGING_KEY = "toggle_adb_wireless"
     }
 }

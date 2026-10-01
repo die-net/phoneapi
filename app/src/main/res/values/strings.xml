@@ -38,14 +38,16 @@
     <string name="paired_toast">Paired with %1$s</string>
 
     <string name="helper_title">Optional: start the helper</string>
-    <string name="helper_why">Without the helper, a paired computer can read the screen, tap, swipe, type, and launch apps. The helper adds faster injected input, screen and audio streaming, Chrome control, and force-stopping apps. Android only allows that from developer tools, so start it once in one of these ways. On Android 11 and later, PhoneAPI restarts it by itself after that.</string>
-    <string name="helper_usb">From a computer with USB debugging on:</string>
+    <string name="helper_why">Without the helper, a paired computer can read the screen, tap, swipe, type, and launch apps. The helper adds faster injected input, screen and audio streaming, Chrome control, and force-stopping apps. Android only allows that from developer tools.</string>
+    <string name="helper_usb">From a computer with USB debugging on. You\'ll need to run this again after the phone reboots.</string>
+    <string name="helper_usb_alt">Prefer a computer instead? This USB command also starts the helper. You\'ll need to run it again after a reboot, unless the on-phone path above is already set up.</string>
     <string name="copy_helper">Copy helper start command</string>
-    <string name="helper_wireless">Or without a computer: open Developer options, Wireless debugging, Pair device with pairing code, and enter the code in the PhoneAPI notification while that dialog stays open. With split screen you can enter it here instead.</string>
-    <string name="wireless_code_hint">Wireless debugging code</string>
-    <string name="wireless_port_hint">Pairing port</string>
+    <string name="helper_wireless">Tap Pair wireless debugging, turn on Wireless debugging, and tap Pair device with pairing code. A PhoneAPI notification drops down; type the code there. Leaving the pairing dialog cancels it, so don\'t switch apps. After this once, PhoneAPI starts the helper itself after a reboot, once the phone is unlocked.</string>
+    <string name="helper_wireless_on">Wireless debugging is on. PhoneAPI starts the helper over it after a reboot, once the phone is unlocked.</string>
     <string name="wireless_pair">Pair wireless debugging</string>
-    <string name="helper_shizuku">Or, if Shizuku is installed and running:</string>
+    <string name="wireless_needs_developer">Turn on Developer options first: in Settings, open About phone and tap Build number seven times.</string>
+    <string name="wireless_needs_notifications">Allow PhoneAPI notifications, then tap again. The code goes into a notification.</string>
+    <string name="helper_shizuku">Shizuku is installed on this phone. Start the helper with it. While Shizuku is running, PhoneAPI starts the helper itself after a reboot.</string>
     <string name="shizuku_start">Start with Shizuku</string>
 
     <string name="tokens_title">Paired computers</string>

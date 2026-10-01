@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.Typeface
+import android.view.View
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -51,6 +52,10 @@ internal fun Context.copyButton(label: Int, value: () -> CharSequence) =
         getSystemService(ClipboardManager::class.java)
             .setPrimaryClip(ClipData.newPlainText(getString(label), value()))
     }
+
+internal fun View.shownIf(shown: Boolean) {
+    visibility = if (shown) View.VISIBLE else View.GONE
+}
 
 internal fun Context.vertical() = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
 

@@ -120,7 +120,7 @@ class ShellCommandReceiver : BroadcastReceiver() {
                 is Parse.Ok -> parsed.value
             }
         pending.resultCode = 0
-        pending.resultData = graph.helperSupervisor.pair(code, port)
+        pending.resultData = graph.helperSupervisor.pair(code, port).message
     }
 
     private fun fail(pending: PendingResult, message: String) {

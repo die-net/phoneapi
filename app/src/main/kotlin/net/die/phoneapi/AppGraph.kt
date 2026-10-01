@@ -42,6 +42,7 @@ import net.die.phoneapi.helperclient.HelperShell
 import net.die.phoneapi.helperclient.HelperStatusNotifier
 import net.die.phoneapi.helperclient.HelperSupervisor
 import net.die.phoneapi.helperclient.KeystorePrivateKeyStore
+import net.die.phoneapi.helperclient.WirelessPairing
 import net.die.phoneapi.input.A11yTouchBackend
 import net.die.phoneapi.input.Humanizer
 import net.die.phoneapi.input.ImeKeyBackend
@@ -107,6 +108,7 @@ class AppGraph(
             accessibilityComponent =
                 ComponentName(context, PhoneAccessibilityService::class.java).flattenToString(),
         )
+    internal val wirelessPairing = WirelessPairing(context, helperSupervisor, scope, ioDispatcher)
 
     /** The lock-screen PIN, provisioned over ADB and never returned by the API. */
     val pins = PinStore(filesDir)

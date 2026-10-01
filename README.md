@@ -21,7 +21,7 @@ export ANDROID_HOME=/opt/homebrew/share/android-commandlinetools
 ./gradlew assembleDebug
 ```
 
-The debug APK is `app/build/outputs/apk/debug/app-debug.apk`.
+The debug APK is `app/build/outputs/apk/debug/app-debug.apk`, installed as `net.die.phoneapi.dev` so it can sit next to a release build.
 
 The same checks CI runs:
 
@@ -45,9 +45,9 @@ To do the same steps by hand:
 
 ```sh
 adb install -r -g app/build/outputs/apk/debug/app-debug.apk
-adb shell pm grant net.die.phoneapi android.permission.WRITE_SECURE_SETTINGS
+adb shell pm grant net.die.phoneapi.dev android.permission.WRITE_SECURE_SETTINGS
 adb shell settings put secure enabled_accessibility_services \
-  net.die.phoneapi/net.die.phoneapi.a11y.PhoneAccessibilityService
+  net.die.phoneapi.dev/net.die.phoneapi.a11y.PhoneAccessibilityService
 adb shell settings put secure accessibility_enabled 1
 scripts/helper-start.sh
 ```
@@ -124,9 +124,9 @@ Launch it once from the computer:
 scripts/helper-start.sh
 ```
 
-The process detaches, so the command returns while the helper keeps running. On Android 11+, after that first pairing, the app restarts the helper itself after a crash, a package update, or a reboot (once the user has unlocked). It turns Wireless Debugging on, starts the helper, and turns Wireless Debugging off again if it was off. Granting `WRITE_SECURE_SETTINGS`, which `dev-setup.sh` does, is what allows that.
+The process detaches, so the command returns while the helper keeps running. That USB start does not survive a reboot; run it again, or use one of the on-phone paths. On Android 11+, after pairing Wireless Debugging once, the app restarts the helper itself after a crash, a package update, or a reboot (once the user has unlocked). It turns Wireless Debugging on, starts the helper, and turns Wireless Debugging off again if it was off. Granting `WRITE_SECURE_SETTINGS`, which `dev-setup.sh` does, is what allows that. If Shizuku is installed and running, the app starts the helper through it instead, including after a reboot.
 
-To pair from the phone, open the system "Pair device with pairing code" dialog and enter the code in the PhoneAPI notification. The dialog has to stay in front; the pairing port closes when it is paused. If Shizuku is installed, the in-app "Start with Shizuku" button binds a user service instead.
+To pair from the phone (Android 11+), tap "Pair wireless debugging" in the app. It opens Developer options and watches mDNS for this phone's pairing service. When the system "Pair device with pairing code" dialog opens, a heads-up notification asks for the code inline. The dialog has to stay in front: Android closes the pairing port when it is dismissed, including when the user switches apps. Wireless debugging is hidden on Android 10. If Shizuku is installed, the app offers "Start with Shizuku" first. The USB command stays available unless wireless debugging is already on.
 
 These calls need the helper: injected input (`input.inject`), `POST /v1/apps/{pkg}/stop` and `/clear`, helper screenshots, logcat, every `/v1/browser` route, and the mirror and audio-submix stream paths. Snapshots, accessibility gestures, app launch, and wake still work while it is down.
 

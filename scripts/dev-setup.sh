@@ -9,7 +9,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-PKG="${PHONEAPI_PKG:-net.die.phoneapi}"
+PKG="${PHONEAPI_PKG:-net.die.phoneapi.dev}"
 SERVICE="$PKG/net.die.phoneapi.a11y.PhoneAccessibilityService"
 build=1
 bind_all=0
@@ -47,7 +47,7 @@ for _ in $(seq 1 10); do
   adb shell settings put secure enabled_accessibility_services "$desired"
   adb shell settings put secure accessibility_enabled 1
   sleep 1
-  if adb shell dumpsys accessibility | grep -q "Bound services:{Service\[label=PhoneAPI"; then break; fi
+  if adb shell dumpsys accessibility | grep -Fq "$SERVICE"; then break; fi
 done
 
 mkdir -p .dev

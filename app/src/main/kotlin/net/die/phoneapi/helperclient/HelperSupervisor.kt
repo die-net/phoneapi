@@ -81,6 +81,20 @@ internal class HelperSupervisor(
             false
         }
 
+    /** True if the Shizuku app is present, or if Sui/Shizuku is already bound. */
+    fun shizukuInstalled(): Boolean {
+        if (shizukuAvailable()) return true
+        return try {
+            context.packageManager.getPackageInfo(SHIZUKU_PACKAGE, 0)
+            true
+        } catch (_: PackageManager.NameNotFoundException) {
+            false
+        }
+    }
+
+    fun wirelessEnabled(): Boolean =
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && secure.wirelessEnabled()
+
     /** Asks Shizuku for permission when it is running, then starts the helper. */
     fun requestShizuku(): String {
         if (!shizukuAvailable()) return "Shizuku is not running."
@@ -122,28 +136,29 @@ internal class HelperSupervisor(
     @Suppress(
         "TooGenericExceptionCaught"
     ) // Pairing failures arrive as library-specific exceptions.
-    suspend fun pair(code: String, port: Int?): String {
+    suspend fun pair(code: String, port: Int?): PairOutcome {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
-            return "Wireless debugging needs Android 11 or newer."
+            return PairOutcome(false, "Wireless debugging needs Android 11 or newer.")
         }
-        if (!PAIRING_CODE.matches(code)) return "Enter the 6-digit pairing code."
-        if (port != null && port !in 1..65_535) {
-            return "Enter the pairing port shown next to the code."
-        }
-        val endpoint = port ?: finder.pairingPort()
-        if (endpoint == null) return "No pairing port. Enter the port shown next to the code."
+        if (!PAIRING_CODE.matches(code)) return PairOutcome(false, "Enter the 6-digit code.")
+        val endpoint =
+            port
+                ?: finder.pairingPort()
+                ?: return PairOutcome(false, "The pairing dialog closed. Open it again.")
         return try {
             pairWith(code, endpoint)
             keys.markPaired()
             nudge()
-            "Paired. Starting the helper."
+            PairOutcome(true, "Paired. Starting the helper.")
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             Log.w(TAG, "Wireless debugging pairing failed", e)
-            "Pairing failed. Check the code and port, then try again."
+            PairOutcome(false, "Pairing failed. Check the code and try again.")
         }
     }
+
+    data class PairOutcome(val paired: Boolean, val message: String)
 
     @Suppress(
         "TooGenericExceptionCaught"
@@ -369,6 +384,7 @@ internal class HelperSupervisor(
         const val TAG = "PhoneApiHelper"
         const val SHELL_SERVICE = "net.die.phoneapi.helper.ShellService"
         const val HELPER_MAIN = "net.die.phoneapi.helper.Main"
+        const val SHIZUKU_PACKAGE = "moe.shizuku.privileged.api"
         const val SHIZUKU_REQUEST = 31
         const val MAX_FAILURES = 6
         const val SHIZUKU_WAIT_MS = 8_000L
