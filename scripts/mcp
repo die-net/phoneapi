@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+# Stdio bridge to the phone's stateless MCP endpoint. Reads one JSON-RPC message per line on
+# stdin, POSTs it to /mcp, and writes each JSON response as one line on stdout. A notification
+# is answered with HTTP 202 and produces no stdout line. Logs go to stderr.
+#
+# Pins spkiSha256 from the pairing file. --insecure skips the authority and hostname checks:
+# the certificate is CN=Android device and has no name for the address you connect to.
+#
+#   scripts/mcp
+#   PAPI_PAIRING=pairing.json scripts/mcp
+#
+# /mcp accepts Host localhost, 127.0.0.1, and ::1 unless allowedHosts is changed. Point the
+# pairing file at a forwarded loopback address (scripts/pair-adb.sh --forward).
+set -euo pipefail
+
+pairing="$(realpath "${PAPI_PAIRING:-$(dirname "$0")/../.dev/pairing.json}")"
+host="$(jq -r '.host | select(. != "") // "127.0.0.1"' "$pairing")"
+port="$(jq -r .port "$pairing")"
+token="$(jq -r .token "$pairing")"
+spki="$(jq -r .spkiSha256 "$pairing")"
+if [[ -z "$port" || "$port" == null || -z "$token" || "$token" == null || -z "$spki" || "$spki" == null ]]; then
+  echo "phoneapi mcp: $pairing is missing port, token, or spkiSha256" >&2
+  exit 1
+fi
+
+case "$host" in
+  localhost | 127.0.0.1 | ::1) ;;
+  *)
+    echo "phoneapi mcp: $host is not a loopback address. /mcp rejects other Host values unless allowedHosts is set. Use scripts/pair-adb.sh --forward." >&2
+    ;;
+esac
+
+if [[ "$host" == *:* && "$host" != \[* ]]; then
+  url_host="[$host]"
+else
+  url_host="$host"
+fi
+url="https://${url_host}:${port}/mcp"
+
+tmp="$(mktemp)"
+trap 'rm -f "$tmp"' EXIT
+protocol_version=""
+request_id=""
+
+echo "phoneapi mcp: $url" >&2
+
+reply_error() {
+  [[ -z "$request_id" ]] && return 0
+  jq -cn --argjson id "$request_id" --arg message "$1" \
+    '{jsonrpc:"2.0",id:$id,error:{code:-32000,message:$message}}'
+}
+
+while IFS= read -r line || [[ -n "$line" ]]; do
+  [[ "$line" =~ [^[:space:]] ]] || continue
+  if ! request_id="$(jq -c 'select(type == "object" and has("id") and .id != null) | .id' <<<"$line")"; then
+    echo "phoneapi mcp: ignoring a line that is not JSON" >&2
+    request_id=""
+    continue
+  fi
+
+  : >"$tmp"
+  curl_args=(
+    --silent
+    --show-error
+    --http1.1
+    --connect-timeout 10
+    --insecure
+    --pinnedpubkey "sha256//$spki"
+    -H "Authorization: Bearer $token"
+    -H "Content-Type: application/json"
+    -H "Accept: application/json, text/event-stream"
+  )
+  if [[ -n "$protocol_version" ]]; then
+    curl_args+=(-H "MCP-Protocol-Version: $protocol_version")
+  fi
+  curl_args+=(--output "$tmp" --write-out '%{http_code}' --data-binary @- "$url")
+
+  http_code="000"
+  if ! http_code="$(curl "${curl_args[@]}" <<<"$line")"; then
+    reply_error "PhoneAPI request failed (HTTP ${http_code:-000})"
+    continue
+  fi
+  if [[ "$http_code" == "202" || ! -s "$tmp" ]]; then
+    if [[ "$http_code" != "202" ]]; then
+      reply_error "PhoneAPI returned HTTP $http_code with an empty body"
+    fi
+    continue
+  fi
+  if ! jq -c . "$tmp"; then
+    reply_error "PhoneAPI returned HTTP $http_code with a non-JSON body"
+    continue
+  fi
+  ver="$(jq -r 'select(.result.protocolVersion != null) | .result.protocolVersion' "$tmp")"
+  if [[ -n "$ver" && "$ver" != null ]]; then
+    protocol_version="$ver"
+  fi
+done

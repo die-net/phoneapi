@@ -166,7 +166,27 @@ On a debuggable emulator image, Chrome only publishes that socket after it is st
 
 Open the viewer at `https://<host>:<port>/viewer` with the stream scope. It plays `WS /v1/stream/video` and `WS /v1/stream/audio` with WebCodecs. The certificate warning is the self-signed dev certificate.
 
-Point an MCP client at `https://<host>:<port>/mcp` with the same bearer token. `access_token` is not accepted on `/mcp`. Many MCP clients verify certificates and will reject the self-signed one unless they offer a way to trust or pin it. The server is stateless Streamable HTTP. `tools/list` includes `device_info`, `ui_snapshot`, input and app tools, `browser_*`, `screenshot`, and `logcat_tail`. A tool is omitted when the token lacks its scope or the capability is false. Each tool's input schema is generated from the Kotlin type that tool decodes, so fields such as `tap.count` cannot drift out of the schema. When a tool is still available through a weaker backend (accessibility gestures without helper injection, or node ids that are not stable), its description says so. Resources: `phoneapi://device/capabilities` and `phoneapi://viewer`.
+Point an MCP client at `https://<host>:<port>/mcp` with the same bearer token. `access_token` is not accepted on `/mcp`. The server is stateless Streamable HTTP. It accepts a `Host` of `localhost`, `127.0.0.1`, or `::1` unless `allowedHosts` is changed, so a Wi-Fi address in the pairing file is rejected before a tool runs. `scripts/pair-adb.sh --forward` writes a loopback host.
+
+Many MCP clients verify certificates and reject this self-signed one (`CN=Android device`, with no name for the address). `scripts/mcp` is a stdio bridge for those clients. It reads the same pairing file as `scripts/papi` (`.dev/pairing.json`, or the file named by `PAPI_PAIRING`), pins `spkiSha256` with `curl --pinnedpubkey`, and forwards one JSON-RPC message per line. A notification comes back as HTTP 202 and produces no stdout line. Logs go to stderr.
+
+```sh
+scripts/mcp
+```
+
+Cursor starts that process itself. Give it an absolute path to the script:
+
+```json
+{
+  "mcpServers": {
+    "phone": {
+      "command": "/absolute/path/to/phoneapi/scripts/mcp"
+    }
+  }
+}
+```
+
+`tools/list` includes `device_info`, `ui_snapshot`, input and app tools, `browser_*`, `screenshot`, and `logcat_tail`. A tool is omitted when the token lacks its scope or the capability is false. Each tool's input schema is generated from the Kotlin type that tool decodes, so fields such as `tap.count` cannot drift out of the schema. When a tool is still available through a weaker backend (accessibility gestures without helper injection, or node ids that are not stable), its description says so. Resources: `phoneapi://device/capabilities` and `phoneapi://viewer`.
 
 `GET /v1/openapi.json` (observe scope) is an OpenAPI 3.1 document generated from the same types. Bearer auth is the `bearer` security scheme, and each operation has `x-scope`. WebSocket routes are marked with `x-websocket`.
 
