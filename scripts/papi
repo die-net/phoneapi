@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
-# Minimal API client for development, using .dev/pairing.json from scripts/dev-setup.sh.
+# Minimal API client for development. Reads .dev/pairing.json from scripts/dev-setup.sh, or the
+# file in $PAPI_PAIRING (for example a pairing.json downloaded from the pairing page).
 #
 #   scripts/papi GET /v1/device
 #   scripts/papi POST /v1/input/tap '{"x":100,"y":200}'
-#   scripts/papi WS /v1/events            (requires websocat)
+#   scripts/papi WS /v1/events            (uses uv and websockets)
 set -euo pipefail
+pairing="$(realpath "${PAPI_PAIRING:-$(dirname "$0")/../.dev/pairing.json}")"
 cd "$(dirname "$0")/.."
 method="$1"; path="$2"; body="${3:-}"
-port="$(jq -r .port .dev/pairing.json)"
-token="$(jq -r .token .dev/pairing.json)"
-base="127.0.0.1:$port"
+host="$(jq -r '.host | select(. != "") // "127.0.0.1"' "$pairing")"
+port="$(jq -r .port "$pairing")"
+token="$(jq -r .token "$pairing")"
+base="$host:$port"
 if [[ "$method" == WS ]]; then
   # Prints each text frame on its own line; stops after $PAPI_WS_SECONDS (default 10).
   exec uv run -q --with websockets python3 - "wss://$base$path" "$token" "${PAPI_WS_SECONDS:-10}" <<'PY'

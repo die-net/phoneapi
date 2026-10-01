@@ -1,17 +1,16 @@
 #!/usr/bin/env bash
 # Installs the debug APK on the connected device/emulator, enables the accessibility service,
-# mints a token over ADB and forwards the API port to localhost. Writes .dev/pairing.json.
+# and mints a token over ADB with scripts/pair-adb.sh. Writes .dev/pairing.json.
 #
 #   scripts/dev-setup.sh [--no-build] [--bind-all]
 #
-# --bind-all makes the server also listen on loopback so `adb forward` works (needed for
-# emulators, whose LAN address isn't reachable from the host).
+# --bind-all makes the server also listen on loopback and forwards the API port to localhost
+# (needed for emulators, whose LAN address isn't reachable from the host).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 PKG="${PHONEAPI_PKG:-net.die.phoneapi}"
 SERVICE="$PKG/net.die.phoneapi.a11y.PhoneAccessibilityService"
-RECEIVER="$PKG/net.die.phoneapi.ShellCommandReceiver"
 build=1
 bind_all=0
 for arg in "$@"; do
@@ -51,17 +50,11 @@ for _ in $(seq 1 10); do
   if adb shell dumpsys accessibility | grep -q "Bound services:{Service\[label=PhoneAPI"; then break; fi
 done
 
-if [[ $bind_all == 1 ]]; then
-  adb shell am broadcast -a net.die.phoneapi.SET_BIND -n "$RECEIVER" --es mode ALL >/dev/null
-  sleep 1
-fi
-
 mkdir -p .dev
-adb shell am broadcast -a net.die.phoneapi.CREATE_TOKEN -n "$RECEIVER" --es name dev-setup \
-  | sed -n 's/.*data="\(.*\)"$/\1/p' > .dev/pairing.json
+pair_args=(--name dev-setup)
+if [[ $bind_all == 1 ]]; then pair_args+=(--forward); fi
+PHONEAPI_PKG="$PKG" scripts/pair-adb.sh "${pair_args[@]}" > .dev/pairing.json
 
 # Shell helper: input injection, screencap, and privileged app commands. It detaches and returns.
 scripts/helper-start.sh "$PKG" || echo "Helper did not start; the app keeps working without it" >&2
-port="$(jq -r .port .dev/pairing.json)"
-adb forward "tcp:$port" "tcp:$port" >/dev/null
-echo "Ready: https://127.0.0.1:$port (token in .dev/pairing.json; use scripts/papi)"
+echo "Ready (token in .dev/pairing.json; use scripts/papi)"

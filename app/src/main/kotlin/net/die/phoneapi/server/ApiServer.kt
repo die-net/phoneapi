@@ -28,7 +28,9 @@ import net.die.phoneapi.server.routes.browserRoutes
 import net.die.phoneapi.server.routes.deviceRoutes
 import net.die.phoneapi.server.routes.eventRoutes
 import net.die.phoneapi.server.routes.inputRoutes
+import net.die.phoneapi.server.routes.isPairingCall
 import net.die.phoneapi.server.routes.openApiRoutes
+import net.die.phoneapi.server.routes.pairRoutes
 import net.die.phoneapi.server.routes.streamRoutes
 import net.die.phoneapi.server.routes.tokenRoutes
 import net.die.phoneapi.server.routes.uiRoutes
@@ -97,8 +99,12 @@ fun Application.phoneApiModule(services: ServerServices) {
             call.respond(HttpStatusCode.InternalServerError, ApiError("internal", e.message))
         }
     }
-    install(BearerAuth) { tokens = services.tokens }
+    install(BearerAuth) {
+        tokens = services.tokens
+        isPublic = { call -> call.isPairingCall(services.pairing) }
+    }
     routing {
+        pairRoutes(services)
         deviceRoutes(services)
         openApiRoutes()
         tokenRoutes(services)

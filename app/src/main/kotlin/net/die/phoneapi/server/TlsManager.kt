@@ -10,6 +10,7 @@ import java.security.MessageDigest
 import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import java.security.spec.ECGenParameterSpec
+import java.util.Base64
 import java.util.Date
 import org.bouncycastle.asn1.x500.X500Name
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter
@@ -18,7 +19,7 @@ import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder
 
 /**
  * Self-signed server certificate, generated on first run and persisted as PKCS#12 in private
- * storage. Clients pin it by SHA-256 fingerprint (shown in the pairing QR code).
+ * storage. Clients pin it by [pins], which pairing hands out with the token.
  */
 class TlsManager(private val dir: File, val password: CharArray) {
     private val file = File(dir, "tls.p12")
@@ -38,6 +39,11 @@ class TlsManager(private val dir: File, val password: CharArray) {
                     bytes.byteSeparator = ":"
                 }
             )
+    }
+
+    val pins: CertPins by lazy {
+        val spki = MessageDigest.getInstance("SHA-256").digest(certificate.publicKey.encoded)
+        CertPins(certSha256 = fingerprint, spkiSha256 = Base64.getEncoder().encodeToString(spki))
     }
 
     private fun loadOrCreate(): KeyStore {
@@ -84,3 +90,6 @@ class TlsManager(private val dir: File, val password: CharArray) {
         private const val VALIDITY_MS = 20L * 365 * 24 * 60 * 60 * 1000
     }
 }
+
+/** [certSha256] is uppercase colon-separated hex; [spkiSha256] is base64, as curl pins it. */
+data class CertPins(val certSha256: String, val spkiSha256: String)

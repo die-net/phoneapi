@@ -61,7 +61,7 @@ class RouteScopeTest {
             assertEquals(declared.toSet(), routes.toSet())
             val unscoped =
                 routing.getAllRoutes().filter { it.declaredScope() == null }.map { it.routePath() }
-            assertTrue(unscoped.all { it == "/mcp" }, "routes without a scope: $unscoped")
+            assertTrue(unscoped.all { it in UNSCOPED }, "routes without a scope: $unscoped")
 
             routes.forEach { route ->
                 val denied = request(client, route, missing.getValue(route.scope))
@@ -79,6 +79,9 @@ class RouteScopeTest {
         }
     }
 }
+
+/** MCP checks scopes per tool; pairing runs without a token while its window is open. */
+private val UNSCOPED = setOf("/mcp", "/pair", "/v1/pair", "/v1/pair/{id}")
 
 private data class RegisteredRoute(val method: ApiMethod, val path: String, val scope: Scope)
 

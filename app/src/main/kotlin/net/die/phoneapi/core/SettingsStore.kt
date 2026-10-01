@@ -30,6 +30,8 @@ data class Settings(
     val keepAwakeMs: Long = 60_000,
     /** Random id advertised over mDNS so clients can recognise this device after IP changes. */
     val instanceId: String,
+    /** The pairing screen shows the IP address instead of the `.local` name. */
+    val pairingShowsIp: Boolean = false,
 )
 
 /**

@@ -31,15 +31,15 @@ The same checks CI runs:
 
 ## Install
 
-`scripts/dev-setup.sh` builds the debug APK, installs it, grants `WRITE_SECURE_SETTINGS`, enables the accessibility service, mints a token into `.dev/pairing.json`, starts the helper, and forwards the API port.
+`scripts/dev-setup.sh` builds the debug APK, installs it, grants `WRITE_SECURE_SETTINGS`, enables the accessibility service, mints a token into `.dev/pairing.json` with `scripts/pair-adb.sh`, and starts the helper.
 
 ```sh
 scripts/dev-setup.sh --bind-all
 ```
 
-`--bind-all` makes the server listen on every interface, including loopback, so `adb forward` can reach an emulator. Without it the server binds only to the Wi-Fi or Ethernet address. `--no-build` skips Gradle when the APK is already built.
+`--bind-all` makes the server listen on every interface, including loopback, and forwards the API port, so an emulator is reachable at `127.0.0.1`. Without it the server binds only to the Wi-Fi or Ethernet address, and `.dev/pairing.json` points there. `--no-build` skips Gradle when the APK is already built.
 
-The script prints the local URL. The bearer token, port, and certificate fingerprint are in `.dev/pairing.json`, which is gitignored.
+The bearer token, host, port, and certificate pins are in `.dev/pairing.json`, which is gitignored.
 
 To do the same steps by hand:
 
@@ -52,15 +52,49 @@ adb shell settings put secure accessibility_enabled 1
 scripts/helper-start.sh
 ```
 
-Open PhoneAPI and turn the accessibility service on if the settings write does not stick. The in-app screen shows status, a pairing QR code, and the helper start command.
+Open PhoneAPI and turn the accessibility service on if the settings write does not stick. The in-app screen explains each permission, shows status, pairs computers, and lists them for revoking. On Android 13 and later, an APK installed from a browser or file manager has the accessibility toggle blocked as a restricted setting until you choose "Allow restricted settings" in the app's App info menu.
+
+## Pairing
+
+A paired computer holds its own bearer token. There are two ways to get one.
+
+**From a browser, no ADB.** In the app, tap "Pair a computer". The phone shows an address such as `https://Android_1A2B3C4D.local:41234/pair` (or the IP address; there is a toggle) and keeps pairing open for five minutes, or until you leave the screen. Open the address on a computer on the same network, accept the self-signed certificate warning, enter a name, and tap Allow on the phone. The page then shows the base URL, the token, an MCP config snippet, a pinned `curl` example, and a `pairing.json` download.
+
+Android chooses the `.local` name, not the app, and only reports it on Android 16 with a recent connectivity module; otherwise the phone shows the IP address. The name can change, for example after a reboot, so treat it as a convenience for typing the pairing address.
+
+The pairing routes (`GET /pair`, `POST /v1/pair`, `GET /v1/pair/{id}`) are the only ones that run without a token, and only while the window is open. Otherwise they get the same empty 404 as any unauthenticated request. One request can wait for approval at a time. An approved token is handed out once, and is revoked if nobody collects it within a minute.
+
+This assumes a trusted local network for the few minutes pairing is open: the window is off by default, short, and needs an explicit Allow on the phone. There is no code to compare, because a browser cannot check the certificate it was shown. After pairing, clients pin the certificate, so later connections are protected the way SSH's first-use trust is.
+
+**Over ADB.** If you installed the APK with ADB, the shell user is already trusted, so no approval is needed. Either run the broadcast directly, which prints `Broadcast completed: result=0, data="<pairing JSON>"`:
+
+```sh
+adb shell am broadcast -a net.die.phoneapi.CREATE_TOKEN \
+  -n net.die.phoneapi/net.die.phoneapi.ShellCommandReceiver --es name laptop
+```
+
+or use `scripts/pair-adb.sh`, which needs only `adb` and prints just the JSON:
+
+```sh
+scripts/pair-adb.sh --name laptop > pairing.json
+scripts/pair-adb.sh --forward > pairing.json   # emulator, or no reachable Wi-Fi address
+```
+
+The pairing JSON is the same from both paths:
+
+```json
+{"host":"192.168.1.23","port":41234,"certSha256":"09:44:…","spkiSha256":"q5Z…=","token":"pa_…","name":"laptop"}
+```
+
+`host` is the address the client reached: the Wi-Fi or Ethernet address for ADB (empty if there is none), or whatever the browser used. `--forward` rewrites it to `127.0.0.1`.
 
 ## Authentication
 
-Every request needs `Authorization: Bearer <token>`. A missing or unknown token gets an empty 404. The `access_token` query parameter is accepted only on `GET /viewer` and on WebSocket upgrades, which is how the viewer page opens its video and audio sockets. Every other route ignores it and still requires the header. The certificate is self-signed; pin `certSha256` from the pairing file.
+Every request needs `Authorization: Bearer <token>`. A missing or unknown token gets an empty 404. The `access_token` query parameter is accepted only on `GET /viewer` and on WebSocket upgrades, which is how the viewer page opens its video and audio sockets. Every other route ignores it and still requires the header. The certificate is self-signed; pin `certSha256` (certificate hash) or `spkiSha256` (public-key hash, the form `curl --pinnedpubkey sha256//…` takes) from the pairing JSON.
 
-Tokens carry scopes: `observe`, `control`, `browser`, `stream`, and `admin`. `CREATE_TOKEN` from ADB grants all of them. Create a narrower token with `POST /v1/tokens`.
+Tokens carry scopes: `observe`, `control`, `browser`, `stream`, and `admin`. Pairing and `CREATE_TOKEN` grant all of them. Create a narrower token with `POST /v1/tokens`.
 
-`scripts/papi` reads `.dev/pairing.json` and skips certificate verification, which is appropriate for the forwarded debug port:
+`scripts/papi` reads `.dev/pairing.json`, or the file named by `PAPI_PAIRING`, and skips certificate verification, which is appropriate for development:
 
 ```sh
 scripts/papi GET /v1/device
@@ -102,7 +136,7 @@ Read the screen and tap a control:
 
 ```sh
 scripts/papi GET '/v1/ui/snapshot?format=compact'
-scripts/papi POST /v1/ui/find '{"text":"Settings"}'
+scripts/papi POST /v1/ui/find '{"selector":{"text":"Settings"}}'
 scripts/papi POST /v1/input/tap '{"selector":{"text":"Settings"}}'
 ```
 
@@ -132,7 +166,7 @@ On a debuggable emulator image, Chrome only publishes that socket after it is st
 
 Open the viewer at `https://<host>:<port>/viewer` with the stream scope. It plays `WS /v1/stream/video` and `WS /v1/stream/audio` with WebCodecs. The certificate warning is the self-signed dev certificate.
 
-Point an MCP client at `https://<host>:<port>/mcp` with the same bearer token. `access_token` is not accepted on `/mcp`. The server is stateless Streamable HTTP. `tools/list` includes `device_info`, `ui_snapshot`, input and app tools, `browser_*`, `screenshot`, and `logcat_tail`. A tool is omitted when the token lacks its scope or the capability is false. Each tool's input schema is generated from the Kotlin type that tool decodes, so fields such as `tap.count` cannot drift out of the schema. When a tool is still available through a weaker backend (accessibility gestures without helper injection, or node ids that are not stable), its description says so. Resources: `phoneapi://device/capabilities` and `phoneapi://viewer`.
+Point an MCP client at `https://<host>:<port>/mcp` with the same bearer token. `access_token` is not accepted on `/mcp`. Many MCP clients verify certificates and will reject the self-signed one unless they offer a way to trust or pin it. The server is stateless Streamable HTTP. `tools/list` includes `device_info`, `ui_snapshot`, input and app tools, `browser_*`, `screenshot`, and `logcat_tail`. A tool is omitted when the token lacks its scope or the capability is false. Each tool's input schema is generated from the Kotlin type that tool decodes, so fields such as `tap.count` cannot drift out of the schema. When a tool is still available through a weaker backend (accessibility gestures without helper injection, or node ids that are not stable), its description says so. Resources: `phoneapi://device/capabilities` and `phoneapi://viewer`.
 
 `GET /v1/openapi.json` (observe scope) is an OpenAPI 3.1 document generated from the same types. Bearer auth is the `bearer` security scheme, and each operation has `x-scope`. WebSocket routes are marked with `x-websocket`.
 
@@ -174,6 +208,9 @@ Closed request fields are enums. A value outside the set is a `400` `bad_request
 | `WS` | `/v1/events` | observe |
 | `GET` | `/viewer` | stream |
 | `WS` | `/v1/stream/video`, `/v1/stream/audio` | stream |
+| `GET` | `/pair` | none, only while pairing is open |
+| `POST` | `/v1/pair` | none, only while pairing is open |
+| `GET` | `/v1/pair/{id}` | none, the request id |
 | `GET`, `POST` | `/v1/tokens` | admin |
 | `DELETE` | `/v1/tokens/{id}` | admin |
 | `POST` | `/mcp` | the tool's scope |

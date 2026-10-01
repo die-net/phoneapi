@@ -35,12 +35,34 @@ public data class CreateTokenRequest(
 /** Returned once on creation; [token] is never retrievable again. */
 @Serializable public data class CreatedToken(val info: TokenInfo, val token: String)
 
-/** Contents of the pairing QR code, also available as a `phoneapi://pair?...` URI. */
+/**
+ * What a client needs to connect: from an approved `/v1/pair` request, or `CREATE_TOKEN` over ADB.
+ * [certSha256] is the colon-separated certificate hash; [spkiSha256] is the base64 public-key hash
+ * that `curl --pinnedpubkey sha256//...` takes.
+ */
 @Serializable
 public data class PairingInfo(
     val host: String,
     val port: Int,
     val certSha256: String,
+    val spkiSha256: String,
     val token: String,
     val name: String,
 )
+
+/** Body of `POST /v1/pair`. [name] labels the token in the app's list of paired computers. */
+@Serializable public data class PairRequest(val name: String)
+
+/** Returned by `POST /v1/pair`. [id] is the only handle on the request; poll it. */
+@Serializable public data class PairTicket(val id: String)
+
+@Serializable
+public enum class PairState {
+    @SerialName("pending") PENDING,
+    @SerialName("approved") APPROVED,
+    @SerialName("denied") DENIED,
+    @SerialName("expired") EXPIRED,
+}
+
+/** `GET /v1/pair/{id}`. [pairing] is present only once, on the approved response. */
+@Serializable public data class PairStatus(val state: PairState, val pairing: PairingInfo? = null)

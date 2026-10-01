@@ -1,23 +1,20 @@
 package net.die.phoneapi.ui
 
 import android.Manifest
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.graphics.Bitmap
-import android.graphics.Color
+import android.graphics.Typeface
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.text.InputType
 import android.view.Gravity
-import android.view.ViewGroup.LayoutParams.MATCH_PARENT
+import android.view.View
+import android.view.ViewGroup
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
-import android.widget.Button
+import android.view.Window
 import android.widget.EditText
-import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
@@ -26,20 +23,22 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
-import com.google.zxing.BarcodeFormat
-import com.google.zxing.qrcode.QRCodeWriter
+import java.net.InetAddress
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import net.die.phoneapi.PhoneApiApp
-import net.die.phoneapi.a11y.PhoneAccessibilityService
+import net.die.phoneapi.R
+import net.die.phoneapi.ShellCommandReceiver
 import net.die.phoneapi.helperclient.HelperLaunch
 import net.die.phoneapi.model.HelperStatus
-import net.die.phoneapi.model.Scope
 import net.die.phoneapi.model.TokenInfo
 import net.die.phoneapi.server.ServerController
 
-/** Status, onboarding and pairing. Keeps the server running while visible. */
+/**
+ * Onboarding, pairing, and the list of paired computers. Written for someone who installed the APK
+ * without reading the README. Keeps the server running while visible.
+ */
 class MainActivity : ComponentActivity() {
     private val graph
         get() = PhoneApiApp.graph
@@ -50,52 +49,113 @@ class MainActivity : ComponentActivity() {
         }
 
     private lateinit var status: TextView
-    private lateinit var qr: ImageView
-    private lateinit var pairingText: TextView
+    private lateinit var a11yState: TextView
+    private lateinit var a11yRestricted: List<View>
     private lateinit var tokenList: LinearLayout
+    private lateinit var pairing: PairingPanel
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val pad = (16 * resources.displayMetrics.density).toInt()
-        status = TextView(this).apply { textSize = 16f }
-        qr = ImageView(this).apply { adjustViewBounds = true }
-        pairingText = TextView(this).apply { setTextIsSelectable(true) }
-        tokenList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        val helperCommand =
-            TextView(this).apply {
-                text = HelperLaunch.command(packageName)
-                setTextIsSelectable(true)
-                textSize = 12f
+        requestWindowFeature(Window.FEATURE_NO_TITLE)
+        status = code("")
+        a11yState = TextView(this).apply { setTypeface(typeface, Typeface.BOLD) }
+        tokenList = vertical()
+        pairing = PairingPanel(this, graph) { lifecycleScope.launch { showTokens() } }
+        val column = vertical()
+        column.setPadding(dpToPx(16), dpToPx(16), dpToPx(16), dpToPx(32))
+        column.addView(title(R.string.app_name))
+        column.addView(body(R.string.intro))
+        column.addView(status)
+        addAccessibility(column)
+        addPairing(column)
+        addHelper(column)
+        column.addView(heading(R.string.tokens_title))
+        column.addView(body(R.string.tokens_how))
+        column.addView(tokenList)
+        setContentView(
+            ScrollView(this).apply {
+                // Android 15+ draws this activity edge to edge.
+                fitsSystemWindows = true
+                clipToPadding = false
+                // Holds initial focus so the view doesn't scroll down to the first text field.
+                isFocusableInTouchMode = true
+                descendantFocusability = ViewGroup.FOCUS_BEFORE_DESCENDANTS
+                addView(column)
             }
-        val column =
-            LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(pad, pad, pad, pad)
-                addView(status)
-                addView(
-                    button("Accessibility settings") {
-                        startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                    }
-                )
-                addView(button("New pairing QR code") { showPairing() })
-                addView(
-                    button("Copy helper start command") {
-                        getSystemService(ClipboardManager::class.java)
-                            .setPrimaryClip(
-                                ClipData.newPlainText("phoneapi helper", helperCommand.text)
-                            )
-                    }
-                )
-                addView(helperCommand)
-                addRecovery(this)
-                addView(caption("Tokens"))
-                addView(tokenList)
-                addView(qr, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
-                addView(pairingText)
-            }
-        setContentView(ScrollView(this).apply { addView(column) })
+        )
         requestNotificationPermission()
         observeStatus()
+    }
+
+    private fun addAccessibility(column: LinearLayout) {
+        column.addView(heading(R.string.a11y_title))
+        column.addView(body(R.string.a11y_why))
+        column.addView(a11yState)
+        column.addView(
+            button(R.string.a11y_button) {
+                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            }
+        )
+        a11yRestricted =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                listOf(
+                    body(R.string.a11y_restricted),
+                    button(R.string.app_info_button) {
+                        startActivity(
+                            Intent(
+                                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                Uri.fromParts("package", packageName, null),
+                            )
+                        )
+                    },
+                )
+            } else {
+                emptyList()
+            }
+        a11yRestricted.forEach(column::addView)
+    }
+
+    private fun addPairing(column: LinearLayout) {
+        column.addView(heading(R.string.pair_title))
+        column.addView(body(R.string.pair_how))
+        pairing.views.forEach(column::addView)
+        column.addView(body(R.string.pair_adb))
+        val adb = ShellCommandReceiver.createTokenCommand(packageName)
+        column.addView(code(adb))
+        column.addView(copyButton(R.string.copy_adb) { adb })
+    }
+
+    private fun addHelper(column: LinearLayout) {
+        column.addView(heading(R.string.helper_title))
+        column.addView(body(R.string.helper_why))
+        column.addView(body(R.string.helper_usb))
+        val command = HelperLaunch.command(packageName)
+        column.addView(code(command))
+        column.addView(copyButton(R.string.copy_helper) { command })
+        val message = TextView(this)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            column.addView(body(R.string.helper_wireless))
+            val code = input(R.string.wireless_code_hint)
+            val port = input(R.string.wireless_port_hint)
+            column.addView(code)
+            column.addView(port)
+            column.addView(
+                button(R.string.wireless_pair) {
+                    lifecycleScope.launch {
+                        val typed = port.text.toString().trim().toIntOrNull()
+                        message.text =
+                            graph.helperSupervisor.pair(code.text.toString().trim(), typed)
+                    }
+                }
+            )
+        }
+        column.addView(body(R.string.helper_shizuku))
+        column.addView(
+            button(R.string.shizuku_start) {
+                message.text = graph.helperSupervisor.requestShizuku()
+            }
+        )
+        column.addView(message)
     }
 
     private fun observeStatus() {
@@ -104,12 +164,15 @@ class MainActivity : ComponentActivity() {
                 graph.serverController.acquire(HOLDER)
                 try {
                     launch { showTokens() }
+                    launch { pairing.run() }
+                    launch { graph.a11y.collect { showAccessibility(it != null) } }
                     val fingerprint = withContext(graph.ioDispatcher) { graph.tls.fingerprint }
-                    combine(graph.serverController.endpoint, graph.a11y, graph.helper.status) {
-                            ep,
-                            a11y,
-                            helper ->
-                            statusText(ep, a11y, helper, fingerprint)
+                    combine(
+                            graph.serverController.endpoint,
+                            graph.network.lanAddress,
+                            graph.helper.status,
+                        ) { endpoint, lan, helper ->
+                            statusText(endpoint, lan, helper, fingerprint)
                         }
                         .collect { status.text = it }
                 } finally {
@@ -119,19 +182,38 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun showAccessibility(on: Boolean) {
+        a11yState.setText(if (on) R.string.a11y_on else R.string.a11y_off)
+        a11yRestricted.forEach { it.visibility = if (on) View.GONE else View.VISIBLE }
+    }
+
     private fun statusText(
         endpoint: ServerController.Endpoint?,
-        a11y: PhoneAccessibilityService?,
+        lan: InetAddress?,
         helper: HelperStatus,
         fingerprint: String,
     ) = buildString {
         appendLine(
-            if (endpoint != null) "Listening on ${endpoint.host}:${endpoint.port}"
-            else "Server not listening (no LAN address?)"
+            if (endpoint != null) {
+                getString(
+                    R.string.status_listening,
+                    lan?.hostAddress ?: endpoint.host,
+                    endpoint.port,
+                )
+            } else {
+                getString(R.string.status_offline)
+            }
         )
-        appendLine("Accessibility service: ${if (a11y != null) "connected" else "disabled"}")
-        appendLine("Helper: ${helper.name.lowercase()}")
-        append("Certificate SHA-256: $fingerprint")
+        val helperState =
+            when (helper) {
+                HelperStatus.RUNNING -> R.string.helper_state_running
+                HelperStatus.STARTING -> R.string.helper_state_starting
+                HelperStatus.NEEDS_PAIRING,
+                HelperStatus.NEEDS_USB,
+                HelperStatus.STOPPED -> R.string.helper_state_off
+            }
+        appendLine(getString(R.string.status_helper, getString(helperState)))
+        append(getString(R.string.status_cert, fingerprint))
     }
 
     private fun requestNotificationPermission() {
@@ -145,67 +227,16 @@ class MainActivity : ComponentActivity() {
         requestNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 
-    private fun addRecovery(column: LinearLayout) {
-        val message = TextView(this)
-        column.addView(message)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            val code = input("Wireless debugging code", InputType.TYPE_CLASS_NUMBER)
-            val port = input("Pairing port", InputType.TYPE_CLASS_NUMBER)
-            column.addView(code)
-            column.addView(port)
-            column.addView(
-                button("Pair wireless debugging") {
-                    launchUi {
-                        val typed = port.text.toString().trim().toIntOrNull()
-                        message.text =
-                            graph.helperSupervisor.pair(code.text.toString().trim(), typed)
-                    }
-                }
-            )
-        }
-        column.addView(
-            button("Start with Shizuku") { message.text = graph.helperSupervisor.requestShizuku() }
-        )
-    }
-
-    private fun launchUi(block: suspend () -> Unit) {
-        lifecycleScope.launch { block() }
-    }
-
-    private fun input(hintText: String, type: Int) =
+    private fun input(hintText: Int) =
         EditText(this).apply {
-            hint = hintText
-            inputType = type
+            setHint(hintText)
+            inputType = InputType.TYPE_CLASS_NUMBER
         }
-
-    private fun showPairing() {
-        lifecycleScope.launch {
-            val rendered =
-                withContext(graph.ioDispatcher) {
-                    val endpoint = graph.serverController.endpoint.value ?: return@withContext null
-                    val created =
-                        graph.tokens.replaceNamed(PAIRING_TOKEN_NAME, Scope.entries.toSet())
-                    val uri =
-                        Uri.Builder()
-                            .scheme("phoneapi")
-                            .authority("pair")
-                            .appendQueryParameter("host", endpoint.host)
-                            .appendQueryParameter("port", endpoint.port.toString())
-                            .appendQueryParameter("fp", graph.tls.fingerprint)
-                            .appendQueryParameter("token", created.token)
-                            .build()
-                            .toString()
-                    uri to qrBitmap(uri)
-                } ?: return@launch
-            qr.setImageBitmap(rendered.second)
-            pairingText.text = rendered.first
-            showTokens()
-        }
-    }
 
     private suspend fun showTokens() {
         val infos = withContext(graph.ioDispatcher) { graph.tokens.list() }
         tokenList.removeAllViews()
+        if (infos.isEmpty()) tokenList.addView(body(R.string.tokens_none))
         infos.forEach { tokenList.addView(tokenRow(it)) }
     }
 
@@ -215,12 +246,11 @@ class MainActivity : ComponentActivity() {
                 text = info.name
                 layoutParams = LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f)
             }
-        return LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
+        return row().apply {
             gravity = Gravity.CENTER_VERTICAL
             addView(name)
             addView(
-                button("Revoke") {
+                button(R.string.revoke) {
                     lifecycleScope.launch {
                         withContext(graph.ioDispatcher) { graph.tokens.revoke(info.id) }
                         showTokens()
@@ -230,28 +260,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun caption(value: String) = TextView(this).apply { text = value }
-
-    private fun qrBitmap(text: String): Bitmap {
-        val size = QR_SIZE
-        val matrix = QRCodeWriter().encode(text, BarcodeFormat.QR_CODE, size, size)
-        val pixels =
-            IntArray(size * size) { i ->
-                if (matrix[i % size, i / size]) Color.BLACK else Color.WHITE
-            }
-        return Bitmap.createBitmap(pixels, size, size, Bitmap.Config.ARGB_8888)
-    }
-
-    private fun button(label: String, onClick: () -> Unit) =
-        Button(this).apply {
-            text = label
-            gravity = Gravity.CENTER
-            setOnClickListener { onClick() }
-        }
-
     private companion object {
         const val HOLDER = "ui"
-        const val QR_SIZE = 720
-        const val PAIRING_TOKEN_NAME = "In-app pairing"
     }
 }

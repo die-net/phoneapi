@@ -28,7 +28,7 @@ import net.die.phoneapi.stream.VideoSpec
 
 /** WebCodecs viewer, plus the video and audio websockets it plays. */
 fun Route.streamRoutes(services: ServerServices) {
-    val viewer = ViewerHtml(services.viewerHtml)
+    val viewer = CachedBytes(services.viewerHtml)
     scoped(Scope.STREAM) {
         get(VIEWER_PATH) { call.respondBytes(viewer.bytes(), ContentType.Text.Html) }
         webSocket("/v1/stream/video") {
@@ -55,8 +55,8 @@ fun Route.streamRoutes(services: ServerServices) {
     }
 }
 
-/** The viewer page, read once the first time a client asks for it. */
-private class ViewerHtml(private val load: suspend () -> ByteArray) {
+/** A bundled page, read once the first time a client asks for it. */
+internal class CachedBytes(private val load: suspend () -> ByteArray) {
     private val gate = Mutex()
 
     @Volatile private var cached: ByteArray? = null

@@ -111,7 +111,6 @@ dependencies {
 
     implementation(libs.bouncycastle.pkix)
     implementation(libs.bouncycastle.prov)
-    implementation(libs.zxing.core)
     implementation(libs.kadb)
     implementation(libs.kadb.mdns)
     implementation(libs.shizuku.api)

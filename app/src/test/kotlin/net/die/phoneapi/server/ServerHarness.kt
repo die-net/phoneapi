@@ -6,7 +6,9 @@ import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.header
 import io.ktor.http.HttpHeaders
 import io.ktor.server.testing.ApplicationTestBuilder
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.emptyFlow
 import net.die.phoneapi.core.AppsService
 import net.die.phoneapi.core.BrowserService
@@ -99,6 +101,7 @@ internal class FakeApi {
     var capabilities = allCapabilities()
     var inputTaps = 0
     var imeShow: ImeShowRequest? = null
+    val pairing = PairingManager(tokens, CoroutineScope(SupervisorJob() + Dispatchers.Unconfined))
 
     val services: ServerServices =
         ServerServices(
@@ -149,6 +152,9 @@ internal class FakeApi {
             cdp = CdpPipes { _ -> IdlePipe },
             viewerText = { "https://127.0.0.1:1/viewer?access_token=TOKEN" },
             logcat = LogcatFeed { _ -> emptyFlow() },
+            pairing = pairing,
+            pairHtml = { PAIR_HTML },
+            pins = { CertPins(certSha256 = "AA:BB", spkiSha256 = "c3BraQ==") },
         )
 
     private object IdlePipe : CdpPipe {
@@ -278,3 +284,5 @@ private object FakePower : PowerService {
 }
 
 private val VIEWER_HTML = "<html>viewer</html>".encodeToByteArray()
+
+private val PAIR_HTML = "<html>pair</html>".encodeToByteArray()

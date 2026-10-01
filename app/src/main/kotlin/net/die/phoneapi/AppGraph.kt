@@ -60,6 +60,7 @@ import net.die.phoneapi.server.AudioFeed
 import net.die.phoneapi.server.DeviceFacts
 import net.die.phoneapi.server.MdnsAdvertiser
 import net.die.phoneapi.server.NetworkWatcher
+import net.die.phoneapi.server.PairingManager
 import net.die.phoneapi.server.ServerController
 import net.die.phoneapi.server.ServerServices
 import net.die.phoneapi.server.TlsManager
@@ -217,6 +218,9 @@ class AppGraph(
         )
     internal val audio = AudioStream(StreamLease(context, settings), helper, ioDispatcher)
 
+    val pairing = PairingManager(tokens, scope)
+    val mdns = MdnsAdvertiser(context)
+
     val services =
         ServerServices(
             ui = ui,
@@ -233,20 +237,21 @@ class AppGraph(
             events = bus.events,
             video = VideoFeed { session, spec -> this.video.serve(session, spec) },
             audio = AudioFeed { session -> this.audio.serve(session) },
-            viewerHtml = {
-                withContext(ioDispatcher) {
-                    context.assets.open("viewer.html").use { it.readBytes() }
-                }
-            },
+            viewerHtml = { asset("viewer.html") },
             shell = { argv -> this.shell.exec(argv) },
             cdp = HelperCdpPipes(helper, ioDispatcher),
             viewerText = { viewerLink() },
             logcat = HelperLogcatFeed(helper, bus, ioDispatcher),
+            pairing = pairing,
+            pairHtml = { asset("pair.html") },
+            pins = { tls.pins },
         )
 
     val server = ApiServer({ tls }, services)
-    val serverController =
-        ServerController(scope, server, network, settings, MdnsAdvertiser(context))
+    val serverController = ServerController(scope, server, network, settings, mdns)
+
+    private suspend fun asset(name: String): ByteArray =
+        withContext(ioDispatcher) { context.assets.open(name).use { it.readBytes() } }
 
     @Suppress("MissingUseCall")
     private fun browserService(): BrowserService =

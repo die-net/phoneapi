@@ -22,10 +22,11 @@ import net.die.phoneapi.model.Scope
  * adb shell am broadcast -a net.die.phoneapi.PAIR_ADB -n <pkg>/net.die.phoneapi.ShellCommandReceiver --es code 123456 --ei port 37123
  * ```
  *
- * The result data is the pairing JSON for `CREATE_TOKEN`. Omitting `scopes` grants every scope.
- * `SET_BIND` takes `LAN` or `ALL`. `SET_PIN` with no `pin` clears it. A bad extra returns result
- * code 1 and a short message; success is result code 0. The same PIN store is writable over
- * `PUT|DELETE /v1/device/pin` (admin scope); neither path returns the PIN.
+ * The result data is the pairing JSON for `CREATE_TOKEN`; its `host` is the Wi-Fi or Ethernet
+ * address, empty when there is none (use `adb forward` and 127.0.0.1 then). Omitting `scopes`
+ * grants every scope. `SET_BIND` takes `LAN` or `ALL`. `SET_PIN` with no `pin` clears it. A bad
+ * extra returns result code 1 and a short message; success is result code 0. The same PIN store is
+ * writable over `PUT|DELETE /v1/device/pin` (admin scope); neither path returns the PIN.
  */
 class ShellCommandReceiver : BroadcastReceiver() {
     @Suppress("TooGenericExceptionCaught") // A bad extra must not crash the app process.
@@ -73,12 +74,14 @@ class ShellCommandReceiver : BroadcastReceiver() {
             is Parse.Error -> fail(pending, scopes.message)
             is Parse.Ok -> {
                 val created = graph.tokens.create(name, scopes.value)
-                val endpoint = graph.serverController.endpoint.value
+                val pins = graph.tls.pins
+                val lan = graph.network.lanAddress.value
                 val pairing =
                     PairingInfo(
-                        host = endpoint?.host.orEmpty(),
+                        host = lan?.hostAddress.orEmpty(),
                         port = graph.settings.current.port,
-                        certSha256 = graph.tls.fingerprint,
+                        certSha256 = pins.certSha256,
+                        spkiSha256 = pins.spkiSha256,
                         token = created.token,
                         name = name,
                     )
@@ -133,6 +136,11 @@ class ShellCommandReceiver : BroadcastReceiver() {
 
         private val ACTIONS =
             setOf(ACTION_CREATE_TOKEN, ACTION_SET_BIND, ACTION_SET_PIN, ACTION_PAIR_ADB)
+
+        /** The host command that mints a token over ADB and prints the pairing JSON. */
+        fun createTokenCommand(packageName: String): String =
+            "adb shell am broadcast -a $ACTION_CREATE_TOKEN " +
+                "-n $packageName/${ShellCommandReceiver::class.java.name} --es name laptop"
     }
 }
 

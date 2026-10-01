@@ -26,17 +26,23 @@ internal const val VIEWER_PATH = "/viewer"
 
 class AuthConfig {
     lateinit var tokens: TokenGateway
+
+    /** Calls that need no token at this moment: pairing, while its window is open. */
+    var isPublic: (ApplicationCall) -> Boolean = { false }
 }
 
 /**
- * Every request needs a valid bearer token. `access_token` is accepted only on [VIEWER_PATH] and on
- * WebSocket upgrades, because a query parameter is copied into logs and history. Unauthenticated
- * requests get an empty 404, so the server reveals as little as possible about what it is.
+ * Every request needs a valid bearer token, except the calls [AuthConfig.isPublic] admits.
+ * `access_token` is accepted only on [VIEWER_PATH] and on WebSocket upgrades, because a query
+ * parameter is copied into logs and history. Unauthenticated requests get an empty 404, so the
+ * server reveals as little as possible about what it is.
  */
 val BearerAuth =
     createApplicationPlugin("BearerAuth", ::AuthConfig) {
         val tokens = pluginConfig.tokens
+        val isPublic = pluginConfig.isPublic
         onCall { call ->
+            if (isPublic(call)) return@onCall
             val header =
                 call.request.headers[HttpHeaders.Authorization]
                     ?.takeIf { it.startsWith("Bearer ", ignoreCase = true) }
