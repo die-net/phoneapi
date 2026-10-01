@@ -35,7 +35,7 @@ import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.helperclient.HelperConnection
 import net.die.phoneapi.model.DisplayInfo
 
-internal data class VideoSpec(val maxSize: Int, val fps: Int, val bitRate: Int)
+data class VideoSpec(val maxSize: Int, val fps: Int, val bitRate: Int)
 
 /**
  * One H.264 encoder shared by every video viewer. The helper mirrors the display onto the encoder's

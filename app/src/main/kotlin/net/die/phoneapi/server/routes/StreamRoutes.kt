@@ -8,11 +8,11 @@ import io.ktor.server.routing.get
 import io.ktor.server.websocket.webSocket
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
-import net.die.phoneapi.AppGraph
 import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.model.Scope
-import net.die.phoneapi.server.requireScope
+import net.die.phoneapi.server.ServerServices
+import net.die.phoneapi.server.VIEWER_PATH
+import net.die.phoneapi.server.scoped
 import net.die.phoneapi.stream.DEFAULT_BIT_RATE
 import net.die.phoneapi.stream.DEFAULT_FPS
 import net.die.phoneapi.stream.DEFAULT_MAX_SIZE
@@ -25,26 +25,23 @@ import net.die.phoneapi.stream.MIN_MAX_SIZE
 import net.die.phoneapi.stream.VideoSpec
 
 /** WebCodecs viewer, plus the video and audio websockets it plays. */
-fun Route.streamRoutes(graph: AppGraph) {
-    val viewer = ViewerHtml(graph)
-    get("/viewer") {
-        call.requireScope(Scope.STREAM)
-        call.respondBytes(viewer.bytes(), ContentType.Text.Html)
-    }
-    webSocket("/v1/stream/video") {
-        call.requireScope(Scope.STREAM)
-        graph.requirePower().wake()
-        graph.video.serve(this, videoSpec(call))
-    }
-    webSocket("/v1/stream/audio") {
-        call.requireScope(Scope.STREAM)
-        graph.requirePower().wake()
-        graph.audio.serve(this)
+fun Route.streamRoutes(services: ServerServices) {
+    val viewer = ViewerHtml(services.viewerHtml)
+    scoped(Scope.STREAM) {
+        get(VIEWER_PATH) { call.respondBytes(viewer.bytes(), ContentType.Text.Html) }
+        webSocket("/v1/stream/video") {
+            services.power().wake()
+            services.video.serve(this, videoSpec(call))
+        }
+        webSocket("/v1/stream/audio") {
+            services.power().wake()
+            services.audio.serve(this)
+        }
     }
 }
 
-/** The viewer page, read once on the IO dispatcher the first time a client asks for it. */
-private class ViewerHtml(private val graph: AppGraph) {
+/** The viewer page, read once the first time a client asks for it. */
+private class ViewerHtml(private val load: suspend () -> ByteArray) {
     private val gate = Mutex()
 
     @Volatile private var cached: ByteArray? = null
@@ -53,13 +50,7 @@ private class ViewerHtml(private val graph: AppGraph) {
         cached?.let {
             return it
         }
-        return gate.withLock {
-            cached
-                ?: withContext(graph.ioDispatcher) {
-                        graph.context.assets.open("viewer.html").use { it.readBytes() }
-                    }
-                    .also { cached = it }
-        }
+        return gate.withLock { cached ?: load().also { cached = it } }
     }
 }
 

@@ -16,6 +16,7 @@ import net.die.phoneapi.model.KeyRequest
 import net.die.phoneapi.model.NodeSelector
 import net.die.phoneapi.model.Point
 import net.die.phoneapi.model.Rect
+import net.die.phoneapi.model.SwipeDirection
 import net.die.phoneapi.model.SwipeRequest
 import net.die.phoneapi.model.TapRequest
 import net.die.phoneapi.model.TextRequest
@@ -158,8 +159,7 @@ class InputServiceImpl(private val graph: AppGraph) : InputService {
         val to = request.to
         if (from != null && to != null) return from to to
         val direction =
-            request.direction?.lowercase()
-                ?: throw ApiException.badRequest("Pass from and to, or a direction")
+            request.direction ?: throw ApiException.badRequest("Pass from and to, or a direction")
         val area = request.selector?.let { nodeTarget(it, force = false) } ?: screenArea()
         val d = request.distance.coerceIn(MIN_DISTANCE, MAX_DISTANCE)
         val cx = (area.left + area.right) / 2f
@@ -167,11 +167,10 @@ class InputServiceImpl(private val graph: AppGraph) : InputService {
         val dx = (area.right - area.left) * d / 2f
         val dy = (area.bottom - area.top) * d / 2f
         return when (direction) {
-            "up" -> Point(cx, cy + dy) to Point(cx, cy - dy)
-            "down" -> Point(cx, cy - dy) to Point(cx, cy + dy)
-            "left" -> Point(cx + dx, cy) to Point(cx - dx, cy)
-            "right" -> Point(cx - dx, cy) to Point(cx + dx, cy)
-            else -> throw ApiException.badRequest("direction must be up, down, left or right")
+            SwipeDirection.UP -> Point(cx, cy + dy) to Point(cx, cy - dy)
+            SwipeDirection.DOWN -> Point(cx, cy - dy) to Point(cx, cy + dy)
+            SwipeDirection.LEFT -> Point(cx + dx, cy) to Point(cx - dx, cy)
+            SwipeDirection.RIGHT -> Point(cx - dx, cy) to Point(cx + dx, cy)
         }
     }
 

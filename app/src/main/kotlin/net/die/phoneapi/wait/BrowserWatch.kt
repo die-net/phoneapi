@@ -22,6 +22,8 @@ import net.die.phoneapi.browser.HelperDevtoolsSocket
 import net.die.phoneapi.browser.decodeCdp
 import net.die.phoneapi.browser.parseBrowserTargetId
 import net.die.phoneapi.core.ApiException
+import net.die.phoneapi.model.ElementBy
+import net.die.phoneapi.model.ElementState
 import net.die.phoneapi.model.WaitCondition
 
 /**
@@ -212,15 +214,15 @@ internal class BrowserWatch(private val graph: AppGraph) {
     private suspend fun element(page: PageSession, condition: WaitCondition.BrowserElement): Check {
         val nodeId = findNode(page, condition)
         return when (condition.state) {
-            "absent" -> Check(nodeId == 0)
-            "present" -> Check(nodeId != 0)
-            else -> Check(nodeId != 0 && visible(page, nodeId))
+            ElementState.ABSENT -> Check(nodeId == 0)
+            ElementState.PRESENT -> Check(nodeId != 0)
+            ElementState.VISIBLE -> Check(nodeId != 0 && visible(page, nodeId))
         }
     }
 
     private suspend fun findNode(page: PageSession, condition: WaitCondition.BrowserElement): Int {
         val root = page.rootId ?: documentRoot(page)
-        return if (condition.by == "css") queryCss(page, root, condition.selector)
+        return if (condition.by == ElementBy.CSS) queryCss(page, root, condition.selector)
         else querySearch(page, condition.selector)
     }
 

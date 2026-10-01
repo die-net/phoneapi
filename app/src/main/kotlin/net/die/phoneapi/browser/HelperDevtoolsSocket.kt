@@ -7,7 +7,10 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
@@ -25,23 +28,27 @@ internal class HelperDevtoolsSocket(
     helper: HelperConnection,
     name: String,
     readTimeoutMs: Long = READ_TIMEOUT_MS,
+    dispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : DevtoolsSocket {
     private val pipe: ParcelFileDescriptor = open(helper, name)
-    private val watchdog = CoroutineScope(SupervisorJob())
 
-    override val input: InputStream = FileInputStream(pipe.fileDescriptor)
-    override val output: OutputStream = FileOutputStream(pipe.fileDescriptor)
-
-    init {
+    // Local scope so closing this socket does not cancel the caller's scope.
+    private val watchdog = CoroutineScope(SupervisorJob() + dispatcher)
+    private val watchdogJob: Job? =
         if (readTimeoutMs > 0) {
             watchdog.launch {
                 delay(readTimeoutMs)
                 closePipe()
             }
+        } else {
+            null
         }
-    }
+
+    override val input: InputStream = FileInputStream(pipe.fileDescriptor)
+    override val output: OutputStream = FileOutputStream(pipe.fileDescriptor)
 
     override fun close() {
+        watchdogJob?.cancel()
         watchdog.cancel()
         closePipe()
     }

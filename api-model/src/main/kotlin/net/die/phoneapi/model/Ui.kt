@@ -2,6 +2,7 @@ package net.die.phoneapi.model
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import net.die.phoneapi.model.schema.Doc
 
 @Serializable
 public data class UiNode(
@@ -60,23 +61,24 @@ public enum class SnapshotFormat {
     @SerialName("both") BOTH,
 }
 
-/** All non-null fields must match. String matches are case-insensitive unless noted. */
+@Doc("All non-null fields must match. String matches are case-insensitive unless noted.")
 @Serializable
 public data class NodeSelector(
-    val ref: String? = null,
-    val text: String? = null,
-    val textContains: String? = null,
-    /** Case-sensitive regular expression over text, falling back to content description. */
+    @Doc("Snapshot handle such as e12. Valid until the node disappears.") val ref: String? = null,
+    @Doc("Exact text, case-insensitive.") val text: String? = null,
+    @Doc("Substring of the text, case-insensitive.") val textContains: String? = null,
+    @Doc("Case-sensitive regular expression over text, then content description.")
     val textRegex: String? = null,
-    val desc: String? = null,
+    @Doc("Exact content description, case-insensitive.") val desc: String? = null,
+    @Doc("Substring of the content description, case-insensitive.")
     val descContains: String? = null,
+    @Doc("Resource id, without the package prefix when it matches the window.")
     val id: String? = null,
-    val role: String? = null,
-    @SerialName("package") val packageName: String? = null,
-    val clickable: Boolean? = null,
-    val editable: Boolean? = null,
-    /** Pick the n-th match (0-based) when several nodes match. */
-    val index: Int? = null,
+    @Doc("Short role such as button, text, or edit.") val role: String? = null,
+    @Doc("Window package name.") @SerialName("package") val packageName: String? = null,
+    @Doc("Require a clickable or non-clickable node.") val clickable: Boolean? = null,
+    @Doc("Require an editable or non-editable node.") val editable: Boolean? = null,
+    @Doc("Zero-based index when several nodes match.") val index: Int? = null,
 )
 
 @Serializable
@@ -98,13 +100,13 @@ public enum class ActionMode {
 
 @Serializable
 public data class NodeActionRequest(
-    /**
-     * `click`, `longClick`, `focus`, `clearFocus`, `select`, `setText`, `scrollForward`,
-     * `scrollBackward`, `expand`, `collapse`, `dismiss`, `showOnScreen`, `imeEnter`.
-     */
+    @Doc(
+        "Standard action (click, longClick, focus, clearFocus, select, setText, scrollForward, scrollBackward, expand, collapse, dismiss, showOnScreen, imeEnter, and the other accessibility actions) or a custom action label from the node's actions in the snapshot."
+    )
     val action: String,
+    @Doc("real uses a touch where it can. semantic calls performAction and generates no touch.")
     val mode: ActionMode = ActionMode.REAL,
-    val text: String? = null,
-    val force: Boolean = false,
-    val autoWake: Boolean = true,
+    @Doc("Replacement text for setText.") val text: String? = null,
+    @Doc("Act even when the node is covered.") val force: Boolean = false,
+    @Doc("Wake and unlock the device first. Defaults to true.") val autoWake: Boolean = true,
 )

@@ -4,27 +4,42 @@ import io.modelcontextprotocol.kotlin.sdk.types.CallToolRequest
 import io.modelcontextprotocol.kotlin.sdk.types.CallToolResult
 import io.modelcontextprotocol.kotlin.sdk.types.ToolAnnotations
 import io.modelcontextprotocol.kotlin.sdk.types.ToolSchema
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonObject
-import net.die.phoneapi.AppGraph
+import kotlinx.serialization.KSerializer
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.serializer
 import net.die.phoneapi.model.Capabilities
+import net.die.phoneapi.model.FindRequest
+import net.die.phoneapi.model.IntentRequest
+import net.die.phoneapi.model.KeyRequest
 import net.die.phoneapi.model.Scope
+import net.die.phoneapi.model.SwipeRequest
+import net.die.phoneapi.model.TapRequest
+import net.die.phoneapi.model.TextRequest
+import net.die.phoneapi.model.schema.JsonSchemas
+import net.die.phoneapi.server.ServerServices
 
 internal data class McpTool(
     val name: String,
     val description: String,
     val scope: Scope,
-    val available: (Map<String, Boolean>) -> Boolean,
-    val schema: ToolSchema,
+    val available: (Capabilities) -> Boolean,
+    val arguments: KSerializer<*>,
+    val schema: ToolSchema = toolSchema(arguments),
     val annotations: ToolAnnotations? = null,
-    val call: suspend (AppGraph, Set<Scope>, CallToolRequest) -> CallToolResult,
+    val call: suspend (ServerServices, Set<Scope>, CallToolRequest) -> CallToolResult,
 )
 
-internal fun visibleMcpTools(
-    scopes: Set<Scope>,
-    capabilities: Map<String, Boolean>,
-): List<McpTool> = MCP_TOOLS.filter { it.scope in scopes && it.available(capabilities) }
+internal fun visibleMcpTools(scopes: Set<Scope>, capabilities: Capabilities): List<McpTool> =
+    MCP_TOOLS.filter { it.scope in scopes && it.available(capabilities) }
+        .map { tool ->
+            val note = reducedNote(tool.name, capabilities)
+            if (note == null) tool else tool.copy(description = "${tool.description} $note")
+        }
+
+internal fun mcpToolTemplates(): List<McpTool> = MCP_TOOLS
 
 private val readOnly = ToolAnnotations(readOnlyHint = true, openWorldHint = false)
 
@@ -34,29 +49,68 @@ private val changes =
 private val destructive =
     ToolAnnotations(readOnlyHint = false, destructiveHint = true, openWorldHint = false)
 
-private val always: (Map<String, Boolean>) -> Boolean = { true }
+private val always: (Capabilities) -> Boolean = { true }
 
-private fun has(key: String): (Map<String, Boolean>) -> Boolean = { it[key] == true }
-
-private fun hasAny(vararg keys: String): (Map<String, Boolean>) -> Boolean = { caps ->
-    keys.any { caps[it] == true }
+private fun reducedNote(name: String, caps: Capabilities): String? {
+    val notes = ArrayList<String>()
+    backendNote(name, caps)?.let { notes += it }
+    if (!caps.uiStableIds && name in REF_TOOLS) {
+        notes += "Reduced mode: node ids are not stable."
+    }
+    return notes.takeIf { it.isNotEmpty() }?.joinToString(" ")
 }
 
-private fun schema(vararg fields: Field, required: List<String> = emptyList()): ToolSchema =
-    ToolSchema(
-        properties =
-            buildJsonObject {
-                fields.forEach { field ->
-                    putJsonObject(field.name) {
-                        put("type", field.type)
-                        field.description?.let { put("description", it) }
-                    }
-                }
-            },
-        required = required,
-    )
+private fun backendNote(name: String, caps: Capabilities): String? =
+    when (name) {
+        "tap",
+        "swipe" -> injectNote(caps)
+        "press_key" -> keyNote(caps)
+        "type_text" -> imeNote(caps)
+        "screenshot" -> shotNote(caps)
+        else -> null
+    }
 
-private data class Field(val name: String, val type: String, val description: String? = null)
+private fun injectNote(caps: Capabilities): String? =
+    if (!caps.inputInject && caps.inputA11y) {
+        "Reduced mode: accessibility gestures only, no helper injection."
+    } else {
+        null
+    }
+
+private fun keyNote(caps: Capabilities): String? =
+    if (!caps.textKeyevent && caps.inputA11y) {
+        "Reduced mode: no helper key injection."
+    } else {
+        null
+    }
+
+private fun imeNote(caps: Capabilities): String? =
+    if (!caps.textIme && (caps.textKeyevent || caps.inputA11y)) {
+        "Reduced mode: the accessibility input method is unavailable."
+    } else {
+        null
+    }
+
+private fun shotNote(caps: Capabilities): String? =
+    if (!caps.screenshotHelper && caps.screenshotA11y) {
+        "Reduced mode: accessibility screenshot only."
+    } else {
+        null
+    }
+
+private val REF_TOOLS =
+    setOf("ui_snapshot", "ui_find", "ui_act", "tap", "swipe", "type_text", "wait_for")
+
+private fun toolSchema(serializer: KSerializer<*>): ToolSchema {
+    val schemas = JsonSchemas(refPrefix = "#/\$defs/")
+    val root = schemas.inline(serializer.descriptor)
+    val required = root["required"]?.jsonArray?.map { it.jsonPrimitive.content }
+    return ToolSchema(
+        properties = root["properties"]?.jsonObject ?: JsonObject(emptyMap()),
+        required = required?.takeIf { it.isNotEmpty() },
+        defs = schemas.definitions.takeIf { it.isNotEmpty() }?.let { JsonObject(it) },
+    )
+}
 
 private val MCP_TOOLS: List<McpTool> =
     listOf(
@@ -66,7 +120,7 @@ private val MCP_TOOLS: List<McpTool> =
                 "Manufacturer, SDK, display, lock state, helper status, and capabilities.",
             scope = Scope.OBSERVE,
             available = always,
-            schema = schema(),
+            arguments = serializer<EmptyArgs>(),
             annotations = readOnly,
             call = { graph, _, _ -> deviceInfo(graph) },
         ),
@@ -75,15 +129,8 @@ private val MCP_TOOLS: List<McpTool> =
             description =
                 "Compact accessibility outline of the current UI. Prefer this over screenshot.",
             scope = Scope.OBSERVE,
-            available = has(Capabilities.UI_SNAPSHOT),
-            schema =
-                schema(
-                    Field("window", "string", "Window id, such as 3 or w3"),
-                    Field("maxDepth", "integer"),
-                    Field("includeInvisible", "boolean"),
-                    Field("all", "boolean", "Include system windows"),
-                    Field("autoWake", "boolean"),
-                ),
+            available = Capabilities::uiSnapshot,
+            arguments = serializer<SnapshotArgs>(),
             annotations = readOnly,
             call = { graph, _, request -> uiSnapshot(graph, request) },
         ),
@@ -91,13 +138,8 @@ private val MCP_TOOLS: List<McpTool> =
             name = "ui_find",
             description = "Find nodes. selector matches text, id, role, and the other node fields.",
             scope = Scope.OBSERVE,
-            available = has(Capabilities.UI_SNAPSHOT),
-            schema =
-                schema(
-                    Field("selector", "object"),
-                    Field("limit", "integer"),
-                    Field("includeInvisible", "boolean"),
-                ),
+            available = Capabilities::uiSnapshot,
+            arguments = serializer<FindRequest>(),
             annotations = readOnly,
             call = { graph, _, request -> uiFind(graph, request) },
         ),
@@ -106,15 +148,8 @@ private val MCP_TOOLS: List<McpTool> =
             description =
                 "Act on a snapshot ref. action is click, longClick, setText, scrollForward, and the other node actions. mode semantic skips real touch.",
             scope = Scope.CONTROL,
-            available = has(Capabilities.UI_SNAPSHOT),
-            schema =
-                schema(
-                    Field("ref", "string"),
-                    Field("action", "string"),
-                    Field("mode", "string", "real or semantic"),
-                    Field("text", "string"),
-                    Field("force", "boolean"),
-                ),
+            available = Capabilities::uiSnapshot,
+            arguments = serializer<NodeActArgs>(),
             annotations = changes,
             call = { graph, _, request -> uiAct(graph, request) },
         ),
@@ -122,14 +157,8 @@ private val MCP_TOOLS: List<McpTool> =
             name = "tap",
             description = "Tap a point or a node selector. Humanized by default.",
             scope = Scope.CONTROL,
-            available = hasAny(Capabilities.INPUT_A11Y, Capabilities.INPUT_INJECT),
-            schema =
-                schema(
-                    Field("x", "number"),
-                    Field("y", "number"),
-                    Field("selector", "object"),
-                    Field("humanize", "boolean"),
-                ),
+            available = any(Capabilities::inputA11y, Capabilities::inputInject),
+            arguments = serializer<TapRequest>(),
             annotations = changes,
             call = { graph, _, request -> tap(graph, request) },
         ),
@@ -138,15 +167,8 @@ private val MCP_TOOLS: List<McpTool> =
             description =
                 "Swipe from/to, or inside a selector in a direction (up, down, left, right).",
             scope = Scope.CONTROL,
-            available = hasAny(Capabilities.INPUT_A11Y, Capabilities.INPUT_INJECT),
-            schema =
-                schema(
-                    Field("from", "object"),
-                    Field("to", "object"),
-                    Field("selector", "object"),
-                    Field("direction", "string"),
-                    Field("humanize", "boolean"),
-                ),
+            available = any(Capabilities::inputA11y, Capabilities::inputInject),
+            arguments = serializer<SwipeRequest>(),
             annotations = changes,
             call = { graph, _, request -> swipe(graph, request) },
         ),
@@ -156,15 +178,8 @@ private val MCP_TOOLS: List<McpTool> =
                 "Type into the focused field, or into selector first. mode auto, keyboard, ime, keyevent, or setText.",
             scope = Scope.CONTROL,
             available =
-                hasAny(Capabilities.TEXT_IME, Capabilities.TEXT_KEYEVENT, Capabilities.INPUT_A11Y),
-            schema =
-                schema(
-                    Field("text", "string"),
-                    Field("selector", "object"),
-                    Field("mode", "string"),
-                    Field("clear", "boolean"),
-                    Field("submit", "boolean"),
-                ),
+                any(Capabilities::textIme, Capabilities::textKeyevent, Capabilities::inputA11y),
+            arguments = serializer<TextRequest>(),
             annotations = changes,
             call = { graph, _, request -> typeText(graph, request) },
         ),
@@ -172,13 +187,8 @@ private val MCP_TOOLS: List<McpTool> =
             name = "press_key",
             description = "Press BACK, HOME, ENTER, DEL, or any KEYCODE_* name.",
             scope = Scope.CONTROL,
-            available = hasAny(Capabilities.INPUT_A11Y, Capabilities.TEXT_KEYEVENT),
-            schema =
-                schema(
-                    Field("key", "string"),
-                    Field("longPress", "boolean"),
-                    required = listOf("key"),
-                ),
+            available = any(Capabilities::inputA11y, Capabilities::textKeyevent),
+            arguments = serializer<KeyRequest>(),
             annotations = changes,
             call = { graph, _, request -> pressKey(graph, request) },
         ),
@@ -188,14 +198,7 @@ private val MCP_TOOLS: List<McpTool> =
                 "Wait until all or any conditions match. A condition's type is node, window, ime, idle, screen, keyguard, or browser.*. Browser conditions need the browser scope.",
             scope = Scope.OBSERVE,
             available = always,
-            schema =
-                schema(
-                    Field("all", "array"),
-                    Field("any", "array"),
-                    Field("timeoutMs", "integer"),
-                    Field("settleMs", "integer"),
-                    Field("snapshot", "boolean"),
-                ),
+            arguments = serializer<WaitArgs>(),
             annotations = readOnly,
             call = { graph, scopes, request -> waitFor(graph, scopes, request) },
         ),
@@ -203,8 +206,8 @@ private val MCP_TOOLS: List<McpTool> =
             name = "keyboard_hide",
             description = "Hide the soft keyboard.",
             scope = Scope.CONTROL,
-            available = has(Capabilities.INPUT_A11Y),
-            schema = schema(),
+            available = Capabilities::inputA11y,
+            arguments = serializer<EmptyArgs>(),
             annotations = changes,
             call = { graph, _, _ -> keyboardHide(graph) },
         ),
@@ -213,14 +216,7 @@ private val MCP_TOOLS: List<McpTool> =
             description = "Launch an app by package name.",
             scope = Scope.CONTROL,
             available = always,
-            schema =
-                schema(
-                    Field("package", "string"),
-                    Field("fresh", "boolean"),
-                    Field("activity", "string"),
-                    Field("wait", "boolean"),
-                    required = listOf("package"),
-                ),
+            arguments = serializer<PackageArgs>(),
             annotations = changes,
             call = { graph, _, request -> appLaunch(graph, request) },
         ),
@@ -228,8 +224,8 @@ private val MCP_TOOLS: List<McpTool> =
             name = "app_stop",
             description = "Force-stop an app. Requires the shell helper.",
             scope = Scope.CONTROL,
-            available = has(Capabilities.APPS_MANAGE),
-            schema = schema(Field("package", "string"), required = listOf("package")),
+            available = Capabilities::appsManage,
+            arguments = serializer<PackageNameArgs>(),
             annotations = destructive,
             call = { graph, _, request -> appStop(graph, request) },
         ),
@@ -237,8 +233,8 @@ private val MCP_TOOLS: List<McpTool> =
             name = "app_clear",
             description = "Clear an app's data. Requires the shell helper.",
             scope = Scope.CONTROL,
-            available = has(Capabilities.APPS_MANAGE),
-            schema = schema(Field("package", "string"), required = listOf("package")),
+            available = Capabilities::appsManage,
+            arguments = serializer<PackageNameArgs>(),
             annotations = destructive,
             call = { graph, _, request -> appClear(graph, request) },
         ),
@@ -247,13 +243,7 @@ private val MCP_TOOLS: List<McpTool> =
             description = "Start an intent. data is a URI. package and component are optional.",
             scope = Scope.CONTROL,
             available = always,
-            schema =
-                schema(
-                    Field("action", "string"),
-                    Field("data", "string"),
-                    Field("package", "string"),
-                    Field("component", "string"),
-                ),
+            arguments = serializer<IntentRequest>(),
             annotations = changes,
             call = { graph, _, request -> openIntent(graph, request) },
         ),
@@ -262,7 +252,7 @@ private val MCP_TOOLS: List<McpTool> =
             description = "Turn the screen on.",
             scope = Scope.CONTROL,
             available = always,
-            schema = schema(),
+            arguments = serializer<EmptyArgs>(),
             annotations = changes,
             call = { graph, _, _ -> deviceWake(graph) },
         ),
@@ -271,7 +261,7 @@ private val MCP_TOOLS: List<McpTool> =
             description = "Dismiss the keyguard. A secure lock uses the stored PIN.",
             scope = Scope.CONTROL,
             available = always,
-            schema = schema(),
+            arguments = serializer<EmptyArgs>(),
             annotations = changes,
             call = { graph, _, _ -> deviceUnlock(graph) },
         ),
@@ -280,7 +270,7 @@ private val MCP_TOOLS: List<McpTool> =
             description = "Lock the device.",
             scope = Scope.CONTROL,
             available = always,
-            schema = schema(),
+            arguments = serializer<EmptyArgs>(),
             annotations = destructive,
             call = { graph, _, _ -> deviceLock(graph) },
         ),
@@ -288,8 +278,8 @@ private val MCP_TOOLS: List<McpTool> =
             name = "browser_targets",
             description = "List Chrome tabs and debuggable WebViews.",
             scope = Scope.BROWSER,
-            available = has(Capabilities.BROWSER_CDP),
-            schema = schema(),
+            available = Capabilities::browserCdp,
+            arguments = serializer<EmptyArgs>(),
             annotations = readOnly,
             call = { graph, _, _ -> browserTargets(graph) },
         ),
@@ -297,8 +287,8 @@ private val MCP_TOOLS: List<McpTool> =
             name = "browser_open",
             description = "Open a tab. url must be http(s) or about:blank.",
             scope = Scope.BROWSER,
-            available = has(Capabilities.BROWSER_CDP),
-            schema = schema(Field("url", "string"), required = listOf("url")),
+            available = Capabilities::browserCdp,
+            arguments = serializer<UrlArgs>(),
             annotations = changes,
             call = { graph, _, request -> browserOpen(graph, request) },
         ),
@@ -306,13 +296,8 @@ private val MCP_TOOLS: List<McpTool> =
             name = "browser_navigate",
             description = "Navigate an existing target. target is the id from browser_targets.",
             scope = Scope.BROWSER,
-            available = has(Capabilities.BROWSER_CDP),
-            schema =
-                schema(
-                    Field("target", "string"),
-                    Field("url", "string"),
-                    required = listOf("target", "url"),
-                ),
+            available = Capabilities::browserCdp,
+            arguments = serializer<TargetUrlArgs>(),
             annotations = changes,
             call = { graph, _, request -> browserNavigate(graph, request) },
         ),
@@ -320,8 +305,8 @@ private val MCP_TOOLS: List<McpTool> =
             name = "browser_snapshot",
             description = "Compact accessibility outline of a browser target.",
             scope = Scope.BROWSER,
-            available = has(Capabilities.BROWSER_CDP),
-            schema = schema(Field("target", "string"), required = listOf("target")),
+            available = Capabilities::browserCdp,
+            arguments = serializer<TargetArgs>(),
             annotations = readOnly,
             call = { graph, _, request -> browserSnapshot(graph, request) },
         ),
@@ -330,15 +315,8 @@ private val MCP_TOOLS: List<McpTool> =
             description =
                 "Tap a snapshot ref or a CSS selector in a browser target, with a real touch.",
             scope = Scope.BROWSER,
-            available = has(Capabilities.BROWSER_CDP),
-            schema =
-                schema(
-                    Field("target", "string"),
-                    Field("ref", "string"),
-                    Field("selector", "string"),
-                    Field("humanize", "boolean"),
-                    required = listOf("target"),
-                ),
+            available = Capabilities::browserCdp,
+            arguments = serializer<BrowserTapArgs>(),
             annotations = changes,
             call = { graph, _, request -> browserTap(graph, request) },
         ),
@@ -347,14 +325,8 @@ private val MCP_TOOLS: List<McpTool> =
             description =
                 "Evaluate JavaScript in an isolated world. A script exception is a result field.",
             scope = Scope.BROWSER,
-            available = has(Capabilities.BROWSER_CDP),
-            schema =
-                schema(
-                    Field("target", "string"),
-                    Field("expression", "string"),
-                    Field("awaitPromise", "boolean"),
-                    required = listOf("target", "expression"),
-                ),
+            available = Capabilities::browserCdp,
+            arguments = serializer<EvalArgs>(),
             annotations = changes,
             call = { graph, _, request -> browserEval(graph, request) },
         ),
@@ -363,13 +335,8 @@ private val MCP_TOOLS: List<McpTool> =
             description =
                 "Collect log entries for timeoutMs. Entries from before the call are not replayed.",
             scope = Scope.BROWSER,
-            available = has(Capabilities.BROWSER_CDP),
-            schema =
-                schema(
-                    Field("target", "string"),
-                    Field("timeoutMs", "integer"),
-                    required = listOf("target"),
-                ),
+            available = Capabilities::browserCdp,
+            arguments = serializer<ConsoleArgs>(),
             annotations = readOnly,
             call = { graph, _, request -> browserConsole(graph, request) },
         ),
@@ -378,8 +345,8 @@ private val MCP_TOOLS: List<McpTool> =
             description =
                 "Last resort. PNG of the screen. Prefer ui_snapshot. scale is 0.1 to 1, default 0.5.",
             scope = Scope.OBSERVE,
-            available = hasAny(Capabilities.SCREENSHOT_A11Y, Capabilities.SCREENSHOT_HELPER),
-            schema = schema(Field("scale", "number")),
+            available = any(Capabilities::screenshotA11y, Capabilities::screenshotHelper),
+            arguments = serializer<ScaleArgs>(),
             annotations = readOnly,
             call = { graph, _, request -> screenshot(graph, request) },
         ),
@@ -387,19 +354,23 @@ private val MCP_TOOLS: List<McpTool> =
             name = "logcat_tail",
             description = "Recent log lines from the shell helper. lines is 1 to 400, default 80.",
             scope = Scope.OBSERVE,
-            available = has(Capabilities.LOGCAT_ALL),
-            schema = schema(Field("lines", "integer"), Field("tag", "string")),
+            available = Capabilities::logcatAll,
+            arguments = serializer<LogcatArgs>(),
             annotations = readOnly,
             call = { graph, _, request -> logcatTail(graph, request) },
         ),
     )
+
+private fun any(vararg flags: (Capabilities) -> Boolean): (Capabilities) -> Boolean = { caps ->
+    flags.any { it(caps) }
+}
 
 internal data class McpResource(
     val uri: String,
     val name: String,
     val description: String,
     val mimeType: String,
-    val read: (AppGraph) -> String,
+    val read: (ServerServices) -> String,
 )
 
 internal fun mcpResources(scopes: Set<Scope>): List<McpResource> =
@@ -412,19 +383,14 @@ private val MCP_RESOURCES =
             name = "capabilities",
             description = "Which device features are available right now.",
             mimeType = "application/json",
-            read = { graph -> jsonText(graph.deviceInfo.capabilities()) },
+            read = { services -> jsonText(services.device.capabilities()) },
         ),
         McpResource(
             uri = "phoneapi://viewer",
             name = "viewer",
-            description = "WebCodecs page at /viewer. Pass the bearer token as access_token.",
+            description =
+                "WebCodecs page at /viewer. Pass the bearer token as access_token. That query parameter is accepted only by the page and by WebSocket upgrades.",
             mimeType = "text/plain",
-            read = { graph -> viewerText(graph) },
+            read = { services -> services.viewerText() },
         ),
     )
-
-internal fun viewerText(graph: AppGraph): String {
-    val port = graph.settings.current.port
-    val host = graph.network.lanAddress.value?.hostAddress ?: "127.0.0.1"
-    return "https://$host:$port/viewer?access_token=TOKEN\nReplace TOKEN with this device's bearer token."
-}

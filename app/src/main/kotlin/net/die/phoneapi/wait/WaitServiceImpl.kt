@@ -15,6 +15,7 @@ import net.die.phoneapi.AppGraph
 import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.core.SnapshotOptions
 import net.die.phoneapi.core.WaitService
+import net.die.phoneapi.model.Scope
 import net.die.phoneapi.model.WaitRequest
 import net.die.phoneapi.model.WaitResult
 
@@ -35,7 +36,8 @@ class WaitServiceImpl(private val graph: AppGraph) : WaitService {
         val recheckAtMs: Long?,
     )
 
-    override suspend fun wait(request: WaitRequest): WaitResult {
+    override suspend fun wait(request: WaitRequest, scopes: Set<Scope>): WaitResult {
+        requireWaitAccess(request, scopes)
         validate(request)
         // Waiting never wakes the device on its own, but it does keep the screen from going dark
         // underneath a long wait.

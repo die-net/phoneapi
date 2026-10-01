@@ -120,4 +120,8 @@ dependencies {
     testImplementation(libs.junit.jupiter)
     testRuntimeOnly(libs.junit.jupiter.engine)
     testRuntimeOnly(libs.junit.platform.launcher)
+    testImplementation(libs.ktor.server.test.host)
+    testImplementation(libs.ktor.client.core)
+    testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.mcp.client)
 }

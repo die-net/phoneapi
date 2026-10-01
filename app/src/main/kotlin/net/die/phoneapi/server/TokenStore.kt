@@ -16,7 +16,7 @@ import net.die.phoneapi.model.Scope
 import net.die.phoneapi.model.TokenInfo
 
 /** Bearer tokens, stored only as SHA-256 hashes. */
-class TokenStore(dir: File) {
+class TokenStore(dir: File) : TokenGateway {
     @Serializable
     private data class Stored(
         val id: String,
@@ -37,7 +37,7 @@ class TokenStore(dir: File) {
     private var lastPersistMs = 0L
 
     @Synchronized
-    fun list(): List<TokenInfo> {
+    override fun list(): List<TokenInfo> {
         ensureLoaded()
         return tokens.map { it.info() }
     }
@@ -49,7 +49,7 @@ class TokenStore(dir: File) {
     }
 
     @Synchronized
-    fun create(name: String, scopes: Set<Scope>): CreatedToken {
+    override fun create(name: String, scopes: Set<Scope>): CreatedToken {
         ensureLoaded()
         val secret = "pa_" + randomToken(random, 32)
         val stored =
@@ -74,7 +74,7 @@ class TokenStore(dir: File) {
     }
 
     @Synchronized
-    fun revoke(id: String): Boolean {
+    override fun revoke(id: String): Boolean {
         ensureLoaded()
         val before = tokens.size
         tokens = tokens.filterNot { it.id == id }
@@ -84,7 +84,7 @@ class TokenStore(dir: File) {
 
     /** Returns the token's info if [secret] is valid, updating its last-used time. */
     @Synchronized
-    fun authenticate(secret: String): TokenInfo? {
+    override fun authenticate(secret: String): TokenInfo? {
         ensureLoaded()
         val candidate = hash(secret).toByteArray()
         val match =

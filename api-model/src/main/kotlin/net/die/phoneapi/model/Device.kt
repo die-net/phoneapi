@@ -68,30 +68,34 @@ public data class DeviceInfo(
     val helper: HelperStatus,
     val helperRecoveredAtMs: Long? = null,
     val accessibilityConnected: Boolean,
-    val capabilities: Map<String, Boolean>,
+    val capabilities: Capabilities,
 )
 
-/** Capability keys reported in [DeviceInfo.capabilities]. */
-public object Capabilities {
-    public const val UI_SNAPSHOT: String = "ui.snapshot"
-    public const val INPUT_A11Y: String = "input.a11y"
-    public const val INPUT_INJECT: String = "input.inject"
-    public const val TEXT_IME: String = "text.ime"
-    public const val TEXT_KEYEVENT: String = "text.keyevent"
-    public const val SCREENSHOT_A11Y: String = "screenshot.a11y"
-    public const val SCREENSHOT_HELPER: String = "screenshot.helper"
-    public const val STABLE_NODE_IDS: String = "ui.stableIds"
-    public const val APPS_MANAGE: String = "apps.manage"
-    public const val LOGCAT_ALL: String = "logcat.all"
-    public const val BROWSER_CDP: String = "browser.cdp"
-    public const val STREAM_VIDEO_PROJECTION: String = "stream.video.projection"
-    public const val STREAM_VIDEO_MIRROR: String = "stream.video.mirror"
-    public const val STREAM_AUDIO_PLAYBACK_CAPTURE: String = "stream.audio.playbackCapture"
-    public const val STREAM_AUDIO_SUBMIX: String = "stream.audio.submix"
-    public const val ENCODER_LOW_LATENCY: String = "encoder.lowLatency"
-    public const val WIRELESS_DEBUGGING: String = "adb.wireless"
-    public const val SECURE_SETTINGS: String = "settings.secure"
-}
+/**
+ * Runtime feature flags. JSON keys stay dotted (`ui.snapshot`) so existing clients keep working. A
+ * flag is true only when this build actually implements that path.
+ */
+@Serializable
+public data class Capabilities(
+    @SerialName("ui.snapshot") val uiSnapshot: Boolean,
+    @SerialName("input.a11y") val inputA11y: Boolean,
+    @SerialName("input.inject") val inputInject: Boolean,
+    @SerialName("text.ime") val textIme: Boolean,
+    @SerialName("text.keyevent") val textKeyevent: Boolean,
+    @SerialName("screenshot.a11y") val screenshotA11y: Boolean,
+    @SerialName("screenshot.helper") val screenshotHelper: Boolean,
+    @SerialName("ui.stableIds") val uiStableIds: Boolean,
+    @SerialName("apps.manage") val appsManage: Boolean,
+    @SerialName("logcat.all") val logcatAll: Boolean,
+    @SerialName("browser.cdp") val browserCdp: Boolean,
+    @SerialName("stream.video.projection") val streamVideoProjection: Boolean,
+    @SerialName("stream.video.mirror") val streamVideoMirror: Boolean,
+    @SerialName("stream.audio.playbackCapture") val streamAudioPlaybackCapture: Boolean,
+    @SerialName("stream.audio.submix") val streamAudioSubmix: Boolean,
+    @SerialName("encoder.lowLatency") val encoderLowLatency: Boolean,
+    @SerialName("adb.wireless") val adbWireless: Boolean,
+    @SerialName("settings.secure") val settingsSecure: Boolean,
+)
 
 /** Body of `PUT /v1/device/pin`. The value is stored and never returned. */
 @Serializable public data class SetPinRequest(val pin: String)

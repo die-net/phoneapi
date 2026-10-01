@@ -16,6 +16,7 @@ import net.die.phoneapi.model.IntentRequest
 import net.die.phoneapi.model.KeyRequest
 import net.die.phoneapi.model.LaunchRequest
 import net.die.phoneapi.model.NodeActionRequest
+import net.die.phoneapi.model.Scope
 import net.die.phoneapi.model.SnapshotFormat
 import net.die.phoneapi.model.SwipeRequest
 import net.die.phoneapi.model.TapRequest
@@ -88,7 +89,11 @@ interface AppsService {
 }
 
 interface WaitService {
-    suspend fun wait(request: WaitRequest): WaitResult
+    /**
+     * Blocks until [request] matches. A `browser.*` condition is 403 when [scopes] lacks
+     * [Scope.BROWSER], before a DevTools session is opened.
+     */
+    suspend fun wait(request: WaitRequest, scopes: Set<Scope>): WaitResult
 }
 
 interface BrowserService {

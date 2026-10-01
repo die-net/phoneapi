@@ -1,6 +1,8 @@
 package net.die.phoneapi.server
 
+import android.util.Log
 import java.io.File
+import java.io.IOException
 import java.math.BigInteger
 import java.security.KeyPairGenerator
 import java.security.KeyStore
@@ -18,7 +20,7 @@ import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder
  * Self-signed server certificate, generated on first run and persisted as PKCS#12 in private
  * storage. Clients pin it by SHA-256 fingerprint (shown in the pairing QR code).
  */
-class TlsManager(private val dir: File, private val password: CharArray) {
+class TlsManager(private val dir: File, val password: CharArray) {
     private val file = File(dir, "tls.p12")
 
     val keyStore: KeyStore by lazy { loadOrCreate() }
@@ -41,8 +43,12 @@ class TlsManager(private val dir: File, private val password: CharArray) {
     private fun loadOrCreate(): KeyStore {
         val ks = KeyStore.getInstance("PKCS12")
         if (file.exists()) {
-            file.inputStream().use { ks.load(it, password) }
-            return ks
+            try {
+                file.inputStream().use { ks.load(it, password) }
+                return ks
+            } catch (e: IOException) {
+                Log.w(TAG, "TLS keystore unreadable; generating a new certificate", e)
+            }
         }
         val keyPair =
             KeyPairGenerator.getInstance("EC").run {
@@ -73,6 +79,7 @@ class TlsManager(private val dir: File, private val password: CharArray) {
 
     companion object {
         const val ALIAS = "server"
+        private const val TAG = "PhoneApiTls"
         private const val CLOCK_SKEW_MS = 24L * 60 * 60 * 1000
         private const val VALIDITY_MS = 20L * 365 * 24 * 60 * 60 * 1000
     }

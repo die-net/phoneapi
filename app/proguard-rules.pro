@@ -21,3 +21,6 @@
 -dontwarn java.lang.management.**
 -keep class io.netty.** { *; }
 -keepclassmembers class * extends io.netty.channel.ChannelInboundHandler { *; }
+
+# R8 full mode shrinks Ktor's Netty engine: the first TLS handshake succeeds, later ones are reset.
+-keep,allowobfuscation,allowoptimization class io.ktor.server.netty.** { *; }

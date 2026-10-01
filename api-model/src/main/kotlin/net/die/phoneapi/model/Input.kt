@@ -2,6 +2,8 @@ package net.die.phoneapi.model
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import net.die.phoneapi.model.schema.Doc
+import net.die.phoneapi.model.schema.LenientEnumSerializer
 
 @Serializable
 public enum class InputBackend {
@@ -15,36 +17,56 @@ public enum class InputBackend {
 
 @Serializable
 public data class TapRequest(
-    val x: Float? = null,
-    val y: Float? = null,
-    /** Tap a node instead of coordinates; the point is jittered inside its visible bounds. */
+    @Doc("Screen x in pixels. Omit when selector is set.") val x: Float? = null,
+    @Doc("Screen y in pixels. Omit when selector is set.") val y: Float? = null,
+    @Doc("Tap a node instead of coordinates. The point is jittered inside its visible bounds.")
     val selector: NodeSelector? = null,
-    val count: Int = 1,
-    val holdMs: Long? = null,
+    @Doc("How many times to tap. Defaults to 1.") val count: Int = 1,
+    @Doc("Hold the pointer down for this many milliseconds.") val holdMs: Long? = null,
+    @Doc("auto, inject, or a11y. auto uses helper injection when it is available.")
     val backend: InputBackend = InputBackend.AUTO,
-    val humanize: Boolean = true,
-    /** Allow tapping nodes covered by the IME or other windows. */
+    @Doc("Jitter the point and timing. Defaults to true.") val humanize: Boolean = true,
+    @Doc("Tap even when the node is covered by the keyboard or another window.")
     val force: Boolean = false,
-    val autoWake: Boolean = true,
+    @Doc("Wake and unlock the device first. Defaults to true.") val autoWake: Boolean = true,
 )
+
+/** Direction of a swipe that does not name [SwipeRequest.from] and [SwipeRequest.to]. */
+@Serializable(with = SwipeDirectionSerializer::class)
+public enum class SwipeDirection {
+    @SerialName("up") UP,
+    @SerialName("down") DOWN,
+    @SerialName("left") LEFT,
+    @SerialName("right") RIGHT,
+}
+
+public object SwipeDirectionSerializer :
+    LenientEnumSerializer<SwipeDirection>(
+        serialName = "net.die.phoneapi.model.SwipeDirection",
+        wires = listOf("up", "down", "left", "right"),
+        values = { enumValues<SwipeDirection>() },
+    )
 
 @Serializable
 public data class SwipeRequest(
-    val from: Point? = null,
-    val to: Point? = null,
+    @Doc("Start point. Pass both from and to, or a direction.") val from: Point? = null,
+    @Doc("End point. Pass both from and to, or a direction.") val to: Point? = null,
     /**
      * Alternative to from/to: swipe inside a node in a direction (`up`, `down`, `left`, `right`).
      */
+    @Doc("Swipe inside this node. Omit to swipe across the screen.")
     val selector: NodeSelector? = null,
-    val direction: String? = null,
-    /** Fraction of the node (or screen) to travel when using [direction]. */
+    @Doc("up, down, left, or right. Use instead of from and to.")
+    val direction: SwipeDirection? = null,
+    @Doc("Fraction of the node or screen to travel when using direction.")
     val distance: Float = 0.6f,
-    val durationMs: Long = 300,
-    /** End with a fling (keep velocity at release) rather than settling before lift. */
+    @Doc("How long the swipe takes, in milliseconds.") val durationMs: Long = 300,
+    @Doc("Keep velocity at release instead of stopping before the pointer lifts.")
     val fling: Boolean = true,
+    @Doc("auto, inject, or a11y. auto uses helper injection when it is available.")
     val backend: InputBackend = InputBackend.AUTO,
-    val humanize: Boolean = true,
-    val autoWake: Boolean = true,
+    @Doc("Jitter the path and timing. Defaults to true.") val humanize: Boolean = true,
+    @Doc("Wake and unlock the device first. Defaults to true.") val autoWake: Boolean = true,
 )
 
 @Serializable public data class TimedPoint(val x: Float, val y: Float, val tMs: Long)
@@ -74,7 +96,10 @@ public enum class TextMode {
     @SerialName("auto") AUTO,
     /** Tap the on-screen keyboard's keys with real touches. */
     @SerialName("keyboard") KEYBOARD,
-    /** Accessibility InputMethod (Android 13+): composing text then commit. */
+    /**
+     * Accessibility InputMethod (Android 13+). The input connection has no composing API, so each
+     * code point is committed on its own.
+     */
     @SerialName("ime") IME,
     /** Helper KeyEvent injection (looks like a hardware keyboard). */
     @SerialName("keyevent") KEYEVENT,
@@ -84,17 +109,16 @@ public enum class TextMode {
 
 @Serializable
 public data class TextRequest(
-    val text: String,
-    /** Focus (tap) this node first. Otherwise types into the currently focused field. */
+    @Doc("Characters to type.") val text: String,
+    @Doc("Focus this node first. Omit to type into the focused field.")
     val selector: NodeSelector? = null,
+    @Doc("auto, keyboard, ime, keyevent, or setText. auto prefers the accessibility input method.")
     val mode: TextMode = TextMode.AUTO,
-    val clear: Boolean = false,
-    /** Press the IME action (Enter / Go / Search) afterwards. */
-    val submit: Boolean = false,
-    /** Per-character delay range for realistic cadence. */
-    val minDelayMs: Long = 40,
-    val maxDelayMs: Long = 140,
-    val autoWake: Boolean = true,
+    @Doc("Clear the field before typing.") val clear: Boolean = false,
+    @Doc("Press the IME action (Enter, Go, or Search) afterwards.") val submit: Boolean = false,
+    @Doc("Minimum delay between characters, in milliseconds.") val minDelayMs: Long = 40,
+    @Doc("Maximum delay between characters, in milliseconds.") val maxDelayMs: Long = 140,
+    @Doc("Wake and unlock the device first. Defaults to true.") val autoWake: Boolean = true,
 )
 
 @Serializable

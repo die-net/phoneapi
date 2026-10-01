@@ -1,6 +1,7 @@
 package net.die.phoneapi.core
 
 import net.die.phoneapi.model.DeviceStateSummary
+import net.die.phoneapi.model.Scope
 
 /** Mapped by the server to an HTTP status and an [net.die.phoneapi.model.ApiError] body. */
 class ApiException(
@@ -13,6 +14,9 @@ class ApiException(
     companion object {
         fun badRequest(message: String, cause: Throwable? = null) =
             ApiException(400, "bad_request", message, cause = cause)
+
+        fun forbidden(scope: Scope) =
+            ApiException(403, "forbidden", "Token lacks the '${scope.name.lowercase()}' scope")
 
         fun notFound(what: String) = ApiException(404, "not_found", what)
 

@@ -1,6 +1,7 @@
 package net.die.phoneapi.wait
 
 import net.die.phoneapi.a11y.UiStates
+import net.die.phoneapi.model.NodeState
 import net.die.phoneapi.model.UiNode
 
 /**
@@ -8,34 +9,27 @@ import net.die.phoneapi.model.UiNode
  * null when nothing matched).
  */
 internal object NodeConditions {
-    const val PRESENT = "present"
-    const val ABSENT = "absent"
-
-    private val TESTS: Map<String, (UiNode?) -> Boolean> =
+    private val TESTS: Map<NodeState, (UiNode?) -> Boolean> =
         mapOf(
-            PRESENT to { node -> node != null },
-            ABSENT to { node -> node == null },
-            "visible" to { node -> node != null },
-            "enabled" to { node -> node.has { UiStates.DISABLED !in it } },
-            "disabled" to { node -> node.has { UiStates.DISABLED in it } },
-            "checked" to { node -> node.has { UiStates.CHECKED in it } },
-            "unchecked" to
+            NodeState.PRESENT to { node -> node != null },
+            NodeState.ABSENT to { node -> node == null },
+            NodeState.VISIBLE to { node -> node != null },
+            NodeState.ENABLED to { node -> node.has { UiStates.DISABLED !in it } },
+            NodeState.DISABLED to { node -> node.has { UiStates.DISABLED in it } },
+            NodeState.CHECKED to { node -> node.has { UiStates.CHECKED in it } },
+            NodeState.UNCHECKED to
                 { node ->
                     node.has { UiStates.CHECKABLE in it && UiStates.CHECKED !in it }
                 },
-            "focused" to { node -> node.has { UiStates.FOCUSED in it } },
-            "selected" to { node -> node.has { UiStates.SELECTED in it } },
+            NodeState.FOCUSED to { node -> node.has { UiStates.FOCUSED in it } },
+            NodeState.SELECTED to { node -> node.has { UiStates.SELECTED in it } },
         )
 
-    val names: Set<String>
-        get() = TESTS.keys
-
-    /** The test for [state], or null when the name is not one of [names]. */
-    fun test(state: String): ((UiNode?) -> Boolean)? = TESTS[state.trim().lowercase()]
+    fun test(state: NodeState): (UiNode?) -> Boolean = TESTS.getValue(state)
 
     /** `present` and `absent` look at the whole tree; every other state needs a visible node. */
-    fun includeInvisible(state: String): Boolean =
-        state.trim().lowercase().let { it == PRESENT || it == ABSENT }
+    fun includeInvisible(state: NodeState): Boolean =
+        state == NodeState.PRESENT || state == NodeState.ABSENT
 }
 
 private inline fun UiNode?.has(predicate: (List<String>) -> Boolean): Boolean =

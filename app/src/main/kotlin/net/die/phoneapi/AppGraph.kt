@@ -23,6 +23,7 @@ import net.die.phoneapi.a11y.require
 import net.die.phoneapi.apps.AppsServiceImpl
 import net.die.phoneapi.browser.BrowserServiceImpl
 import net.die.phoneapi.browser.ContentFrame
+import net.die.phoneapi.browser.HelperCdpPipes
 import net.die.phoneapi.browser.HelperDevtoolsSocket
 import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.core.AppsService
@@ -33,6 +34,7 @@ import net.die.phoneapi.core.EventBus
 import net.die.phoneapi.core.InputService
 import net.die.phoneapi.core.PowerService
 import net.die.phoneapi.core.SettingsStore
+import net.die.phoneapi.core.TlsPasswordStore
 import net.die.phoneapi.core.UiService
 import net.die.phoneapi.core.WaitService
 import net.die.phoneapi.helperclient.HelperConnection
@@ -54,11 +56,15 @@ import net.die.phoneapi.model.HelperStatus
 import net.die.phoneapi.power.PinStore
 import net.die.phoneapi.power.PowerServiceImpl
 import net.die.phoneapi.server.ApiServer
+import net.die.phoneapi.server.AudioFeed
+import net.die.phoneapi.server.DeviceFacts
 import net.die.phoneapi.server.MdnsAdvertiser
 import net.die.phoneapi.server.NetworkWatcher
 import net.die.phoneapi.server.ServerController
+import net.die.phoneapi.server.ServerServices
 import net.die.phoneapi.server.TlsManager
 import net.die.phoneapi.server.TokenStore
+import net.die.phoneapi.server.VideoFeed
 import net.die.phoneapi.stream.AudioStream
 import net.die.phoneapi.stream.StreamLease
 import net.die.phoneapi.stream.VideoStream
@@ -76,7 +82,7 @@ class AppGraph(
     val settings = SettingsStore(filesDir)
     val tokens = TokenStore(filesDir)
     val tls by lazy {
-        TlsManager(filesDir, settings.current.keystorePassword.toCharArray())
+        TlsManager(filesDir, TlsPasswordStore(filesDir).chars())
     }
     val state = DeviceStateTracker(context, bus)
     val helper =
@@ -153,6 +159,32 @@ class AppGraph(
         )
     internal val audio = AudioStream(StreamLease(context, settings), helper, ioDispatcher)
 
+    val services =
+        ServerServices(
+            ui = ui,
+            input = input,
+            apps = apps,
+            waits = waits,
+            browser = browser,
+            power = { requirePower() },
+            tokens = tokens,
+            ioDispatcher = ioDispatcher,
+            device = GraphDevice(deviceInfo),
+            screenshots = { scale -> this.screenshots.png(scale) },
+            writePin = { pin -> pins.write(pin) },
+            events = bus.events,
+            video = VideoFeed { session, spec -> this.video.serve(session, spec) },
+            audio = AudioFeed { session -> this.audio.serve(session) },
+            viewerHtml = {
+                withContext(ioDispatcher) {
+                    context.assets.open("viewer.html").use { it.readBytes() }
+                }
+            },
+            shell = { argv -> this.shell.exec(argv) },
+            cdp = HelperCdpPipes(helper, ioDispatcher),
+            viewerText = { viewerLink() },
+        )
+
     val server = ApiServer(this)
     val serverController =
         ServerController(scope, server, network, settings, MdnsAdvertiser(context))
@@ -162,7 +194,7 @@ class AppGraph(
         BrowserServiceImpl(
             io = ioDispatcher,
             listSockets = { helper.require().listDevtoolsSockets() },
-            open = { name -> HelperDevtoolsSocket(helper, name) },
+            open = { name -> HelperDevtoolsSocket(helper, name, dispatcher = ioDispatcher) },
             contentBounds = { pkg -> ContentFrame.find(a11y.require().windows, pkg.orEmpty()) },
             touchAt = { rect, humanize, backend ->
                 val outcome = touch.tap(rect, humanize = humanize, backend = backend)
@@ -173,6 +205,9 @@ class AppGraph(
                     message = if (outcome.ok) null else "The system cancelled the gesture",
                 )
             },
+            prepare = { autoWake -> prepareForAction(autoWake) },
+            sequence = { uiTracker.seq.value },
+            invalidateSnapshots = { snapshots.invalidate() },
         )
 
     fun start() {
@@ -203,4 +238,20 @@ class AppGraph(
         power?.prepareForAction(autoWake, allowLocked) == true
 
     fun screenRect(): Rect = deviceInfo.display().let { Rect(0, 0, it.widthPx, it.heightPx) }
+
+    private fun viewerLink(): String {
+        val port = settings.current.port
+        val host = network.lanAddress.value?.hostAddress ?: "127.0.0.1"
+        return "https://$host:$port/viewer?access_token=TOKEN\n" +
+            "Replace TOKEN with this device's bearer token. " +
+            "The query parameter is accepted only by GET /viewer and by WebSocket upgrades."
+    }
+}
+
+private class GraphDevice(private val provider: DeviceInfoProvider) : DeviceFacts {
+    override fun info() = provider.info()
+
+    override fun capabilities() = provider.capabilities()
+
+    override fun versionName() = provider.versionName()
 }

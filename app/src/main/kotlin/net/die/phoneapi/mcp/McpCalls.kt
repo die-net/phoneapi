@@ -1,20 +1,21 @@
 package net.die.phoneapi.mcp
 
-import android.util.Base64
 import io.modelcontextprotocol.kotlin.sdk.types.CallToolRequest
 import io.modelcontextprotocol.kotlin.sdk.types.CallToolResult
 import io.modelcontextprotocol.kotlin.sdk.types.ImageContent
 import io.modelcontextprotocol.kotlin.sdk.types.TextContent
+import java.util.Base64
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.serializer
-import net.die.phoneapi.AppGraph
 import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.core.ApiJson
+import net.die.phoneapi.core.ScreenshotScale
 import net.die.phoneapi.core.SnapshotOptions
+import net.die.phoneapi.core.windowId
 import net.die.phoneapi.model.ActionMode
 import net.die.phoneapi.model.BrowserTapRequest
 import net.die.phoneapi.model.ConsoleRequest
@@ -30,185 +31,218 @@ import net.die.phoneapi.model.SwipeRequest
 import net.die.phoneapi.model.TapRequest
 import net.die.phoneapi.model.TextRequest
 import net.die.phoneapi.model.UnlockRequest
+import net.die.phoneapi.model.WaitCondition
 import net.die.phoneapi.model.WaitRequest
-import net.die.phoneapi.wait.isBrowserCondition
+import net.die.phoneapi.model.schema.Doc
+import net.die.phoneapi.server.ServerServices
+import net.die.phoneapi.wait.requireWaitAccess
 
-internal suspend fun deviceInfo(graph: AppGraph): CallToolResult = runTool {
-    jsonText(graph.deviceInfo.info())
+internal suspend fun deviceInfo(services: ServerServices): CallToolResult = runTool {
+    jsonText(services.device.info())
 }
 
-internal suspend fun uiSnapshot(graph: AppGraph, request: CallToolRequest): CallToolResult =
-    runTool {
-        val args = request.args<SnapshotArgs>()
-        val snapshot =
-            graph.ui.snapshot(
-                SnapshotOptions(
-                    format = SnapshotFormat.COMPACT,
-                    windowId = args.window?.let(::windowId),
-                    maxDepth = args.maxDepth,
-                    includeInvisible = args.includeInvisible,
-                    allWindows = args.all,
-                    autoWake = args.autoWake,
-                )
+internal suspend fun uiSnapshot(
+    services: ServerServices,
+    request: CallToolRequest,
+): CallToolResult = runTool {
+    val args = request.args<SnapshotArgs>()
+    val snapshot =
+        services.ui.snapshot(
+            SnapshotOptions(
+                format = SnapshotFormat.COMPACT,
+                windowId = args.window?.let(::windowId),
+                maxDepth = args.maxDepth,
+                includeInvisible = args.includeInvisible,
+                allWindows = args.all,
+                autoWake = args.autoWake,
             )
-        snapshot.compact ?: "(empty snapshot)"
+        )
+    snapshot.compact ?: "(empty snapshot)"
+}
+
+internal suspend fun uiFind(services: ServerServices, request: CallToolRequest): CallToolResult =
+    runTool {
+        jsonText(services.ui.find(request.args<FindRequest>()))
     }
 
-internal suspend fun uiFind(graph: AppGraph, request: CallToolRequest): CallToolResult = runTool {
-    jsonText(graph.ui.find(request.args<FindRequest>()))
-}
-
-internal suspend fun uiAct(graph: AppGraph, request: CallToolRequest): CallToolResult = runTool {
-    val args = request.args<NodeActArgs>()
-    jsonText(
-        graph.ui.act(
-            args.ref,
-            NodeActionRequest(
-                action = args.action,
-                mode = args.mode,
-                text = args.text,
-                force = args.force,
-                autoWake = args.autoWake,
-            ),
+internal suspend fun uiAct(services: ServerServices, request: CallToolRequest): CallToolResult =
+    runTool {
+        val args = request.args<NodeActArgs>()
+        jsonText(
+            services.ui.act(
+                args.ref,
+                NodeActionRequest(
+                    action = args.action,
+                    mode = args.mode,
+                    text = args.text,
+                    force = args.force,
+                    autoWake = args.autoWake,
+                ),
+            )
         )
-    )
-}
+    }
 
-internal suspend fun tap(graph: AppGraph, request: CallToolRequest): CallToolResult = runTool {
-    jsonText(graph.input.tap(request.args<TapRequest>()))
-}
+internal suspend fun tap(services: ServerServices, request: CallToolRequest): CallToolResult =
+    runTool {
+        jsonText(services.input.tap(request.args<TapRequest>()))
+    }
 
-internal suspend fun swipe(graph: AppGraph, request: CallToolRequest): CallToolResult = runTool {
-    jsonText(graph.input.swipe(request.args<SwipeRequest>()))
-}
+internal suspend fun swipe(services: ServerServices, request: CallToolRequest): CallToolResult =
+    runTool {
+        jsonText(services.input.swipe(request.args<SwipeRequest>()))
+    }
 
-internal suspend fun typeText(graph: AppGraph, request: CallToolRequest): CallToolResult = runTool {
-    jsonText(graph.input.text(request.args<TextRequest>()))
-}
+internal suspend fun typeText(services: ServerServices, request: CallToolRequest): CallToolResult =
+    runTool {
+        jsonText(services.input.text(request.args<TextRequest>()))
+    }
 
-internal suspend fun pressKey(graph: AppGraph, request: CallToolRequest): CallToolResult = runTool {
-    jsonText(graph.input.key(request.args<KeyRequest>()))
-}
+internal suspend fun pressKey(services: ServerServices, request: CallToolRequest): CallToolResult =
+    runTool {
+        jsonText(services.input.key(request.args<KeyRequest>()))
+    }
 
 internal suspend fun waitFor(
-    graph: AppGraph,
+    services: ServerServices,
     scopes: Set<Scope>,
     request: CallToolRequest,
 ): CallToolResult = runTool {
-    val args = request.args<WaitRequest>().copy(snapshotFormat = SnapshotFormat.COMPACT)
-    if ((args.all + args.any).any(::isBrowserCondition) && Scope.BROWSER !in scopes) {
-        throw ApiException.badRequest("Browser wait conditions need the browser scope")
-    }
-    val result = graph.waits.wait(args)
+    val args = request.args<WaitArgs>()
+    val wait =
+        WaitRequest(
+            all = args.all,
+            any = args.any,
+            timeoutMs = args.timeoutMs,
+            settleMs = args.settleMs,
+            snapshot = args.snapshot,
+            snapshotFormat = SnapshotFormat.COMPACT,
+        )
+    requireWaitAccess(wait, scopes)
+    val result = services.waits.wait(wait, scopes)
     val header =
         "matched=${result.matched} timedOut=${result.timedOut} elapsedMs=${result.elapsedMs}"
     val body = result.snapshot?.compact
     if (body.isNullOrBlank()) header else "$header\n$body"
 }
 
-internal suspend fun keyboardHide(graph: AppGraph): CallToolResult = runTool {
-    jsonText(graph.input.hideIme())
+internal suspend fun keyboardHide(services: ServerServices): CallToolResult = runTool {
+    jsonText(services.input.hideIme())
 }
 
-internal suspend fun appLaunch(graph: AppGraph, request: CallToolRequest): CallToolResult =
+internal suspend fun appLaunch(services: ServerServices, request: CallToolRequest): CallToolResult =
     runTool {
         val args = request.args<PackageArgs>()
         jsonText(
-            graph.apps.launch(
+            services.apps.launch(
                 args.packageName,
                 LaunchRequest(fresh = args.fresh, activity = args.activity, wait = args.wait),
             )
         )
     }
 
-internal suspend fun appStop(graph: AppGraph, request: CallToolRequest): CallToolResult = runTool {
-    jsonText(graph.apps.stop(request.args<PackageArgs>().packageName))
-}
-
-internal suspend fun appClear(graph: AppGraph, request: CallToolRequest): CallToolResult = runTool {
-    jsonText(graph.apps.clear(request.args<PackageArgs>().packageName))
-}
-
-internal suspend fun openIntent(graph: AppGraph, request: CallToolRequest): CallToolResult =
+internal suspend fun appStop(services: ServerServices, request: CallToolRequest): CallToolResult =
     runTool {
-        jsonText(graph.apps.intent(request.args<IntentRequest>()))
+        jsonText(services.apps.stop(request.args<PackageNameArgs>().packageName))
     }
 
-internal suspend fun deviceWake(graph: AppGraph): CallToolResult = runTool {
-    jsonText(graph.requirePower().wake())
-}
-
-internal suspend fun deviceUnlock(graph: AppGraph): CallToolResult = runTool {
-    jsonText(graph.requirePower().unlock(UnlockRequest()))
-}
-
-internal suspend fun deviceLock(graph: AppGraph): CallToolResult = runTool {
-    jsonText(graph.requirePower().lock())
-}
-
-internal suspend fun browserTargets(graph: AppGraph): CallToolResult = runTool {
-    jsonText(graph.browser.targets())
-}
-
-internal suspend fun browserOpen(graph: AppGraph, request: CallToolRequest): CallToolResult =
+internal suspend fun appClear(services: ServerServices, request: CallToolRequest): CallToolResult =
     runTool {
-        jsonText(graph.browser.openTab(request.args<UrlArgs>().url))
+        jsonText(services.apps.clear(request.args<PackageNameArgs>().packageName))
     }
 
-internal suspend fun browserNavigate(graph: AppGraph, request: CallToolRequest): CallToolResult =
-    runTool {
-        val args = request.args<TargetUrlArgs>()
-        jsonText(graph.browser.navigate(args.target, args.url))
-    }
+internal suspend fun openIntent(
+    services: ServerServices,
+    request: CallToolRequest,
+): CallToolResult = runTool {
+    jsonText(services.apps.intent(request.args<IntentRequest>()))
+}
 
-internal suspend fun browserSnapshot(graph: AppGraph, request: CallToolRequest): CallToolResult =
-    runTool {
-        val snapshot = graph.browser.snapshot(request.args<TargetArgs>().target)
-        snapshot.compact
-    }
+internal suspend fun deviceWake(services: ServerServices): CallToolResult = runTool {
+    jsonText(services.power().wake())
+}
 
-internal suspend fun browserTap(graph: AppGraph, request: CallToolRequest): CallToolResult =
-    runTool {
-        val args = request.args<BrowserTapArgs>()
-        val woke = graph.prepareForAction(args.autoWake)
-        val result =
-            graph.browser.tap(
-                args.target,
-                BrowserTapRequest(
-                    ref = args.ref,
-                    selector = args.selector,
-                    humanize = args.humanize,
-                    autoWake = args.autoWake,
-                ),
-            )
-        jsonText(result.copy(woke = woke, seq = graph.uiTracker.seq.value))
-    }
+internal suspend fun deviceUnlock(services: ServerServices): CallToolResult = runTool {
+    jsonText(services.power().unlock(UnlockRequest()))
+}
 
-internal suspend fun browserEval(graph: AppGraph, request: CallToolRequest): CallToolResult =
-    runTool {
-        val args = request.args<EvalArgs>()
-        jsonText(
-            graph.browser.evaluate(args.target, EvalRequest(args.expression, args.awaitPromise))
+internal suspend fun deviceLock(services: ServerServices): CallToolResult = runTool {
+    jsonText(services.power().lock())
+}
+
+internal suspend fun browserTargets(services: ServerServices): CallToolResult = runTool {
+    jsonText(services.browser.targets())
+}
+
+internal suspend fun browserOpen(
+    services: ServerServices,
+    request: CallToolRequest,
+): CallToolResult = runTool {
+    jsonText(services.browser.openTab(request.args<UrlArgs>().url))
+}
+
+internal suspend fun browserNavigate(
+    services: ServerServices,
+    request: CallToolRequest,
+): CallToolResult = runTool {
+    val args = request.args<TargetUrlArgs>()
+    jsonText(services.browser.navigate(args.target, args.url))
+}
+
+internal suspend fun browserSnapshot(
+    services: ServerServices,
+    request: CallToolRequest,
+): CallToolResult = runTool {
+    val snapshot = services.browser.snapshot(request.args<TargetArgs>().target)
+    snapshot.compact
+}
+
+internal suspend fun browserTap(
+    services: ServerServices,
+    request: CallToolRequest,
+): CallToolResult = runTool {
+    val args = request.args<BrowserTapArgs>()
+    jsonText(
+        services.browser.tap(
+            args.target,
+            BrowserTapRequest(
+                ref = args.ref,
+                selector = args.selector,
+                humanize = args.humanize,
+                autoWake = args.autoWake,
+            ),
         )
-    }
+    )
+}
 
-internal suspend fun browserConsole(graph: AppGraph, request: CallToolRequest): CallToolResult =
-    runTool {
-        val args = request.args<ConsoleArgs>()
-        jsonText(graph.browser.console(args.target, ConsoleRequest(args.timeoutMs)))
-    }
+internal suspend fun browserEval(
+    services: ServerServices,
+    request: CallToolRequest,
+): CallToolResult = runTool {
+    val args = request.args<EvalArgs>()
+    jsonText(
+        services.browser.evaluate(args.target, EvalRequest(args.expression, args.awaitPromise))
+    )
+}
 
-internal suspend fun screenshot(graph: AppGraph, request: CallToolRequest): CallToolResult =
+internal suspend fun browserConsole(
+    services: ServerServices,
+    request: CallToolRequest,
+): CallToolResult = runTool {
+    val args = request.args<ConsoleArgs>()
+    jsonText(services.browser.console(args.target, ConsoleRequest(args.timeoutMs)))
+}
+
+internal suspend fun screenshot(
+    services: ServerServices,
+    request: CallToolRequest,
+): CallToolResult =
     try {
         val scale = request.args<ScaleArgs>().scale
-        if (scale !in MIN_SCALE..MAX_SCALE) {
-            throw ApiException.badRequest("scale must be $MIN_SCALE..$MAX_SCALE")
-        }
-        val png = graph.screenshots.png(scale)
+        val png = services.screenshots(scale)
         if (png.size > MAX_PNG_BYTES) {
             throw ApiException.badRequest("Screenshot is too large; pass a smaller scale")
         }
-        val data = Base64.encodeToString(png, Base64.NO_WRAP)
+        val data = Base64.getEncoder().encodeToString(png)
         CallToolResult(content = listOf(ImageContent(data = data, mimeType = "image/png")))
     } catch (e: CancellationException) {
         throw e
@@ -218,23 +252,24 @@ internal suspend fun screenshot(graph: AppGraph, request: CallToolRequest): Call
         toolFailure("bad_request: ${e.message.orEmpty()}")
     }
 
-internal suspend fun logcatTail(graph: AppGraph, request: CallToolRequest): CallToolResult =
-    runTool {
-        val args = request.args<LogcatArgs>()
-        if (args.lines !in 1..MAX_LOG_LINES) {
-            throw ApiException.badRequest("lines must be 1..$MAX_LOG_LINES")
-        }
-        val tag = args.tag
-        if (tag != null && !LOG_TAG.matches(tag)) {
-            throw ApiException.badRequest("tag must be letters, digits, dots, or underscores")
-        }
-        val argv = mutableListOf("logcat", "-d", "-t", args.lines.toString())
-        if (tag != null) argv += "$tag:I"
-        val result = graph.shell.exec(argv)
-        if (!result.ok)
-            throw ApiException(503, "helper_error", result.stderr.ifBlank { result.stdout })
-        result.stdout
+internal suspend fun logcatTail(
+    services: ServerServices,
+    request: CallToolRequest,
+): CallToolResult = runTool {
+    val args = request.args<LogcatArgs>()
+    if (args.lines !in 1..MAX_LOG_LINES) {
+        throw ApiException.badRequest("lines must be 1..$MAX_LOG_LINES")
     }
+    val tag = args.tag
+    if (tag != null && !LOG_TAG.matches(tag)) {
+        throw ApiException.badRequest("tag must be letters, digits, dots, or underscores")
+    }
+    val argv = mutableListOf("logcat", "-d", "-t", args.lines.toString())
+    if (tag != null) argv += "$tag:I"
+    val result = services.shell(argv)
+    if (!result.ok) throw ApiException(503, "helper_error", result.stderr.ifBlank { result.stdout })
+    result.stdout
+}
 
 private suspend fun runTool(block: suspend () -> String): CallToolResult =
     try {
@@ -266,45 +301,47 @@ private inline fun <reified T> CallToolRequest.args(): T {
     return ApiJson.decodeFromJsonElement(serializer<T>(), arguments)
 }
 
-private fun windowId(value: String): Int =
-    value.removePrefix("w").toIntOrNull()
-        ?: throw ApiException.badRequest("window must be a window id like 3 or w3")
-
 @Serializable
-private data class SnapshotArgs(
-    val window: String? = null,
+internal data class SnapshotArgs(
+    @Doc("Window id, such as 3 or w3. Defaults to the active window.") val window: String? = null,
     val maxDepth: Int? = null,
     val includeInvisible: Boolean = false,
-    val all: Boolean = false,
+    @Doc("Include system windows.") val all: Boolean = false,
     val autoWake: Boolean = true,
 )
 
 @Serializable
-private data class NodeActArgs(
-    val ref: String,
+internal data class NodeActArgs(
+    @Doc("Node ref from ui_snapshot or ui_find, such as e12.") val ref: String,
+    @Doc(
+        "Standard action such as click, longClick, setText, scrollForward or imeEnter, or a custom action label listed on the node in the snapshot."
+    )
     val action: String,
+    @Doc("real uses a touch where it can. semantic calls performAction and generates no touch.")
     val mode: ActionMode = ActionMode.REAL,
     val text: String? = null,
     val force: Boolean = false,
     val autoWake: Boolean = true,
 )
 
+@Serializable internal data class PackageNameArgs(@SerialName("package") val packageName: String)
+
 @Serializable
-private data class PackageArgs(
+internal data class PackageArgs(
     @SerialName("package") val packageName: String,
     val fresh: Boolean = false,
     val activity: String? = null,
     val wait: Boolean = true,
 )
 
-@Serializable private data class UrlArgs(val url: String)
+@Serializable internal data class UrlArgs(val url: String)
 
-@Serializable private data class TargetArgs(val target: String)
+@Serializable internal data class TargetArgs(val target: String)
 
-@Serializable private data class TargetUrlArgs(val target: String, val url: String)
+@Serializable internal data class TargetUrlArgs(val target: String, val url: String)
 
 @Serializable
-private data class BrowserTapArgs(
+internal data class BrowserTapArgs(
     val target: String,
     val ref: String? = null,
     val selector: String? = null,
@@ -313,20 +350,38 @@ private data class BrowserTapArgs(
 )
 
 @Serializable
-private data class EvalArgs(
+internal data class EvalArgs(
     val target: String,
     val expression: String,
     val awaitPromise: Boolean = false,
 )
 
-@Serializable private data class ConsoleArgs(val target: String, val timeoutMs: Long = 1_000)
+@Serializable internal data class ConsoleArgs(val target: String, val timeoutMs: Long = 1_000)
 
-@Serializable private data class ScaleArgs(val scale: Float = 0.5f)
+@Serializable
+internal data class ScaleArgs(
+    @Doc("Scale from 0.1 to 1. Defaults to 0.5, which is smaller than the REST default.")
+    val scale: Float = ScreenshotScale.MCP
+)
 
-@Serializable private data class LogcatArgs(val lines: Int = 80, val tag: String? = null)
+@Serializable internal data class LogcatArgs(val lines: Int = 80, val tag: String? = null)
+
+@Serializable internal class EmptyArgs
+
+@Serializable
+internal data class WaitArgs(
+    @Doc(
+        "Every condition must match. Each object's type is node, window, ime, idle, screen, keyguard, or browser.*."
+    )
+    val all: List<WaitCondition> = emptyList(),
+    @Doc("At least one condition must match. Same types as all.")
+    val any: List<WaitCondition> = emptyList(),
+    @Doc("Give up after this many milliseconds.") val timeoutMs: Long = 10_000,
+    @Doc("After a match, keep waiting until the UI is quiet for this many milliseconds.")
+    val settleMs: Long = 0,
+    @Doc("Include a fresh UI snapshot in the result.") val snapshot: Boolean = false,
+)
 
 private val LOG_TAG = Regex("[A-Za-z0-9._-]{1,80}")
-private const val MIN_SCALE = 0.1f
-private const val MAX_SCALE = 1f
 private const val MAX_PNG_BYTES = 1_500_000
 private const val MAX_LOG_LINES = 400

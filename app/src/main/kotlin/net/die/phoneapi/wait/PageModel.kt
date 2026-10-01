@@ -6,7 +6,11 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
 import net.die.phoneapi.browser.decodeCdp
 import net.die.phoneapi.core.ApiException
+import net.die.phoneapi.model.LogLevel
+import net.die.phoneapi.model.Scope
 import net.die.phoneapi.model.WaitCondition
+import net.die.phoneapi.model.WaitRequest
+import net.die.phoneapi.model.wire
 
 /**
  * What one page has done since a wait started. Updated from CDP events; queried by the wait
@@ -99,10 +103,10 @@ internal class PageModel(startedMs: Long) {
         return status == null || request.status == status
     }
 
-    fun logMatched(level: String?, textContains: String?): Boolean =
+    fun logMatched(level: LogLevel?, textContains: String?): Boolean =
         synchronized(lock) {
             logs.any { hit ->
-                (level == null || hit.level.equals(level, ignoreCase = true)) &&
+                (level == null || hit.level.equals(level.wire, ignoreCase = true)) &&
                     (textContains == null || hit.text.contains(textContains))
             }
         }
@@ -236,6 +240,13 @@ internal class TargetModel {
     }
 }
 
+/** `browser.*` reads DevTools, so it needs the browser scope before any session is opened. */
+internal fun requireWaitAccess(request: WaitRequest, scopes: Set<Scope>) {
+    if ((request.all + request.any).any(::isBrowserCondition) && Scope.BROWSER !in scopes) {
+        throw ApiException.forbidden(Scope.BROWSER)
+    }
+}
+
 internal fun isBrowserCondition(condition: WaitCondition): Boolean =
     when (condition) {
         is WaitCondition.BrowserUrl,
@@ -310,8 +321,6 @@ private fun elementCondition(condition: WaitCondition.BrowserElement) {
     if (condition.selector.isBlank() || condition.selector.length > MAX_SELECTOR) {
         bad("selector must be 1..$MAX_SELECTOR characters")
     }
-    if (condition.by !in ELEMENT_BY) bad("by must be css, xpath, or text")
-    if (condition.state !in ELEMENT_STATE) bad("state must be present, absent, or visible")
 }
 
 private fun requestCondition(condition: WaitCondition.BrowserRequest) {
@@ -368,6 +377,4 @@ private fun bad(message: String): Nothing = throw ApiException.badRequest(messag
 
 @Serializable private data class TargetInfoBody(val type: String? = null, val url: String? = null)
 
-private val ELEMENT_BY = setOf("css", "xpath", "text")
-private val ELEMENT_STATE = setOf("present", "absent", "visible")
 private const val MAX_SELECTOR = 1_000

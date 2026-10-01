@@ -56,7 +56,7 @@ Open PhoneAPI and turn the accessibility service on if the settings write does n
 
 ## Authentication
 
-Every request needs `Authorization: Bearer <token>`. A missing or unknown token gets an empty 404. WebSocket clients that cannot set headers may pass `access_token` as a query parameter. The certificate is self-signed; pin `certSha256` from the pairing file.
+Every request needs `Authorization: Bearer <token>`. A missing or unknown token gets an empty 404. The `access_token` query parameter is accepted only on `GET /viewer` and on WebSocket upgrades, which is how the viewer page opens its video and audio sockets. Every other route ignores it and still requires the header. The certificate is self-signed; pin `certSha256` from the pairing file.
 
 Tokens carry scopes: `observe`, `control`, `browser`, `stream`, and `admin`. `CREATE_TOKEN` from ADB grants all of them. Create a narrower token with `POST /v1/tokens`.
 
@@ -73,6 +73,8 @@ scripts/papi WS /v1/events
 ## Helper
 
 The helper is a separate `app_process` that registers a binder with the app. `/v1/device` reports it as `running`, `starting`, `needs_pairing`, `needs_usb`, or `stopped`. `capabilities` shrinks to what works in the current state.
+
+`stream.video.projection` and `stream.audio.playbackCapture` stay in the map and are always `false`: this build has no MediaProjection or AudioPlaybackCapture path. Video uses the helper display mirror (`stream.video.mirror`). Audio uses the helper's remote submix (`stream.audio.submix`, Android 11+). The other flags follow the code that implements them: accessibility snapshots and gestures, helper injection, the Android 13 input method, helper key events, accessibility and helper screenshots, stable node ids on Android 13+, helper app management, logcat, and Chrome DevTools, low-latency encoder requests and Wireless Debugging on Android 11+, and `WRITE_SECURE_SETTINGS`.
 
 | Status | Meaning |
 | --- | --- |
@@ -108,10 +110,12 @@ Wait until a window is in front, then launch or stop an app:
 
 ```sh
 scripts/papi POST /v1/wait \
-  '{"conditions":[{"type":"window","package":"com.android.settings"}],"timeoutMs":10000}'
+  '{"all":[{"type":"window","package":"com.android.settings"}],"timeoutMs":10000}'
 scripts/papi POST /v1/apps/com.android.settings/launch
 scripts/papi POST /v1/apps/com.android.settings/stop
 ```
+
+A `browser.*` condition also needs the browser scope, on REST and on the MCP `wait_for` tool. An observe-only token is `403 forbidden` for that wait. Node, window, and the other non-browser conditions stay on the observe scope.
 
 Drive Chrome. The helper must be running, and Chrome must be publishing `@chrome_devtools_remote`. A target id looks like `chrome_devtools_remote~<page id>`.
 
@@ -128,13 +132,27 @@ On a debuggable emulator image, Chrome only publishes that socket after it is st
 
 Open the viewer at `https://<host>:<port>/viewer` with the stream scope. It plays `WS /v1/stream/video` and `WS /v1/stream/audio` with WebCodecs. The certificate warning is the self-signed dev certificate.
 
-Point an MCP client at `https://<host>:<port>/mcp` with the same bearer token. The server is stateless Streamable HTTP. `tools/list` includes `device_info`, `ui_snapshot`, input and app tools, `browser_*`, `screenshot`, and `logcat_tail`. A tool is omitted when the token lacks its scope or the capability is false. Resources: `phoneapi://device/capabilities` and `phoneapi://viewer`.
+Point an MCP client at `https://<host>:<port>/mcp` with the same bearer token. `access_token` is not accepted on `/mcp`. The server is stateless Streamable HTTP. `tools/list` includes `device_info`, `ui_snapshot`, input and app tools, `browser_*`, `screenshot`, and `logcat_tail`. A tool is omitted when the token lacks its scope or the capability is false. Each tool's input schema is generated from the Kotlin type that tool decodes, so fields such as `tap.count` cannot drift out of the schema. When a tool is still available through a weaker backend (accessibility gestures without helper injection, or node ids that are not stable), its description says so. Resources: `phoneapi://device/capabilities` and `phoneapi://viewer`.
+
+`GET /v1/openapi.json` (observe scope) is an OpenAPI 3.1 document generated from the same types. Bearer auth is the `bearer` security scheme, and each operation has `x-scope`. WebSocket routes are marked with `x-websocket`.
+
+Closed request fields are enums. A value outside the set is a `400` `bad_request` on REST and a tool error on MCP. Matching is case-insensitive for node state, swipe direction, log level, and node action.
+
+| Field | Values |
+| --- | --- |
+| Wait node `state` | `present`, `absent`, `visible`, `enabled`, `disabled`, `checked`, `unchecked`, `focused`, `selected` |
+| Browser element `by` | `css`, `xpath`, `text` |
+| Browser element `state` | `present`, `absent`, `visible` |
+| Browser log `level` | `verbose`, `info`, `warning`, `error` |
+| Swipe `direction` | `up`, `down`, `left`, `right` |
+| Node `action` | The accessibility catalog: `click`, `longClick`, `focus`, `clearFocus`, `select`, `setText`, `scrollForward`, `scrollBackward`, `expand`, `collapse`, `dismiss`, `showOnScreen`, `imeEnter`, and the other standard names (`scrollUp`, `copy`, `paste`, …). App-defined action labels are rejected. |
 
 ## API
 
 | Method | Path | Scope |
 | --- | --- | --- |
 | `GET` | `/v1/device` | observe |
+| `GET` | `/v1/openapi.json` | observe |
 | `POST` | `/v1/device/wake`, `/unlock`, `/lock` | control |
 | `PUT`, `DELETE` | `/v1/device/pin` | admin |
 | `GET` | `/v1/ui/snapshot` | observe |
@@ -147,7 +165,7 @@ Point an MCP client at `https://<host>:<port>/mcp` with the same bearer token. T
 | `POST` | `/v1/apps/{pkg}/launch` | control |
 | `POST` | `/v1/apps/{pkg}/stop`, `/clear` | control, helper |
 | `POST` | `/v1/intents` | control |
-| `POST` | `/v1/wait` | observe |
+| `POST` | `/v1/wait` | observe; `browser.*` also needs browser |
 | `GET` | `/v1/browser/targets` | browser, helper |
 | `POST` | `/v1/browser/tabs` | browser, helper |
 | `POST` | `/v1/browser/targets/{id}/navigate`, `/tap`, `/evaluate`, `/console` | browser, helper |

@@ -6,10 +6,16 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.net.SocketTimeoutException
 import java.util.Collections
-import java.util.concurrent.ConcurrentHashMap
+import java.util.LinkedHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.cancellation.CancellationException
+import kotlin.coroutines.coroutineContext
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
@@ -50,28 +56,52 @@ internal class BrowserServiceImpl(
     private val touchAt: suspend (Rect, Boolean, InputBackend) -> ActionResult = { _, _, _ ->
         ActionResult(ok = false)
     },
+    private val targetTimeoutMs: Long = TARGET_LIST_MS,
+    private val axTreeCap: Int = AX_TREE_CACHE_CAP,
+    private val prepare: suspend (Boolean) -> Boolean = { false },
+    private val sequence: () -> Long = { 0L },
+    private val invalidateSnapshots: () -> Unit = {},
 ) : BrowserService {
-    private val axTrees = ConcurrentHashMap<String, JsonObject>()
+    private val axTrees = newAxCache()
+
+    private fun newAxCache(): AxTreeCache = AxTreeCache(axTreeCap)
 
     override suspend fun targets(): List<BrowserTarget> {
-        val sockets = socketList()
-        val out = ArrayList<BrowserTarget>()
-        val failures = ArrayList<String>()
-        var status = 502
-        for (socket in sockets) {
-            try {
-                out += listOne(socket)
-            } catch (e: ApiException) {
-                if (e.error == "helper_unavailable") throw e
-                status = e.status
-                failures += e.message ?: e.error
-            }
-        }
-        if (out.isEmpty() && failures.isNotEmpty()) {
-            throw ApiException(status, "cdp_error", failures.joinToString("; "))
-        }
-        return out
+        val found = queryTargets(socketList())
+        axTrees.retain(found.map { it.id }.toSet())
+        return found
     }
+
+    private suspend fun queryTargets(sockets: List<HelperSocket>): List<BrowserTarget> =
+        coroutineScope {
+            val results = sockets.map { socket -> async { listQuietly(socket) } }.awaitAll()
+            val out = ArrayList<BrowserTarget>()
+            val failures = ArrayList<ApiException>()
+            for (result in results) {
+                when (result) {
+                    is SocketList.Ready -> out += result.targets
+                    is SocketList.Failed -> failures += result.error
+                }
+            }
+            if (out.isEmpty() && failures.isNotEmpty()) {
+                throw ApiException(
+                    failures.last().status,
+                    "cdp_error",
+                    failures.joinToString("; ") { it.message ?: it.error },
+                )
+            }
+            out
+        }
+
+    private suspend fun listQuietly(socket: HelperSocket): SocketList =
+        try {
+            SocketList.Ready(listOne(socket))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: ApiException) {
+            if (e.error == "helper_unavailable") throw e
+            SocketList.Failed(e)
+        }
 
     override suspend fun openTab(url: String): BrowserTarget {
         val pageUrl = webUrl(url)
@@ -113,15 +143,23 @@ internal class BrowserServiceImpl(
     }
 
     override suspend fun tap(id: String, request: BrowserTapRequest): ActionResult {
-        val wanted = tapTarget(request)
-        val (socket, chromeId) = parseBrowserTargetId(id)
-        val pkg = socketList().firstOrNull { it.name == socket }?.packageName
-        return usePage(socket, chromeId) { cdp ->
-            cdp.call("Page.bringToFront")
-            delay(FRONT_SETTLE_MS)
-            val quads = elementQuads(cdp, id, wanted)
-            val target = screenTarget(quads, cdp.call("Page.getLayoutMetrics"), contentBounds(pkg))
-            touchAt(target, request.humanize, request.backend)
+        val woke = prepare(request.autoWake)
+        try {
+            val wanted = tapTarget(request)
+            val (socket, chromeId) = parseBrowserTargetId(id)
+            val pkg = socketList().firstOrNull { it.name == socket }?.packageName
+            val result =
+                usePage(socket, chromeId) { cdp ->
+                    cdp.call("Page.bringToFront")
+                    delay(FRONT_SETTLE_MS)
+                    val quads = elementQuads(cdp, id, wanted)
+                    val target =
+                        screenTarget(quads, cdp.call("Page.getLayoutMetrics"), contentBounds(pkg))
+                    touchAt(target, request.humanize, request.backend)
+                }
+            return result.copy(woke = woke, seq = sequence())
+        } finally {
+            invalidateSnapshots()
         }
     }
 
@@ -153,15 +191,53 @@ internal class BrowserServiceImpl(
             val url = loaded?.frameTree?.frame?.url
             cdp.call("Accessibility.enable")
             val tree = cdp.call("Accessibility.getFullAXTree")
-            axTrees[id] = tree
+            axTrees.put(id, tree)
             val text = formatAxTree(tree, url)
             BrowserSnapshot(id = id, url = url, title = text.title, compact = text.compact)
         }
     }
 
-    private suspend fun listOne(socket: HelperSocket): List<BrowserTarget> =
-        useSocket(socket.name) { input, output ->
-            parseTargets(socket, httpGet(input, output, "/json/list", MAX_BODY))
+    private suspend fun listOne(socket: HelperSocket): List<BrowserTarget> = coroutineScope {
+        val devtools = withContext(io) { open(socket.name) }
+        val timedOut = AtomicBoolean(false)
+        val closer = launch {
+            delay(targetTimeoutMs)
+            timedOut.set(true)
+            devtools.close()
+        }
+        try {
+            withContext(io) { readTargets(socket, devtools, timedOut) }
+        } finally {
+            closer.cancel()
+            devtools.close()
+        }
+    }
+
+    private suspend fun readTargets(
+        socket: HelperSocket,
+        devtools: DevtoolsSocket,
+        timedOut: AtomicBoolean,
+    ): List<BrowserTarget> =
+        try {
+            parseTargets(socket, httpGet(devtools.input, devtools.output, "/json/list", MAX_BODY))
+        } catch (e: SocketTimeoutException) {
+            throw ApiException(
+                503,
+                "cdp_timeout",
+                e.message ?: "DevTools did not answer in time",
+                cause = e,
+            )
+        } catch (e: IOException) {
+            coroutineContext.ensureActive()
+            if (timedOut.get()) {
+                throw ApiException(503, "cdp_timeout", "DevTools did not answer in time", cause = e)
+            }
+            throw ApiException(
+                502,
+                "cdp_error",
+                e.message ?: "DevTools connection failed",
+                cause = e,
+            )
         }
 
     private suspend fun <T> usePage(
@@ -225,7 +301,7 @@ internal class BrowserServiceImpl(
     }
 
     private fun cachedBackend(targetId: String, ref: String): Int? {
-        val tree = axTrees[targetId] ?: return null
+        val tree = axTrees.get(targetId) ?: return null
         return try {
             elementBackendId(tree, ref)
         } catch (_: ApiException) {
@@ -236,7 +312,7 @@ internal class BrowserServiceImpl(
     private suspend fun fetchBackend(cdp: CdpSession, targetId: String, ref: String): Int {
         cdp.call("Accessibility.enable")
         val tree = cdp.call("Accessibility.getFullAXTree")
-        axTrees[targetId] = tree
+        axTrees.put(targetId, tree)
         return elementBackendId(tree, ref)
     }
 
@@ -496,6 +572,7 @@ internal class BrowserServiceImpl(
         const val MAX_SELECTOR = 1_000
         const val MAX_EXPRESSION = 20_000
         const val MAX_CONSOLE_MS = 5_000L
+        const val TARGET_LIST_MS = MAX_CONSOLE_MS
         const val ISOLATED_WORLD = "phoneapi"
         const val PAGE_ATTEMPTS = 4
         const val PAGE_RETRY_MS = 200L
@@ -508,6 +585,48 @@ internal class BrowserServiceImpl(
         data class Ref(val id: String) : TapTarget
 
         data class Css(val selector: String) : TapTarget
+    }
+
+    private sealed interface SocketList {
+        data class Ready(val targets: List<BrowserTarget>) : SocketList
+
+        data class Failed(val error: ApiException) : SocketList
+    }
+}
+
+internal const val AX_TREE_CACHE_CAP = 16
+
+private class AxTreeCache(cap: Int) {
+    private val limit = cap.coerceAtLeast(1)
+    private val map = LinkedHashMap<String, JsonObject>(limit, LOAD, true)
+
+    @Synchronized fun get(id: String): JsonObject? = map[id]
+
+    @Synchronized
+    fun put(id: String, tree: JsonObject) {
+        map[id] = tree
+        trim()
+    }
+
+    @Synchronized
+    fun remove(id: String) {
+        map.remove(id)
+    }
+
+    @Synchronized
+    fun retain(live: Set<String>) {
+        map.keys.retainAll(live)
+        trim()
+    }
+
+    private fun trim() {
+        while (map.size > limit) {
+            map.remove(map.entries.iterator().next().key)
+        }
+    }
+
+    private companion object {
+        const val LOAD = 0.75f
     }
 }
 

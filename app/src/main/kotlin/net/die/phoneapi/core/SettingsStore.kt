@@ -28,7 +28,6 @@ data class Settings(
     val mdnsEnabled: Boolean = true,
     val mdnsName: String = "Android device",
     val keepAwakeMs: Long = 60_000,
-    val keystorePassword: String,
     /** Random id advertised over mDNS so clients can recognise this device after IP changes. */
     val instanceId: String,
 )
@@ -58,7 +57,7 @@ internal object StoreIo {
 
 /** Small JSON-file settings store in the app's private files directory. */
 class SettingsStore(private val dir: File) {
-    private val atomic = AtomicFile(File(dir, "settings.json"))
+    private val atomic = AtomicFile(File(dir, SETTINGS_FILE_NAME))
     private val state: MutableStateFlow<Settings> by lazy { MutableStateFlow(load()) }
 
     val settings: StateFlow<Settings> by lazy { state.asStateFlow() }
@@ -74,13 +73,14 @@ class SettingsStore(private val dir: File) {
     }
 
     private fun load(): Settings = StoreIo.call {
+        // Before this file can be rewritten, move a legacy plaintext password into the keystore.
+        TlsPasswordStore(dir).migrate()
         atomic.readUtf8()?.let { ApiJson.decodeFromString(serializer<Settings>(), it) }
             ?: run {
                 val random = SecureRandom()
                 val created =
                     Settings(
                         port = EPHEMERAL_MIN + random.nextInt(EPHEMERAL_MAX - EPHEMERAL_MIN),
-                        keystorePassword = randomToken(random, 24),
                         instanceId = randomToken(random, 6),
                     )
                 dir.mkdirs()
@@ -107,11 +107,13 @@ internal fun AtomicFile.readUtf8(): String? {
     return readFully().decodeToString()
 }
 
+internal fun AtomicFile.writeUtf8(text: String) = writeAll(text.toByteArray(Charsets.UTF_8))
+
 @Suppress("MissingUseCall") // finishWrite and failWrite close the stream.
-internal fun AtomicFile.writeUtf8(text: String) {
+internal fun AtomicFile.writeAll(bytes: ByteArray) {
     val out = startWrite()
     try {
-        out.write(text.toByteArray(Charsets.UTF_8))
+        out.write(bytes)
     } catch (e: IOException) {
         failWrite(out)
         throw e

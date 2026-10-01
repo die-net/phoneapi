@@ -20,13 +20,15 @@ class DeviceInfoProvider(
     private val helperStatus: () -> HelperStatus,
     private val helperRecoveredAtMs: () -> Long?,
 ) {
+    private val cachedVersion: String by lazy { readVersion() }
+
     fun info(): DeviceInfo =
         DeviceInfo(
             manufacturer = Build.MANUFACTURER,
             model = Build.MODEL,
             sdkInt = Build.VERSION.SDK_INT,
             release = Build.VERSION.RELEASE,
-            appVersion = appVersion(),
+            appVersion = cachedVersion,
             display = display(),
             state = state.current,
             helper = helperStatus(),
@@ -35,32 +37,35 @@ class DeviceInfoProvider(
             capabilities = capabilities(),
         )
 
-    fun capabilities(): Map<String, Boolean> {
+    /** Package version only, so a tool listing does not also query the display. */
+    fun versionName(): String = cachedVersion
+
+    fun capabilities(): Capabilities {
         val sdk = Build.VERSION.SDK_INT
         val helper = isHelperRunning()
         val a11y = isA11yConnected()
         val secureSettings =
             context.checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS) ==
                 PackageManager.PERMISSION_GRANTED
-        return mapOf(
-            Capabilities.UI_SNAPSHOT to a11y,
-            Capabilities.INPUT_A11Y to a11y,
-            Capabilities.INPUT_INJECT to helper,
-            Capabilities.TEXT_IME to (a11y && sdk >= Build.VERSION_CODES.TIRAMISU),
-            Capabilities.TEXT_KEYEVENT to helper,
-            Capabilities.SCREENSHOT_A11Y to (a11y && sdk >= Build.VERSION_CODES.R),
-            Capabilities.SCREENSHOT_HELPER to helper,
-            Capabilities.STABLE_NODE_IDS to (sdk >= Build.VERSION_CODES.TIRAMISU),
-            Capabilities.APPS_MANAGE to helper,
-            Capabilities.LOGCAT_ALL to helper,
-            Capabilities.BROWSER_CDP to helper,
-            Capabilities.STREAM_VIDEO_PROJECTION to true,
-            Capabilities.STREAM_VIDEO_MIRROR to helper,
-            Capabilities.STREAM_AUDIO_PLAYBACK_CAPTURE to true,
-            Capabilities.STREAM_AUDIO_SUBMIX to (helper && sdk >= Build.VERSION_CODES.R),
-            Capabilities.ENCODER_LOW_LATENCY to (sdk >= Build.VERSION_CODES.R),
-            Capabilities.WIRELESS_DEBUGGING to (sdk >= Build.VERSION_CODES.R),
-            Capabilities.SECURE_SETTINGS to secureSettings,
+        return Capabilities(
+            uiSnapshot = a11y,
+            inputA11y = a11y,
+            inputInject = helper,
+            textIme = a11y && sdk >= Build.VERSION_CODES.TIRAMISU,
+            textKeyevent = helper,
+            screenshotA11y = a11y && sdk >= Build.VERSION_CODES.R,
+            screenshotHelper = helper,
+            uiStableIds = sdk >= Build.VERSION_CODES.TIRAMISU,
+            appsManage = helper,
+            logcatAll = helper,
+            browserCdp = helper,
+            streamVideoProjection = false,
+            streamVideoMirror = helper,
+            streamAudioPlaybackCapture = false,
+            streamAudioSubmix = helper && sdk >= Build.VERSION_CODES.R,
+            encoderLowLatency = sdk >= Build.VERSION_CODES.R,
+            adbWireless = sdk >= Build.VERSION_CODES.R,
+            settingsSecure = secureSettings,
         )
     }
 
@@ -80,6 +85,6 @@ class DeviceInfoProvider(
         )
     }
 
-    private fun appVersion(): String =
+    private fun readVersion(): String =
         context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "unknown"
 }

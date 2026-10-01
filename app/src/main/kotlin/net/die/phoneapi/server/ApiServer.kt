@@ -29,6 +29,7 @@ import net.die.phoneapi.server.routes.browserRoutes
 import net.die.phoneapi.server.routes.deviceRoutes
 import net.die.phoneapi.server.routes.eventRoutes
 import net.die.phoneapi.server.routes.inputRoutes
+import net.die.phoneapi.server.routes.openApiRoutes
 import net.die.phoneapi.server.routes.streamRoutes
 import net.die.phoneapi.server.routes.tokenRoutes
 import net.die.phoneapi.server.routes.uiRoutes
@@ -44,7 +45,7 @@ class ApiServer(private val graph: AppGraph) {
     fun start(host: String, port: Int) {
         stop()
         val tls = graph.tls
-        val password = graph.settings.current.keystorePassword.toCharArray()
+        val password = tls.password
         val env = applicationEnvironment {}
         server =
             embeddedServer(
@@ -64,7 +65,7 @@ class ApiServer(private val graph: AppGraph) {
                             this.port = port
                         }
                     },
-                    module = { module(graph) },
+                    module = { phoneApiModule(graph.services) },
                 )
                 .also { it.start(wait = false) }
     }
@@ -76,7 +77,7 @@ class ApiServer(private val graph: AppGraph) {
     }
 }
 
-internal fun Application.module(graph: AppGraph) {
+fun Application.phoneApiModule(services: ServerServices) {
     install(ContentNegotiation) { register(ContentType.Application.Json, PhoneJsonConverter) }
     install(WebSockets) { pingPeriod = 15.seconds }
     install(StatusPages) {
@@ -94,19 +95,20 @@ internal fun Application.module(graph: AppGraph) {
             call.respond(HttpStatusCode.InternalServerError, ApiError("internal", e.message))
         }
     }
-    install(BearerAuth) { tokens = graph.tokens }
+    install(BearerAuth) { tokens = services.tokens }
     routing {
-        deviceRoutes(graph)
-        tokenRoutes(graph)
-        eventRoutes(graph)
-        uiRoutes(graph)
-        inputRoutes(graph)
-        appRoutes(graph)
-        browserRoutes(graph)
-        waitRoutes(graph)
-        streamRoutes(graph)
+        deviceRoutes(services)
+        openApiRoutes()
+        tokenRoutes(services)
+        eventRoutes(services)
+        uiRoutes(services)
+        inputRoutes(services)
+        appRoutes(services)
+        browserRoutes(services)
+        waitRoutes(services)
+        streamRoutes(services)
     }
-    installPhoneMcp(graph)
+    installPhoneMcp(services)
 }
 
 private fun Throwable.rootMessage(): String? =

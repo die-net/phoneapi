@@ -1,14 +1,18 @@
 import com.android.build.api.dsl.ApplicationExtension
 import com.android.build.api.dsl.LibraryExtension
 import com.android.build.api.dsl.Lint
+import com.android.build.api.variant.AndroidComponentsExtension
+import com.android.build.api.variant.Component
 import dev.detekt.gradle.Detekt
 import dev.detekt.gradle.extensions.DetektExtension
 import dev.detekt.gradle.report.ReportMergeTask
 import org.gradle.api.JavaVersion
 import org.gradle.api.Project
+import org.gradle.api.tasks.compile.JavaCompile
 import org.gradle.kotlin.dsl.configure
 import org.gradle.kotlin.dsl.withType
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import org.jetbrains.kotlin.gradle.dsl.KotlinAndroidExtension
 import org.jetbrains.kotlin.gradle.dsl.KotlinJvmCompilerOptions
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompilationTask
 
@@ -42,6 +46,36 @@ internal fun Project.configureDetekt() {
     val merge = rootProject.tasks.named("detektReportMerge", ReportMergeTask::class.java)
     tasks.withType<Detekt>().configureEach { finalizedBy(merge) }
     merge.configure { input.from(tasks.withType<Detekt>().map { it.reports.sarif.outputLocation }) }
+    extensions.findByType(AndroidComponentsExtension::class.java)?.let { components ->
+        val kotlinAndroid = extensions.getByType(KotlinAndroidExtension::class.java)
+        components.onVariants { variant ->
+            addJavacOutputToDetektClasspath(variant, kotlinAndroid)
+            variant.nestedComponents.forEach { addJavacOutputToDetektClasspath(it, kotlinAndroid) }
+        }
+    }
+}
+
+/**
+ * Detekt's Android classpath comes from the Kotlin compile task, so javac-compiled AIDL classes are
+ * missing. `from()` must run after detekt sets its classpath convention, which it then extends; an
+ * earlier `from()` or `setFrom()` replaces it. AGP creates the javac task after `onVariants`, so it
+ * is looked up only when the detekt task is configured.
+ */
+private fun Project.addJavacOutputToDetektClasspath(
+    component: Component,
+    kotlinAndroid: KotlinAndroidExtension,
+) {
+    val javaCompileTaskName = component.computeTaskName("compile", "JavaWithJavac")
+    kotlinAndroid.target.compilations
+        .matching { it.name == component.name }
+        .configureEach {
+            tasks
+                .named("detekt" + name.replaceFirstChar { it.uppercase() }, Detekt::class.java)
+                .configure {
+                    val javaCompile = tasks.named(javaCompileTaskName, JavaCompile::class.java)
+                    classpath.from(javaCompile.flatMap { it.destinationDirectory })
+                }
+        }
 }
 
 internal fun Lint.configureLint(project: Project) {

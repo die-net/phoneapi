@@ -47,11 +47,7 @@ internal class ConditionWatchers(
         }
 
     private fun node(condition: WaitCondition.Node): ConditionWatcher {
-        val test =
-            NodeConditions.test(condition.state)
-                ?: throw ApiException.badRequest(
-                    "state must be one of ${NodeConditions.names.joinToString(", ")}"
-                )
+        val test = NodeConditions.test(condition.state)
         val request =
             FindRequest(
                 selector = condition.selector,

@@ -1,11 +1,25 @@
 package net.die.phoneapi.mcp
 
+import kotlinx.serialization.SerializationException
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
+import net.die.phoneapi.core.ApiJson
 import net.die.phoneapi.model.Capabilities
 import net.die.phoneapi.model.Scope
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 
 class McpCatalogTest {
     @Test
@@ -21,19 +35,22 @@ class McpCatalogTest {
 
     @Test
     fun `hides browser without cdp`() {
-        val caps = allOn().toMutableMap()
-        caps[Capabilities.BROWSER_CDP] = false
-        val names = visibleMcpTools(setOf(Scope.OBSERVE, Scope.BROWSER), caps).map { it.name }
+        val names =
+            visibleMcpTools(setOf(Scope.OBSERVE, Scope.BROWSER), allOn().copy(browserCdp = false))
+                .map { it.name }
         assertFalse(names.any { it.startsWith("browser_") })
     }
 
     @Test
     fun `hides screenshot and logcat`() {
-        val caps = allOn().toMutableMap()
-        caps[Capabilities.SCREENSHOT_A11Y] = false
-        caps[Capabilities.SCREENSHOT_HELPER] = false
-        caps[Capabilities.LOGCAT_ALL] = false
-        caps[Capabilities.APPS_MANAGE] = false
+        val caps =
+            allOn()
+                .copy(
+                    screenshotA11y = false,
+                    screenshotHelper = false,
+                    logcatAll = false,
+                    appsManage = false,
+                )
         val names = visibleMcpTools(Scope.entries.toSet(), caps).map { it.name }
         assertFalse("screenshot" in names)
         assertFalse("logcat_tail" in names)
@@ -48,18 +65,157 @@ class McpCatalogTest {
         assertEquals(0, mcpResources(setOf(Scope.CONTROL)).size)
     }
 
-    private fun allOn(): Map<String, Boolean> =
-        listOf(
-                Capabilities.UI_SNAPSHOT,
-                Capabilities.INPUT_A11Y,
-                Capabilities.INPUT_INJECT,
-                Capabilities.TEXT_IME,
-                Capabilities.TEXT_KEYEVENT,
-                Capabilities.SCREENSHOT_A11Y,
-                Capabilities.SCREENSHOT_HELPER,
-                Capabilities.APPS_MANAGE,
-                Capabilities.LOGCAT_ALL,
-                Capabilities.BROWSER_CDP,
-            )
-            .associateWith { true }
+    @Test
+    fun `schemas match decoded types`() {
+        mcpToolTemplates().forEach { tool ->
+            assertEquals("object", tool.schema.type)
+            val properties = tool.schema.properties ?: JsonObject(emptyMap())
+            val names =
+                (0 until tool.arguments.descriptor.elementsCount).map { index ->
+                    tool.arguments.descriptor.getElementName(index)
+                }
+            assertEquals(names.toSet(), properties.keys, tool.name)
+            val defs = tool.schema.defs ?: JsonObject(emptyMap())
+            val sample = sampleObject(properties, tool.schema.required.orEmpty(), defs)
+            ApiJson.decodeFromJsonElement(tool.arguments, sample)
+        }
+        val tap = mcpToolTemplates().first { it.name == "tap" }.schema.properties!!
+        assertTrue(tap.keys.containsAll(listOf("count", "holdMs", "backend", "force", "autoWake")))
+        assertTrue(
+            "autoWake" in mcpToolTemplates().first { it.name == "ui_act" }.schema.properties!!.keys
+        )
+        assertFalse(
+            mcpToolTemplates()
+                .first { it.name == "wait_for" }
+                .schema
+                .properties!!
+                .containsKey("snapshotFormat")
+        )
+        val waitItems =
+            mcpToolTemplates()
+                .first { it.name == "wait_for" }
+                .schema
+                .properties!!
+                .getValue("all")
+                .jsonObject["items"]!!
+        assertTrue(
+            waitItems.jsonObject.containsKey("\$ref") || waitItems.jsonObject.containsKey("oneOf")
+        )
+        ApiJson.decodeFromJsonElement(
+            mcpToolTemplates().first { it.name == "tap" }.arguments,
+            buildJsonObject { put("count", 2) },
+        )
+    }
+
+    @Test
+    fun `reduced mode notes weaker path`() {
+        val full = visibleMcpTools(setOf(Scope.CONTROL), allOn()).first { it.name == "tap" }
+        assertFalse(full.description.contains("Reduced mode"))
+        val reduced =
+            visibleMcpTools(
+                    setOf(Scope.CONTROL),
+                    allOn().copy(inputInject = false, uiStableIds = false),
+                )
+                .first { it.name == "tap" }
+        assertTrue(reduced.description.contains("accessibility gestures only"))
+        assertTrue(reduced.description.contains("node ids are not stable"))
+    }
+
+    @Test
+    fun `bad enum fails to decode`() {
+        val failure =
+            assertThrows<SerializationException> {
+                ApiJson.decodeFromJsonElement(
+                    mcpToolTemplates().first { it.name == "wait_for" }.arguments,
+                    buildJsonObject {
+                        put(
+                            "all",
+                            buildJsonArray {
+                                add(
+                                    buildJsonObject {
+                                        put("type", "node")
+                                        put("selector", buildJsonObject { put("text", "Ok") })
+                                        put("state", "bogus")
+                                    }
+                                )
+                            },
+                        )
+                    },
+                )
+            }
+        assertTrue(failure.message.orEmpty().contains("bogus"))
+    }
+
+    private fun allOn() =
+        Capabilities(
+            uiSnapshot = true,
+            inputA11y = true,
+            inputInject = true,
+            textIme = true,
+            textKeyevent = true,
+            screenshotA11y = true,
+            screenshotHelper = true,
+            uiStableIds = true,
+            appsManage = true,
+            logcatAll = true,
+            browserCdp = true,
+            streamVideoProjection = false,
+            streamVideoMirror = true,
+            streamAudioPlaybackCapture = false,
+            streamAudioSubmix = true,
+            encoderLowLatency = true,
+            adbWireless = true,
+            settingsSecure = true,
+        )
+
+    private fun sampleObject(
+        properties: JsonObject,
+        required: List<String>,
+        defs: JsonObject,
+    ): JsonObject = buildJsonObject {
+        required.forEach { name -> put(name, sample(properties.getValue(name).jsonObject, defs)) }
+    }
+
+    private fun sample(schema: JsonObject, defs: JsonObject): JsonElement {
+        schema["\$ref"]?.jsonPrimitive?.content?.let { ref ->
+            return sample(defs.getValue(ref.substringAfterLast('/')).jsonObject, defs)
+        }
+        schema["const"]?.let {
+            return it
+        }
+        schema["anyOf"]?.jsonArray?.let { options ->
+            return sample(options.first().jsonObject, defs)
+        }
+        schema["oneOf"]?.jsonArray?.let { options ->
+            return sample(options.first().jsonObject, defs)
+        }
+        return sampleTyped(schema, defs)
+    }
+
+    private fun sampleTyped(schema: JsonObject, defs: JsonObject): JsonElement {
+        val type =
+            when (val raw = schema["type"]) {
+                is JsonArray -> raw.first().jsonPrimitive.content
+                is JsonPrimitive -> raw.content
+                else -> null
+            }
+        return when (type) {
+            "string" -> {
+                val enum = schema["enum"]?.jsonArray?.firstOrNull { it !is JsonNull }
+                JsonPrimitive(enum?.jsonPrimitive?.content ?: "x")
+            }
+            "integer" -> JsonPrimitive(0)
+            "number" -> JsonPrimitive(0)
+            "boolean" -> JsonPrimitive(false)
+            "array" -> JsonArray(emptyList())
+            "object" ->
+                sampleObject(
+                    schema["properties"]?.jsonObject ?: JsonObject(emptyMap()),
+                    schema["required"]?.jsonArray?.map { it.jsonPrimitive.content }.orEmpty(),
+                    defs,
+                )
+            "null" -> JsonNull
+            else -> JsonObject(emptyMap())
+        }
+    }
 }

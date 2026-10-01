@@ -8,17 +8,17 @@ import io.modelcontextprotocol.kotlin.sdk.types.Implementation
 import io.modelcontextprotocol.kotlin.sdk.types.ReadResourceResult
 import io.modelcontextprotocol.kotlin.sdk.types.ServerCapabilities
 import io.modelcontextprotocol.kotlin.sdk.types.TextResourceContents
-import net.die.phoneapi.AppGraph
+import net.die.phoneapi.server.ServerServices
 import net.die.phoneapi.server.token
 
 /** Streamable HTTP MCP at `/mcp`. Tools and resources follow the caller's scopes. */
-internal fun Application.installPhoneMcp(graph: AppGraph) {
+internal fun Application.installPhoneMcp(services: ServerServices) {
     mcpStatelessStreamableHttp(path = "/mcp") {
         val scopes = call.token.scopes
-        val tools = visibleMcpTools(scopes, graph.deviceInfo.capabilities())
+        val tools = visibleMcpTools(scopes, services.device.capabilities())
         val resources = mcpResources(scopes)
         Server(
-            Implementation(name = "phoneapi", version = graph.deviceInfo.info().appVersion),
+            Implementation(name = "phoneapi", version = services.device.versionName()),
             ServerOptions(
                 capabilities =
                     ServerCapabilities(
@@ -39,7 +39,7 @@ internal fun Application.installPhoneMcp(graph: AppGraph) {
                     inputSchema = tool.schema,
                     toolAnnotations = tool.annotations,
                 ) { request ->
-                    tool.call(graph, scopes, request)
+                    tool.call(services, scopes, request)
                 }
             }
             resources.forEach { resource ->
@@ -53,7 +53,7 @@ internal fun Application.installPhoneMcp(graph: AppGraph) {
                         contents =
                             listOf(
                                 TextResourceContents(
-                                    text = resource.read(graph),
+                                    text = resource.read(services),
                                     uri = resource.uri,
                                     mimeType = resource.mimeType,
                                 )

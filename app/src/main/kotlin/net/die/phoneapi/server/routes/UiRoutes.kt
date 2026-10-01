@@ -8,60 +8,56 @@ import io.ktor.server.response.respondBytes
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
-import net.die.phoneapi.AppGraph
 import net.die.phoneapi.core.ApiException
+import net.die.phoneapi.core.ScreenshotScale
 import net.die.phoneapi.core.SnapshotOptions
+import net.die.phoneapi.core.windowId
 import net.die.phoneapi.model.FindRequest
 import net.die.phoneapi.model.NodeActionRequest
 import net.die.phoneapi.model.Scope
 import net.die.phoneapi.model.SnapshotFormat
-import net.die.phoneapi.server.requireScope
+import net.die.phoneapi.server.ServerServices
+import net.die.phoneapi.server.scoped
 
 /**
  * `GET /v1/ui/snapshot?format=compact|json|both&window=&maxDepth=&includeInvisible=&all=`, `POST
  * /v1/ui/find`, `POST /v1/ui/nodes/{ref}/action` and `GET /v1/screenshot?scale=`.
  */
-fun Route.uiRoutes(graph: AppGraph) {
-    get("/v1/ui/snapshot") {
-        call.requireScope(Scope.OBSERVE)
-        val q = call.request.queryParameters
-        val options =
-            SnapshotOptions(
-                format = q["format"]?.let(::parseFormat) ?: SnapshotFormat.COMPACT,
-                windowId = q["window"]?.let(::parseWindowId),
-                maxDepth = q.int("maxDepth"),
-                includeInvisible = q.flag("includeInvisible", default = false),
-                allWindows = q.flag("all", default = false),
-                autoWake = q.flag("autoWake", default = true),
-            )
-        call.respond(graph.ui.snapshot(options))
+fun Route.uiRoutes(services: ServerServices) {
+    scoped(Scope.OBSERVE) {
+        get("/v1/ui/snapshot") {
+            val q = call.request.queryParameters
+            val options =
+                SnapshotOptions(
+                    format = q["format"]?.let(::parseFormat) ?: SnapshotFormat.COMPACT,
+                    windowId = q["window"]?.let(::windowId),
+                    maxDepth = q.int("maxDepth"),
+                    includeInvisible = q.flag("includeInvisible", default = false),
+                    allWindows = q.flag("all", default = false),
+                    autoWake = q.flag("autoWake", default = true),
+                )
+            call.respond(services.ui.snapshot(options))
+        }
+        post("/v1/ui/find") { call.respond(services.ui.find(call.receive<FindRequest>())) }
+        get("/v1/screenshot") {
+            val scale =
+                call.request.queryParameters["scale"]?.let {
+                    it.toFloatOrNull() ?: throw ApiException.badRequest("scale must be a number")
+                } ?: ScreenshotScale.REST
+            call.respondBytes(services.screenshots(scale), ContentType.Image.PNG)
+        }
     }
-    post("/v1/ui/find") {
-        call.requireScope(Scope.OBSERVE)
-        call.respond(graph.ui.find(call.receive<FindRequest>()))
-    }
-    post("/v1/ui/nodes/{ref}/action") {
-        call.requireScope(Scope.CONTROL)
-        val ref = call.parameters["ref"] ?: throw ApiException.badRequest("ref required")
-        call.respond(graph.ui.act(ref, call.receive<NodeActionRequest>()))
-    }
-    get("/v1/screenshot") {
-        call.requireScope(Scope.OBSERVE)
-        val scale =
-            call.request.queryParameters["scale"]?.let {
-                it.toFloatOrNull() ?: throw ApiException.badRequest("scale must be a number")
-            } ?: 1f
-        call.respondBytes(graph.screenshots.png(scale), ContentType.Image.PNG)
+    scoped(Scope.CONTROL) {
+        post("/v1/ui/nodes/{ref}/action") {
+            val ref = call.parameters["ref"] ?: throw ApiException.badRequest("ref required")
+            call.respond(services.ui.act(ref, call.receive<NodeActionRequest>()))
+        }
     }
 }
 
 private fun parseFormat(value: String): SnapshotFormat =
     SnapshotFormat.entries.firstOrNull { it.name.equals(value, ignoreCase = true) }
         ?: throw ApiException.badRequest("format must be compact, json or both")
-
-private fun parseWindowId(value: String): Int =
-    value.removePrefix("w").toIntOrNull()
-        ?: throw ApiException.badRequest("window must be a window id like 3 or w3")
 
 internal fun Parameters.int(name: String): Int? =
     get(name)?.let { it.toIntOrNull() ?: throw ApiException.badRequest("$name must be an integer") }

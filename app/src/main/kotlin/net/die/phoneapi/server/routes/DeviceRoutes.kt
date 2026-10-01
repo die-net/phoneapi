@@ -11,40 +11,34 @@ import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.put
-import net.die.phoneapi.AppGraph
 import net.die.phoneapi.model.PinStatus
 import net.die.phoneapi.model.Scope
 import net.die.phoneapi.model.SetPinRequest
 import net.die.phoneapi.model.UnlockRequest
-import net.die.phoneapi.server.requireScope
+import net.die.phoneapi.server.ServerServices
+import net.die.phoneapi.server.scoped
 
 /** `GET /v1/device`, `POST /v1/device/wake|unlock|lock`, and `PUT|DELETE /v1/device/pin`. */
-fun Route.deviceRoutes(graph: AppGraph) {
-    get("/v1/device") {
-        call.requireScope(Scope.OBSERVE)
-        call.respond(graph.deviceInfo.info())
+fun Route.deviceRoutes(services: ServerServices) {
+    scoped(Scope.OBSERVE) {
+        get("/v1/device") { call.respond(services.device.info()) }
     }
-    post("/v1/device/wake") {
-        call.requireScope(Scope.CONTROL)
-        call.respond(graph.requirePower().wake())
+    scoped(Scope.CONTROL) {
+        post("/v1/device/wake") { call.respond(services.power().wake()) }
+        post("/v1/device/unlock") {
+            call.respond(services.power().unlock(bodyOrDefault(call, UnlockRequest())))
+        }
+        post("/v1/device/lock") { call.respond(services.power().lock()) }
     }
-    post("/v1/device/unlock") {
-        call.requireScope(Scope.CONTROL)
-        call.respond(graph.requirePower().unlock(bodyOrDefault(call, UnlockRequest())))
-    }
-    post("/v1/device/lock") {
-        call.requireScope(Scope.CONTROL)
-        call.respond(graph.requirePower().lock())
-    }
-    put("/v1/device/pin") {
-        call.requireScope(Scope.ADMIN)
-        graph.pins.write(call.receive<SetPinRequest>().pin)
-        call.respond(PinStatus(stored = true))
-    }
-    delete("/v1/device/pin") {
-        call.requireScope(Scope.ADMIN)
-        graph.pins.write(null)
-        call.respond(HttpStatusCode.NoContent)
+    scoped(Scope.ADMIN) {
+        put("/v1/device/pin") {
+            services.writePin(call.receive<SetPinRequest>().pin)
+            call.respond(PinStatus(stored = true))
+        }
+        delete("/v1/device/pin") {
+            services.writePin(null)
+            call.respond(HttpStatusCode.NoContent)
+        }
     }
 }
 
