@@ -12,6 +12,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.serializer
 import net.die.phoneapi.model.Capabilities
 import net.die.phoneapi.model.FindRequest
+import net.die.phoneapi.model.ImeShowRequest
 import net.die.phoneapi.model.IntentRequest
 import net.die.phoneapi.model.KeyRequest
 import net.die.phoneapi.model.Scope
@@ -99,7 +100,16 @@ private fun shotNote(caps: Capabilities): String? =
     }
 
 private val REF_TOOLS =
-    setOf("ui_snapshot", "ui_find", "ui_act", "tap", "swipe", "type_text", "wait_for")
+    setOf(
+        "ui_snapshot",
+        "ui_find",
+        "ui_act",
+        "tap",
+        "swipe",
+        "type_text",
+        "wait_for",
+        "keyboard_show",
+    )
 
 private fun toolSchema(serializer: KSerializer<*>): ToolSchema {
     val schemas = JsonSchemas(refPrefix = "#/\$defs/")
@@ -210,6 +220,16 @@ private val MCP_TOOLS: List<McpTool> =
             arguments = serializer<EmptyArgs>(),
             annotations = changes,
             call = { graph, _, _ -> keyboardHide(graph) },
+        ),
+        McpTool(
+            name = "keyboard_show",
+            description =
+                "Show the soft keyboard for an editable node. Omit selector to use the focused field.",
+            scope = Scope.CONTROL,
+            available = Capabilities::inputA11y,
+            arguments = serializer<ImeShowRequest>(),
+            annotations = changes,
+            call = { graph, _, request -> keyboardShow(graph, request) },
         ),
         McpTool(
             name = "app_launch",

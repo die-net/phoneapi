@@ -122,6 +122,15 @@ public data class TextRequest(
 )
 
 @Serializable
+public data class ImeShowRequest(
+    @Doc(
+        "Editable node to focus, the same selector as tap, including ref. Omit to use the field that already has input focus."
+    )
+    val selector: NodeSelector? = null,
+    @Doc("Wake and unlock the device first. Defaults to true.") val autoWake: Boolean = true,
+)
+
+@Serializable
 public data class ActionResult(
     val ok: Boolean,
     val backend: String? = null,

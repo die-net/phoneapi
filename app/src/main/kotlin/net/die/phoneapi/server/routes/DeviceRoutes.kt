@@ -24,11 +24,11 @@ fun Route.deviceRoutes(services: ServerServices) {
         get("/v1/device") { call.respond(services.device.info()) }
     }
     scoped(Scope.CONTROL) {
-        post("/v1/device/wake") { call.respond(services.power().wake()) }
+        post("/v1/device/wake") { call.respond(services.power.wake()) }
         post("/v1/device/unlock") {
-            call.respond(services.power().unlock(bodyOrDefault(call, UnlockRequest())))
+            call.respond(services.power.unlock(bodyOrDefault(call, UnlockRequest())))
         }
-        post("/v1/device/lock") { call.respond(services.power().lock()) }
+        post("/v1/device/lock") { call.respond(services.power.lock()) }
     }
     scoped(Scope.ADMIN) {
         put("/v1/device/pin") {

@@ -2,16 +2,21 @@ package net.die.phoneapi.apps
 
 import android.content.ActivityNotFoundException
 import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import androidx.core.net.toUri
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
-import net.die.phoneapi.AppGraph
 import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.core.AppsService
+import net.die.phoneapi.core.DeviceStateTracker
+import net.die.phoneapi.core.EventBus
 import net.die.phoneapi.core.awaitDeviceState
+import net.die.phoneapi.helperclient.HelperShell
 import net.die.phoneapi.helperclient.failureMessage
 import net.die.phoneapi.model.ActionResult
 import net.die.phoneapi.model.AppInfo
@@ -24,11 +29,20 @@ import net.die.phoneapi.model.LaunchRequest
  * Launching goes through the platform, so it works without the helper; `stop` and `clear` are
  * privileged and need the helper's shell UID (`apps.manage` in the capability map).
  */
-class AppsServiceImpl(private val graph: AppGraph) : AppsService {
-    private val packages: PackageManager = graph.context.packageManager
+class AppsServiceImpl(
+    private val context: Context,
+    private val io: CoroutineDispatcher,
+    private val prepare: suspend (Boolean, Boolean) -> Boolean,
+    private val invalidateSnapshots: () -> Unit,
+    private val seq: StateFlow<Long>,
+    private val shell: HelperShell,
+    private val state: DeviceStateTracker,
+    private val bus: EventBus,
+) : AppsService {
+    private val packages: PackageManager = context.packageManager
 
     override suspend fun list(launchableOnly: Boolean): List<AppInfo> =
-        withContext(graph.ioDispatcher) {
+        withContext(io) {
             val launchable = launchablePackages()
             val names = if (launchableOnly) launchable.toList() else installedPackages()
             names
@@ -37,16 +51,16 @@ class AppsServiceImpl(private val graph: AppGraph) : AppsService {
         }
 
     override suspend fun launch(packageName: String, request: LaunchRequest): ActionResult {
-        val woke = graph.prepareForAction(autoWake = true)
+        val woke = prepare(true, false)
         val intent = launchIntent(packageName, request)
         start(intent)
         val arrived = !request.wait || awaitForeground(packageName)
-        graph.snapshots.invalidate()
+        invalidateSnapshots()
         return ActionResult(
             ok = arrived,
             backend = "activity",
             woke = woke,
-            seq = graph.uiTracker.seq.value,
+            seq = seq.value,
             message = if (arrived) null else notForeground(intent, packageName),
         )
     }
@@ -58,7 +72,7 @@ class AppsServiceImpl(private val graph: AppGraph) : AppsService {
         manage(packageName, "clear", listOf("pm", "clear", packageName))
 
     override suspend fun intent(request: IntentRequest): ActionResult {
-        val woke = graph.prepareForAction(autoWake = true)
+        val woke = prepare(true, false)
         val intent = buildIntent(request)
         start(intent)
         // Null once the target is showing, or when the intent doesn't name a package to wait for.
@@ -66,12 +80,12 @@ class AppsServiceImpl(private val graph: AppGraph) : AppsService {
             (request.packageName ?: intent.component?.packageName)?.takeIf {
                 !awaitForeground(it)
             }
-        graph.snapshots.invalidate()
+        invalidateSnapshots()
         return ActionResult(
             ok = missing == null,
             backend = "activity",
             woke = woke,
-            seq = graph.uiTracker.seq.value,
+            seq = seq.value,
             message = missing?.let { notForeground(intent, it) },
         )
     }
@@ -81,13 +95,13 @@ class AppsServiceImpl(private val graph: AppGraph) : AppsService {
         what: String,
         argv: List<String>,
     ): ActionResult {
-        if (packageName == graph.context.packageName) {
+        if (packageName == context.packageName) {
             throw ApiException.badRequest("Refusing to $what PhoneAPI itself")
         }
         if (packageInfo(packageName) == null) {
             throw ApiException.notFound("$packageName is not installed")
         }
-        val result = graph.shell.exec(argv)
+        val result = shell.exec(argv)
         if (!result.ok) {
             throw ApiException(
                 409,
@@ -95,11 +109,11 @@ class AppsServiceImpl(private val graph: AppGraph) : AppsService {
                 "`${argv.joinToString(" ")}` exited ${result.exit}: ${result.failureMessage()}",
             )
         }
-        graph.snapshots.invalidate()
+        invalidateSnapshots()
         return ActionResult(
             ok = true,
             backend = "shell",
-            seq = graph.uiTracker.seq.value,
+            seq = seq.value,
             message = result.stdout.trim().takeIf { it.isNotEmpty() },
         )
     }
@@ -141,7 +155,7 @@ class AppsServiceImpl(private val graph: AppGraph) : AppsService {
 
     private fun start(intent: Intent) {
         try {
-            graph.context.startActivity(intent)
+            context.startActivity(intent)
         } catch (e: ActivityNotFoundException) {
             throw ApiException(
                 404,
@@ -160,7 +174,7 @@ class AppsServiceImpl(private val graph: AppGraph) : AppsService {
     }
 
     private suspend fun awaitForeground(packageName: String): Boolean =
-        awaitDeviceState(graph.state, graph.bus, FOREGROUND_WAIT_MS) {
+        awaitDeviceState(state, bus, FOREGROUND_WAIT_MS) {
             it.foregroundPackage == packageName
         }
 

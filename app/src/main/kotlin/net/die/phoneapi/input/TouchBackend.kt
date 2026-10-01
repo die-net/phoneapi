@@ -20,17 +20,15 @@ interface TouchBackend {
 }
 
 /**
- * Picks a touch backend per request. The helper phase registers its injection backend in [inject];
- * until then `auto` means accessibility gestures.
+ * Picks a touch backend per request. `auto` uses [inject] while it is available, and accessibility
+ * gestures otherwise.
  */
-class TouchBackends(private val a11y: TouchBackend) {
-    @Volatile var inject: TouchBackend? = null
-
+class TouchBackends(private val a11y: TouchBackend, private val inject: TouchBackend) {
     fun select(requested: InputBackend): TouchBackend =
         when (requested) {
-            InputBackend.AUTO -> inject?.takeIf { it.isAvailable } ?: requireA11y()
+            InputBackend.AUTO -> inject.takeIf { it.isAvailable } ?: requireA11y()
             InputBackend.INJECT ->
-                inject?.takeIf { it.isAvailable } ?: throw ApiException.helperUnavailable()
+                inject.takeIf { it.isAvailable } ?: throw ApiException.helperUnavailable()
             InputBackend.A11Y -> requireA11y()
         }
 

@@ -34,8 +34,12 @@ class DeviceStateTracker(private val context: Context, private val bus: EventBus
 
     val state: StateFlow<DeviceStateSummary> = summary.asStateFlow()
 
+    /**
+     * The last published summary. Screen and keyguard are not broadcast for every change, so a
+     * caller that needs them live uses [refresh].
+     */
     val current: DeviceStateSummary
-        get() = compute().also { summary.value = it }
+        get() = summary.value
 
     private val receiver =
         object : BroadcastReceiver() {
@@ -63,9 +67,8 @@ class DeviceStateTracker(private val context: Context, private val bus: EventBus
         context.registerReceiver(receiver, filter)
     }
 
-    fun refresh() {
-        summary.value = compute()
-    }
+    /** Re-reads screen and keyguard, publishes the result on [state], and returns it. */
+    fun refresh(): DeviceStateSummary = compute().also { summary.value = it }
 
     fun setIme(next: ImeState) {
         val prev = imeState.value

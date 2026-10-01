@@ -25,7 +25,6 @@ import net.die.phoneapi.browser.BrowserServiceImpl
 import net.die.phoneapi.browser.ContentFrame
 import net.die.phoneapi.browser.HelperCdpPipes
 import net.die.phoneapi.browser.HelperDevtoolsSocket
-import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.core.AppsService
 import net.die.phoneapi.core.BrowserService
 import net.die.phoneapi.core.DeviceInfoProvider
@@ -38,6 +37,7 @@ import net.die.phoneapi.core.TlsPasswordStore
 import net.die.phoneapi.core.UiService
 import net.die.phoneapi.core.WaitService
 import net.die.phoneapi.helperclient.HelperConnection
+import net.die.phoneapi.helperclient.HelperLogcatFeed
 import net.die.phoneapi.helperclient.HelperShell
 import net.die.phoneapi.helperclient.HelperStatusNotifier
 import net.die.phoneapi.helperclient.HelperSupervisor
@@ -81,9 +81,7 @@ class AppGraph(
     val bus = EventBus()
     val settings = SettingsStore(filesDir)
     val tokens = TokenStore(filesDir)
-    val tls by lazy {
-        TlsManager(filesDir, TlsPasswordStore(filesDir).chars())
-    }
+    val tls by lazy { TlsManager(filesDir, TlsPasswordStore(filesDir).chars()) }
     val state = DeviceStateTracker(context, bus)
     val helper =
         HelperConnection(
@@ -115,9 +113,6 @@ class AppGraph(
     /** The connected accessibility service, or null when it is disabled. */
     val a11y = MutableStateFlow<PhoneAccessibilityService?>(null)
 
-    /** Wake/unlock handling; installed by [start]. */
-    @Volatile var power: PowerService? = null
-
     val deviceInfo =
         DeviceInfoProvider(
             context = context,
@@ -130,25 +125,88 @@ class AppGraph(
 
     val uiTracker = UiChangeTracker(bus, state, scope, ioDispatcher)
     val nodes = NodeRegistry()
-
-    /** The helper registers its injection backends in these. */
-    val touchBackends = TouchBackends(A11yTouchBackend(a11y))
-    val keyBackends = KeyBackends(ImeKeyBackend(a11y))
-
-    init {
-        touchBackends.inject = InjectTouchBackend(helper, ioDispatcher)
-        keyBackends.helper = InjectKeyBackend(helper, ioDispatcher)
-    }
-
+    val touchBackends =
+        TouchBackends(
+            a11y = A11yTouchBackend(a11y),
+            inject = InjectTouchBackend(helper, ioDispatcher),
+        )
+    val keyBackends =
+        KeyBackends(ime = ImeKeyBackend(a11y), helper = InjectKeyBackend(helper, ioDispatcher))
     val touch = TouchInput(touchBackends, Humanizer()) { deviceInfo.display() }
     val targeting = NodeTargeting(::screenRect)
-    val snapshots = SnapshotEngine(this)
+    val snapshots =
+        SnapshotEngine(
+            a11y = a11y,
+            io = ioDispatcher,
+            seq = uiTracker.seq,
+            device = state,
+            nodes = nodes,
+            screenRect = ::screenRect,
+        )
     val screenshots = Screenshotter(a11y, ioDispatcher, ::helperScreenshot)
-    val ui: UiService = A11yUiService(this)
-    val input: InputService = InputServiceImpl(this)
-    val apps: AppsService = AppsServiceImpl(this)
-    val waits: WaitService = WaitServiceImpl(this)
+    val power: PowerService =
+        PowerServiceImpl(
+            context = context,
+            settings = settings,
+            seq = uiTracker.seq,
+            a11y = a11y,
+            state = state,
+            bus = bus,
+            shell = shell,
+            pins = pins,
+            touch = touch,
+            display = { deviceInfo.display() },
+            io = ioDispatcher,
+        )
+    val ui: UiService =
+        A11yUiService(
+            prepare = power::prepareForAction,
+            snapshots = snapshots,
+            a11y = a11y,
+            io = ioDispatcher,
+            nodes = nodes,
+            targeting = targeting,
+            touch = touch,
+            seq = uiTracker.seq,
+        )
+    val input: InputService =
+        InputServiceImpl(
+            prepare = power::prepareForAction,
+            io = ioDispatcher,
+            snapshots = snapshots,
+            seq = uiTracker.seq,
+            touch = touch,
+            a11y = a11y,
+            keyBackends = keyBackends,
+            state = state,
+            targeting = targeting,
+            display = { deviceInfo.display() },
+            touchBackends = touchBackends,
+        )
+    val apps: AppsService =
+        AppsServiceImpl(
+            context = context,
+            io = ioDispatcher,
+            prepare = power::prepareForAction,
+            invalidateSnapshots = snapshots::invalidate,
+            seq = uiTracker.seq,
+            shell = shell,
+            state = state,
+            bus = bus,
+        )
     val browser: BrowserService = browserService()
+    val waits: WaitService =
+        WaitServiceImpl(
+            prepare = power::prepareForAction,
+            uiTracker = uiTracker,
+            state = state,
+            bus = bus,
+            snapshots = snapshots,
+            a11y = a11y,
+            io = ioDispatcher,
+            browser = browser,
+            helper = helper,
+        )
     internal val video =
         VideoStream(
             StreamLease(context, settings),
@@ -166,7 +224,7 @@ class AppGraph(
             apps = apps,
             waits = waits,
             browser = browser,
-            power = { requirePower() },
+            power = power,
             tokens = tokens,
             ioDispatcher = ioDispatcher,
             device = GraphDevice(deviceInfo),
@@ -183,9 +241,10 @@ class AppGraph(
             shell = { argv -> this.shell.exec(argv) },
             cdp = HelperCdpPipes(helper, ioDispatcher),
             viewerText = { viewerLink() },
+            logcat = HelperLogcatFeed(helper, bus, ioDispatcher),
         )
 
-    val server = ApiServer(this)
+    val server = ApiServer({ tls }, services)
     val serverController =
         ServerController(scope, server, network, settings, MdnsAdvertiser(context))
 
@@ -205,13 +264,12 @@ class AppGraph(
                     message = if (outcome.ok) null else "The system cancelled the gesture",
                 )
             },
-            prepare = { autoWake -> prepareForAction(autoWake) },
+            prepare = { autoWake -> power.prepareForAction(autoWake) },
             sequence = { uiTracker.seq.value },
             invalidateSnapshots = { snapshots.invalidate() },
         )
 
     fun start() {
-        power = PowerServiceImpl(this)
         state.start()
         network.start()
         HelperStatusNotifier(context, helper).start(scope)
@@ -229,13 +287,6 @@ class AppGraph(
             }
         }
     }
-
-    fun requirePower(): PowerService =
-        power ?: throw ApiException.unavailable("power_unavailable", "Power control is not ready")
-
-    /** Runs before every action and snapshot; returns whether the device was woken. */
-    suspend fun prepareForAction(autoWake: Boolean, allowLocked: Boolean = false): Boolean =
-        power?.prepareForAction(autoWake, allowLocked) == true
 
     fun screenRect(): Rect = deviceInfo.display().let { Rect(0, 0, it.widthPx, it.heightPx) }
 

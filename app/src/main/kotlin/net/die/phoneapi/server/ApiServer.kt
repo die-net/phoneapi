@@ -20,7 +20,6 @@ import io.ktor.server.websocket.WebSockets
 import io.ktor.server.websocket.pingPeriod
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.serialization.SerializationException
-import net.die.phoneapi.AppGraph
 import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.mcp.installPhoneMcp
 import net.die.phoneapi.model.ApiError
@@ -35,8 +34,11 @@ import net.die.phoneapi.server.routes.tokenRoutes
 import net.die.phoneapi.server.routes.uiRoutes
 import net.die.phoneapi.server.routes.waitRoutes
 
-/** HTTPS + WebSocket API server (Ktor on Netty, since CIO cannot terminate TLS). */
-class ApiServer(private val graph: AppGraph) {
+/**
+ * HTTPS + WebSocket API server (Ktor on Netty, since CIO cannot terminate TLS). [tls] is resolved
+ * on the first start, which runs off the main thread.
+ */
+class ApiServer(private val tls: () -> TlsManager, private val services: ServerServices) {
     private var server:
         EmbeddedServer<NettyApplicationEngine, NettyApplicationEngine.Configuration>? =
         null
@@ -44,7 +46,7 @@ class ApiServer(private val graph: AppGraph) {
     @Synchronized
     fun start(host: String, port: Int) {
         stop()
-        val tls = graph.tls
+        val tls = tls()
         val password = tls.password
         val env = applicationEnvironment {}
         server =
@@ -65,7 +67,7 @@ class ApiServer(private val graph: AppGraph) {
                             this.port = port
                         }
                     },
-                    module = { phoneApiModule(graph.services) },
+                    module = { phoneApiModule(services) },
                 )
                 .also { it.start(wait = false) }
     }

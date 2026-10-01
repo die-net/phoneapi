@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.Flow
 import net.die.phoneapi.core.AppsService
 import net.die.phoneapi.core.BrowserService
 import net.die.phoneapi.core.InputService
+import net.die.phoneapi.core.LogcatFilter
 import net.die.phoneapi.core.PowerService
 import net.die.phoneapi.core.UiService
 import net.die.phoneapi.core.WaitService
@@ -29,7 +30,7 @@ data class ServerServices(
     val apps: AppsService,
     val waits: WaitService,
     val browser: BrowserService,
-    val power: () -> PowerService,
+    val power: PowerService,
     val tokens: TokenGateway,
     val ioDispatcher: CoroutineDispatcher,
     val device: DeviceFacts,
@@ -42,7 +43,13 @@ data class ServerServices(
     val shell: suspend (List<String>) -> ShellResult,
     val cdp: CdpPipes,
     val viewerText: () -> String,
+    val logcat: LogcatFeed,
 )
+
+/** Per-connection logcat. Not part of [ServerServices.events]; only clients that ask receive it. */
+fun interface LogcatFeed {
+    fun lines(filter: LogcatFilter): Flow<Event>
+}
 
 /** Bearer tokens. Implementations store only hashes. */
 interface TokenGateway {

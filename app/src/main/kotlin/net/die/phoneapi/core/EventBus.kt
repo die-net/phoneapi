@@ -23,6 +23,10 @@ class EventBus {
         get() = seq.get()
 
     fun emit(type: String, data: JsonObject = JsonObject(emptyMap())) {
-        flow.tryEmit(Event(type, System.currentTimeMillis(), seq.incrementAndGet(), data))
+        flow.tryEmit(next(type, data))
     }
+
+    /** Same clock and sequence as [emit], without publishing on [events]. */
+    fun next(type: String, data: JsonObject = JsonObject(emptyMap())): Event =
+        Event(type, System.currentTimeMillis(), seq.incrementAndGet(), data)
 }

@@ -1,20 +1,28 @@
 package net.die.phoneapi.wait
 
 import android.os.SystemClock
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
-import net.die.phoneapi.AppGraph
+import net.die.phoneapi.a11y.PhoneAccessibilityService
+import net.die.phoneapi.a11y.SnapshotEngine
+import net.die.phoneapi.a11y.UiChangeTracker
 import net.die.phoneapi.core.ApiException
+import net.die.phoneapi.core.BrowserService
+import net.die.phoneapi.core.DeviceStateTracker
+import net.die.phoneapi.core.EventBus
 import net.die.phoneapi.core.SnapshotOptions
 import net.die.phoneapi.core.WaitService
+import net.die.phoneapi.helperclient.HelperConnection
 import net.die.phoneapi.model.Scope
 import net.die.phoneapi.model.WaitRequest
 import net.die.phoneapi.model.WaitResult
@@ -28,7 +36,17 @@ import net.die.phoneapi.model.WaitResult
  * Browser conditions open a DevTools session for the wait and wake the same loop when Chrome
  * reports a page, network, or target event.
  */
-class WaitServiceImpl(private val graph: AppGraph) : WaitService {
+class WaitServiceImpl(
+    private val prepare: suspend (Boolean, Boolean) -> Boolean,
+    private val uiTracker: UiChangeTracker,
+    private val state: DeviceStateTracker,
+    private val bus: EventBus,
+    private val snapshots: SnapshotEngine,
+    private val a11y: StateFlow<PhoneAccessibilityService?>,
+    private val io: CoroutineDispatcher,
+    private val browser: BrowserService,
+    private val helper: HelperConnection,
+) : WaitService {
     private data class Outcome(
         val matched: Boolean,
         val matchedAll: List<Int>,
@@ -41,10 +59,20 @@ class WaitServiceImpl(private val graph: AppGraph) : WaitService {
         validate(request)
         // Waiting never wakes the device on its own, but it does keep the screen from going dark
         // underneath a long wait.
-        graph.prepareForAction(autoWake = false, allowLocked = true)
-        val browser =
-            BrowserWatch(graph).takeIf { (request.all + request.any).any(::isBrowserCondition) }
-        val watchers = ConditionWatchers(graph, browser)
+        prepare(false, true)
+        val browserWatch =
+            BrowserWatch(browser, io, helper).takeIf {
+                (request.all + request.any).any(::isBrowserCondition)
+            }
+        val watchers =
+            ConditionWatchers(
+                snapshots = snapshots,
+                state = state,
+                a11y = a11y,
+                io = io,
+                lastChangeMs = { uiTracker.lastChangeMs },
+                browser = browserWatch,
+            )
         val all = request.all.map(watchers::watcher)
         val any = request.any.map(watchers::watcher)
         val started = SystemClock.uptimeMillis()
@@ -52,8 +80,10 @@ class WaitServiceImpl(private val graph: AppGraph) : WaitService {
         return coroutineScope {
             val changes = Channel<Unit>(Channel.CONFLATED)
             try {
-                browser?.open(request.all + request.any, request.timeoutMs)
-                val pump: Job = launch { changeSources(browser).collect { changes.trySend(Unit) } }
+                browserWatch?.open(request.all + request.any, request.timeoutMs)
+                val pump: Job = launch {
+                    changeSources(browserWatch).collect { changes.trySend(Unit) }
+                }
                 try {
                     val outcome = await(all, any, deadline, changes)
                     if (outcome.matched) settle(request.settleMs, deadline, changes)
@@ -62,7 +92,7 @@ class WaitServiceImpl(private val graph: AppGraph) : WaitService {
                     pump.cancel()
                 }
             } finally {
-                browser?.close()
+                browserWatch?.close()
             }
         }
     }
@@ -114,7 +144,7 @@ class WaitServiceImpl(private val graph: AppGraph) : WaitService {
         if (settleMs <= 0) return
         while (true) {
             val now = SystemClock.uptimeMillis()
-            val quietAt = graph.uiTracker.lastChangeMs + settleMs
+            val quietAt = uiTracker.lastChangeMs + settleMs
             if (now >= quietAt || now >= deadline) return
             withTimeoutOrNull((minOf(quietAt, deadline) - now).coerceAtLeast(1)) {
                 changes.receive()
@@ -125,10 +155,10 @@ class WaitServiceImpl(private val graph: AppGraph) : WaitService {
     private fun changeSources(browser: BrowserWatch?): Flow<Any> {
         val device =
             merge(
-                graph.uiTracker.seq.drop(1),
-                graph.uiTracker.windowsVersion.drop(1),
-                graph.state.state.drop(1),
-                graph.bus.events,
+                uiTracker.seq.drop(1),
+                uiTracker.windowsVersion.drop(1),
+                state.state.drop(1),
+                bus.events,
             )
         val page = browser?.changes ?: return device
         return merge(device, page)
@@ -147,11 +177,11 @@ class WaitServiceImpl(private val graph: AppGraph) : WaitService {
             matchedAny = outcome.matchedAny,
             snapshot =
                 if (request.snapshot) {
-                    graph.snapshots.snapshot(SnapshotOptions(format = request.snapshotFormat))
+                    snapshots.snapshot(SnapshotOptions(format = request.snapshotFormat))
                 } else {
                     null
                 },
-            state = graph.state.current,
+            state = state.refresh(),
         )
 
     private fun validate(request: WaitRequest) {

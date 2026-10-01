@@ -38,14 +38,12 @@ class ImeKeyBackend(private val service: StateFlow<AccessibilityService?>) : Key
 }
 
 /**
- * Picks where key events go. Editing keys go to the focused editor through [ime]; everything else
- * needs the helper, which registers itself in [helper].
+ * Picks where key events go. Editing keys go to the focused editor through [ime] when that
+ * connection is live; every other key, and editing keys with no editor, go through [helper].
  */
-class KeyBackends(private val ime: KeyBackend) {
-    @Volatile var helper: KeyBackend? = null
-
+class KeyBackends(private val ime: KeyBackend, val helper: KeyBackend) {
     fun forKey(keyCode: Int): KeyBackend {
-        val injected = helper?.takeIf { it.isAvailable }
+        val injected = helper.takeIf { it.isAvailable }
         if (keyCode !in EDITOR_KEYS) return injected ?: throw ApiException.helperUnavailable()
         return ime.takeIf { it.isAvailable }
             ?: injected

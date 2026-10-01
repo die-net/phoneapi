@@ -41,6 +41,7 @@ class McpEndpointTest {
         assertTrue("wait_for" in names)
         assertTrue("screenshot" in names)
         assertFalse("tap" in names)
+        assertFalse("keyboard_show" in names)
         assertFalse("browser_targets" in names)
 
         api.capabilities = api.capabilities.copy(browserCdp = false, logcatAll = false)

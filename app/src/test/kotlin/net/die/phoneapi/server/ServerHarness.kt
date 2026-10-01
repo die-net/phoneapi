@@ -34,6 +34,7 @@ import net.die.phoneapi.model.FindRequest
 import net.die.phoneapi.model.FindResult
 import net.die.phoneapi.model.GestureRequest
 import net.die.phoneapi.model.HelperStatus
+import net.die.phoneapi.model.ImeShowRequest
 import net.die.phoneapi.model.ImeState
 import net.die.phoneapi.model.IntentRequest
 import net.die.phoneapi.model.KeyRequest
@@ -97,6 +98,7 @@ internal class FakeApi {
     val waits = RecordingWaits()
     var capabilities = allCapabilities()
     var inputTaps = 0
+    var imeShow: ImeShowRequest? = null
 
     val services: ServerServices =
         ServerServices(
@@ -117,11 +119,16 @@ internal class FakeApi {
                     override suspend fun text(request: TextRequest) = acted()
 
                     override suspend fun hideIme() = acted()
+
+                    override suspend fun showIme(request: ImeShowRequest): ActionResult {
+                        imeShow = request
+                        return acted()
+                    }
                 },
             apps = FakeApps,
             waits = waits,
             browser = FakeBrowser,
-            power = { FakePower },
+            power = FakePower,
             tokens = tokens,
             ioDispatcher = Dispatchers.Unconfined,
             device =
@@ -141,6 +148,7 @@ internal class FakeApi {
             shell = { _ -> ShellResult(exit = 0, stdout = "log") },
             cdp = CdpPipes { _ -> IdlePipe },
             viewerText = { "https://127.0.0.1:1/viewer?access_token=TOKEN" },
+            logcat = LogcatFeed { _ -> emptyFlow() },
         )
 
     private object IdlePipe : CdpPipe {

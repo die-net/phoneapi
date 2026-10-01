@@ -2,16 +2,23 @@ package net.die.phoneapi.input
 
 import android.accessibilityservice.AccessibilityService
 import android.view.KeyEvent
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import net.die.phoneapi.AppGraph
 import net.die.phoneapi.a11y.NodeCompat
+import net.die.phoneapi.a11y.NodeTargeting
+import net.die.phoneapi.a11y.PhoneAccessibilityService
+import net.die.phoneapi.a11y.SnapshotEngine
 import net.die.phoneapi.a11y.require
 import net.die.phoneapi.core.ApiException
+import net.die.phoneapi.core.DeviceStateTracker
 import net.die.phoneapi.core.InputService
 import net.die.phoneapi.model.ActionResult
+import net.die.phoneapi.model.DisplayInfo
 import net.die.phoneapi.model.GestureRequest
+import net.die.phoneapi.model.ImeShowRequest
 import net.die.phoneapi.model.KeyRequest
 import net.die.phoneapi.model.NodeSelector
 import net.die.phoneapi.model.Point
@@ -21,8 +28,31 @@ import net.die.phoneapi.model.SwipeRequest
 import net.die.phoneapi.model.TapRequest
 import net.die.phoneapi.model.TextRequest
 
-class InputServiceImpl(private val graph: AppGraph) : InputService {
-    private val typer = TextTyper(graph)
+class InputServiceImpl(
+    private val prepare: suspend (Boolean, Boolean) -> Boolean,
+    private val io: CoroutineDispatcher,
+    private val snapshots: SnapshotEngine,
+    private val seq: StateFlow<Long>,
+    private val touch: TouchInput,
+    private val a11y: StateFlow<PhoneAccessibilityService?>,
+    private val keyBackends: KeyBackends,
+    private val state: DeviceStateTracker,
+    private val targeting: NodeTargeting,
+    private val display: () -> DisplayInfo,
+    touchBackends: TouchBackends,
+) : InputService {
+    private val typer =
+        TextTyper(
+            a11y,
+            io,
+            snapshots,
+            targeting,
+            touch,
+            state,
+            touchBackends,
+            keyBackends,
+        )
+    private val imeShow = ImeShow(a11y, state, snapshots)
 
     override suspend fun tap(request: TapRequest): ActionResult =
         action(request.autoWake) {
@@ -34,7 +64,7 @@ class InputServiceImpl(private val graph: AppGraph) : InputService {
                 request.selector?.let { nodeTarget(it, request.force) }
                     ?: pointTarget(request.x, request.y, request.humanize)
             val outcome =
-                graph.touch.tap(
+                touch.tap(
                     target,
                     request.count,
                     request.holdMs,
@@ -51,7 +81,7 @@ class InputServiceImpl(private val graph: AppGraph) : InputService {
             }
             val (from, to) = swipeEnds(request)
             val spec = SwipeSpec(request.durationMs, request.fling, request.humanize)
-            result(graph.touch.swipe(from, to, spec, request.backend))
+            result(touch.swipe(from, to, spec, request.backend))
         }
 
     override suspend fun gesture(request: GestureRequest): ActionResult =
@@ -65,7 +95,7 @@ class InputServiceImpl(private val graph: AppGraph) : InputService {
             }
             if (pointers.any { path -> path.any { it.tMs < 0 } })
                 throw ApiException.badRequest("tMs must be >= 0")
-            result(graph.touch.gesture(pointers, request.backend))
+            result(touch.gesture(pointers, request.backend))
         }
 
     override suspend fun key(request: KeyRequest): ActionResult =
@@ -73,7 +103,7 @@ class InputServiceImpl(private val graph: AppGraph) : InputService {
             val name = request.key.trim().uppercase().removePrefix("KEYCODE_")
             val global = GLOBAL_ACTIONS[name]
             if (global != null) {
-                val ok = graph.a11y.require().performGlobalAction(global)
+                val ok = a11y.require().performGlobalAction(global)
                 ActionResult(ok = ok, backend = "global")
             } else {
                 val code =
@@ -84,7 +114,7 @@ class InputServiceImpl(private val graph: AppGraph) : InputService {
                             it != KeyEvent.KEYCODE_UNKNOWN
                         }
                         ?: throw ApiException.badRequest("Unknown key '${request.key}'")
-                val backend = graph.keyBackends.press(code, request.metaState, request.longPress)
+                val backend = keyBackends.press(code, request.metaState, request.longPress)
                 ActionResult(ok = true, backend = backend)
             }
         }
@@ -96,8 +126,8 @@ class InputServiceImpl(private val graph: AppGraph) : InputService {
 
     override suspend fun hideIme(): ActionResult =
         action(autoWake = true) {
-            val service = graph.a11y.require()
-            if (!graph.state.ime.visible) {
+            val service = a11y.require()
+            if (!state.ime.visible) {
                 ActionResult(ok = true, message = "The keyboard is already hidden")
             } else {
                 service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
@@ -117,15 +147,18 @@ class InputServiceImpl(private val graph: AppGraph) : InputService {
             }
         }
 
+    override suspend fun showIme(request: ImeShowRequest): ActionResult =
+        action(request.autoWake) { imeShow.show(request) }
+
     private suspend fun awaitImeHidden(): Boolean =
-        withTimeoutOrNull(IME_HIDE_WAIT_MS) { graph.state.state.first { !it.ime.visible } } != null
+        withTimeoutOrNull(IME_HIDE_WAIT_MS) { state.state.first { !it.ime.visible } } != null
 
     /** Wakes if needed, runs [block] off the main thread, and fills in `woke` and `seq`. */
     private suspend fun action(autoWake: Boolean, block: suspend () -> ActionResult): ActionResult {
-        val woke = graph.prepareForAction(autoWake)
-        val result = withContext(graph.ioDispatcher) { block() }
-        graph.snapshots.invalidate()
-        return result.copy(woke = woke, seq = graph.uiTracker.seq.value)
+        val woke = prepare(autoWake, false)
+        val result = withContext(io) { block() }
+        snapshots.invalidate()
+        return result.copy(woke = woke, seq = seq.value)
     }
 
     private fun result(outcome: TouchOutcome) =
@@ -137,10 +170,10 @@ class InputServiceImpl(private val graph: AppGraph) : InputService {
         )
 
     private suspend fun nodeTarget(selector: NodeSelector, force: Boolean): Rect {
-        val service = graph.a11y.require()
-        val node = graph.snapshots.resolve(selector)
+        val service = a11y.require()
+        val node = snapshots.resolve(selector)
         try {
-            return graph.targeting.touchTarget(service, node, force)
+            return targeting.touchTarget(service, node, force)
         } finally {
             NodeCompat.recycle(node)
         }
@@ -176,10 +209,10 @@ class InputServiceImpl(private val graph: AppGraph) : InputService {
 
     /** The screen minus a margin, so direction swipes don't start in the system gesture areas. */
     private fun screenArea(): Rect {
-        val display = graph.deviceInfo.display()
-        val mx = (display.widthPx * EDGE_MARGIN).toInt()
-        val my = (display.heightPx * EDGE_MARGIN).toInt()
-        return Rect(mx, my, display.widthPx - mx, display.heightPx - my)
+        val screen = display()
+        val mx = (screen.widthPx * EDGE_MARGIN).toInt()
+        val my = (screen.heightPx * EDGE_MARGIN).toInt()
+        return Rect(mx, my, screen.widthPx - mx, screen.heightPx - my)
     }
 
     private companion object {

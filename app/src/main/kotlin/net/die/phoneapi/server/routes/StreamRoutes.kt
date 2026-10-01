@@ -30,11 +30,11 @@ fun Route.streamRoutes(services: ServerServices) {
     scoped(Scope.STREAM) {
         get(VIEWER_PATH) { call.respondBytes(viewer.bytes(), ContentType.Text.Html) }
         webSocket("/v1/stream/video") {
-            services.power().wake()
+            services.power.wake()
             services.video.serve(this, videoSpec(call))
         }
         webSocket("/v1/stream/audio") {
-            services.power().wake()
+            services.power.wake()
             services.audio.serve(this)
         }
     }

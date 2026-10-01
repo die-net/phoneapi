@@ -2,23 +2,31 @@ package net.die.phoneapi.power
 
 import android.accessibilityservice.AccessibilityService
 import android.app.KeyguardManager
+import android.content.Context
 import android.util.Log
 import kotlin.random.Random
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import net.die.phoneapi.AppGraph
+import net.die.phoneapi.a11y.PhoneAccessibilityService
 import net.die.phoneapi.a11y.require
 import net.die.phoneapi.core.ApiException
+import net.die.phoneapi.core.DeviceStateTracker
+import net.die.phoneapi.core.EventBus
 import net.die.phoneapi.core.PowerService
+import net.die.phoneapi.core.SettingsStore
 import net.die.phoneapi.core.awaitDeviceState
+import net.die.phoneapi.helperclient.HelperShell
 import net.die.phoneapi.helperclient.failureMessage
 import net.die.phoneapi.input.SwipeSpec
+import net.die.phoneapi.input.TouchInput
 import net.die.phoneapi.model.ActionResult
-import net.die.phoneapi.model.DeviceStateSummary
+import net.die.phoneapi.model.DisplayInfo
 import net.die.phoneapi.model.Point
 import net.die.phoneapi.model.ScreenState
 import net.die.phoneapi.model.UnlockRequest
@@ -30,10 +38,22 @@ import net.die.phoneapi.model.UnlockRequest
  * Wake and unlock run one at a time, so concurrent requests (an agent firing several calls at once)
  * queue behind a single attempt instead of fighting each other on the lock screen.
  */
-class PowerServiceImpl(private val graph: AppGraph, private val random: Random = Random.Default) :
-    PowerService {
-    private val keyguard = graph.context.getSystemService(KeyguardManager::class.java)
-    private val lease = AwakeLease(graph.context, graph.settings)
+class PowerServiceImpl(
+    private val context: Context,
+    settings: SettingsStore,
+    private val seq: StateFlow<Long>,
+    private val a11y: StateFlow<PhoneAccessibilityService?>,
+    private val state: DeviceStateTracker,
+    private val bus: EventBus,
+    private val shell: HelperShell,
+    private val pins: PinStore,
+    private val touch: TouchInput,
+    private val display: () -> DisplayInfo,
+    private val io: CoroutineDispatcher,
+    private val random: Random = Random.Default,
+) : PowerService {
+    private val keyguard = context.getSystemService(KeyguardManager::class.java)
+    private val lease = AwakeLease(context, settings)
     private val mutex = Mutex()
 
     /** What an unlock attempt did, and why it failed if it did. */
@@ -72,19 +92,19 @@ class PowerServiceImpl(private val graph: AppGraph, private val random: Random =
             backend = attempt.backend,
             woke = woke,
             points = attempt.points,
-            seq = graph.uiTracker.seq.value,
+            seq = seq.value,
         )
     }
 
     override suspend fun lock(): ActionResult = mutex.withLock {
-        val service = graph.a11y.require()
+        val service = a11y.require()
         // Otherwise our own lease would light the screen straight back up.
         lease.release()
         if (!service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_LOCK_SCREEN)) {
             throw ApiException(409, "lock_failed", "The system refused to lock the screen")
         }
         val locked =
-            awaitDeviceState(graph.state, graph.bus, LOCK_WAIT_MS) {
+            awaitDeviceState(state, bus, LOCK_WAIT_MS) {
                 it.screen != ScreenState.ON || it.keyguard.locked
             }
         ActionResult(
@@ -96,9 +116,9 @@ class PowerServiceImpl(private val graph: AppGraph, private val random: Random =
 
     override suspend fun prepareForAction(autoWake: Boolean, allowLocked: Boolean): Boolean {
         lease.extend()
-        val state = graph.state.current
-        val needsWake = autoWake && state.screen != ScreenState.ON
-        val needsUnlock = !allowLocked && state.keyguard.locked
+        val summary = state.refresh()
+        val needsWake = autoWake && summary.screen != ScreenState.ON
+        val needsUnlock = !allowLocked && summary.keyguard.locked
         if (!needsWake && !needsUnlock) return false
         return mutex.withLock { prepare(autoWake, allowLocked) }
     }
@@ -123,24 +143,24 @@ class PowerServiceImpl(private val graph: AppGraph, private val random: Random =
         return changed
     }
 
-    private fun screenOn(): Boolean = graph.state.current.screen == ScreenState.ON
+    private fun screenOn(): Boolean = state.refresh().screen == ScreenState.ON
 
     /** Starts a wake attempt and returns the backend that ran it. */
     private suspend fun turnScreenOn(): String {
-        if (graph.shell.isAvailable) {
-            val result = graph.shell.exec(listOf("input", "keyevent", "KEYCODE_WAKEUP"))
+        if (shell.isAvailable) {
+            val result = shell.exec(listOf("input", "keyevent", "KEYCODE_WAKEUP"))
             if (result.ok) return "keyevent"
             Log.w(TAG, "KEYCODE_WAKEUP failed: ${result.failureMessage()}")
         }
-        WakeActivity.start(graph.context)
+        WakeActivity.start(context)
         return "activity"
     }
 
     private suspend fun awaitScreenOn(): Boolean =
-        awaitDeviceState(graph.state, graph.bus, WAKE_WAIT_MS) { it.screen == ScreenState.ON }
+        awaitDeviceState(state, bus, WAKE_WAIT_MS) { it.screen == ScreenState.ON }
 
     private suspend fun awaitUnlocked(): Boolean =
-        awaitDeviceState(graph.state, graph.bus, UNLOCK_WAIT_MS) { !it.keyguard.locked }
+        awaitDeviceState(state, bus, UNLOCK_WAIT_MS) { !it.keyguard.locked }
 
     private suspend fun dismissKeyguard(useStoredPin: Boolean): Attempt {
         if (!keyguard.isDeviceSecure) return dismissInsecure()
@@ -150,18 +170,18 @@ class PowerServiceImpl(private val graph: AppGraph, private val random: Random =
                 message = "The lock screen is secure and useStoredPin is off",
             )
         }
-        val pin = graph.pins.read() ?: return Attempt(ok = false, message = NO_PIN)
+        val pin = pins.read() ?: return Attempt(ok = false, message = NO_PIN)
         return enterPin(pin)
     }
 
     /** A lock screen with no credential only has to be swiped (or told) out of the way. */
     private suspend fun dismissInsecure(): Attempt {
-        if (graph.shell.isAvailable) {
-            val result = graph.shell.exec(listOf("wm", "dismiss-keyguard"))
+        if (shell.isAvailable) {
+            val result = shell.exec(listOf("wm", "dismiss-keyguard"))
             if (result.ok && awaitUnlocked())
                 return Attempt(ok = true, backend = "dismiss-keyguard")
         }
-        WakeActivity.start(graph.context, dismissKeyguard = true)
+        WakeActivity.start(context, dismissKeyguard = true)
         if (awaitUnlocked()) return Attempt(ok = true, backend = "requestDismissKeyguard")
         val points = swipeUp()
         return if (awaitUnlocked()) {
@@ -177,7 +197,7 @@ class PowerServiceImpl(private val graph: AppGraph, private val random: Random =
     }
 
     private suspend fun enterPin(pin: String): Attempt {
-        val service = graph.a11y.require()
+        val service = a11y.require()
         val points = ArrayList<Point>()
         var keypad = scanKeypad(service)
         if (!keypad.covers(pin)) {
@@ -190,13 +210,13 @@ class PowerServiceImpl(private val graph: AppGraph, private val random: Random =
         }
         for ((i, digit) in pin.withIndex()) {
             if (i > 0) delay(random.nextLong(MIN_DIGIT_GAP_MS, MAX_DIGIT_GAP_MS))
-            val outcome = graph.touch.tap(checkNotNull(keypad.digits[digit]))
+            val outcome = touch.tap(checkNotNull(keypad.digits[digit]))
             points += outcome.points
             if (!outcome.ok) {
                 return Attempt(ok = false, points = points, message = "A keypad tap was cancelled")
             }
         }
-        keypad.submit?.let { points += graph.touch.tap(it).points }
+        keypad.submit?.let { points += touch.tap(it).points }
         return if (awaitUnlocked()) {
             Attempt(ok = true, backend = "pin", points = points)
         } else {
@@ -205,12 +225,12 @@ class PowerServiceImpl(private val graph: AppGraph, private val random: Random =
     }
 
     private suspend fun scanKeypad(service: AccessibilityService): Keypad =
-        withContext(graph.ioDispatcher) { PinPad.scan(service) }
+        withContext(io) { PinPad.scan(service) }
 
     /** Brings up the credential prompt, and returns the points touched doing it. */
     private suspend fun revealBouncer(): List<Point> {
-        if (graph.shell.isAvailable) {
-            val result = graph.shell.exec(listOf("wm", "dismiss-keyguard"))
+        if (shell.isAvailable) {
+            val result = shell.exec(listOf("wm", "dismiss-keyguard"))
             if (result.ok) {
                 awaitUiChange()
                 return emptyList()
@@ -222,17 +242,17 @@ class PowerServiceImpl(private val graph: AppGraph, private val random: Random =
     }
 
     private suspend fun swipeUp(): List<Point> {
-        val display = graph.deviceInfo.display()
-        val x = display.widthPx / 2f
-        val from = Point(x, display.heightPx * SWIPE_FROM)
-        val to = Point(x, display.heightPx * SWIPE_TO)
-        return graph.touch.swipe(from, to, SwipeSpec(durationMs = SWIPE_MS, fling = true)).points
+        val screen = display()
+        val x = screen.widthPx / 2f
+        val from = Point(x, screen.heightPx * SWIPE_FROM)
+        val to = Point(x, screen.heightPx * SWIPE_TO)
+        return touch.swipe(from, to, SwipeSpec(durationMs = SWIPE_MS, fling = true)).points
     }
 
     /** Lets the bouncer's window settle before reading the tree again. */
     private suspend fun awaitUiChange() {
-        val before = graph.uiTracker.seq.value
-        withTimeoutOrNull(BOUNCER_WAIT_MS) { graph.uiTracker.seq.first { it != before } }
+        val before = seq.value
+        withTimeoutOrNull(BOUNCER_WAIT_MS) { seq.first { it != before } }
         delay(BOUNCER_SETTLE_MS)
     }
 
@@ -242,21 +262,21 @@ class PowerServiceImpl(private val graph: AppGraph, private val random: Random =
             "wake_failed",
             "The screen did not turn on. Without the helper this needs permission to start " +
                 "activities from the background.",
-            state = graph.state.current,
+            state = state.refresh(),
         )
 
     private fun needsUser(why: String?) =
-        ApiException(409, "needs_user", why ?: NO_PIN, state = graph.state.current)
+        ApiException(409, "needs_user", why ?: NO_PIN, state = state.refresh())
 
     private fun deviceLocked(why: String?): ApiException {
-        val state: DeviceStateSummary = graph.state.current
+        val summary = state.refresh()
         val detail = why?.let { " ($it)" }.orEmpty()
         return ApiException(
             409,
             "device_locked",
             "The device is locked$detail. Unlock it with POST /v1/device/unlock, or pass " +
                 "autoWake=true once a PIN is configured.",
-            state = state,
+            state = summary,
         )
     }
 

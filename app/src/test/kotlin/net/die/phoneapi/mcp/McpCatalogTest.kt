@@ -29,6 +29,8 @@ class McpCatalogTest {
         assertTrue("ui_snapshot" in names)
         assertTrue("screenshot" in names)
         assertFalse("tap" in names)
+        assertFalse("keyboard_show" in names)
+        assertFalse("keyboard_hide" in names)
         assertFalse("browser_targets" in names)
         assertFalse("app_clear" in names)
     }
@@ -57,6 +59,18 @@ class McpCatalogTest {
         assertFalse("app_stop" in names)
         assertTrue("app_launch" in names)
         assertTrue("browser_eval" in names)
+    }
+
+    @Test
+    fun `keyboard show needs a11y`() {
+        val control = visibleMcpTools(setOf(Scope.CONTROL), allOn()).map { it.name }
+        assertTrue("keyboard_show" in control)
+        assertTrue("keyboard_hide" in control)
+        val noA11y =
+            visibleMcpTools(setOf(Scope.CONTROL), allOn().copy(inputA11y = false)).map { it.name }
+        assertFalse("keyboard_show" in noA11y)
+        val show = mcpToolTemplates().first { it.name == "keyboard_show" }
+        assertTrue(show.schema.properties!!.keys.containsAll(listOf("selector", "autoWake")))
     }
 
     @Test

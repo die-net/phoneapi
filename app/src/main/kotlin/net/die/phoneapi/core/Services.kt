@@ -12,6 +12,7 @@ import net.die.phoneapi.model.EvalResult
 import net.die.phoneapi.model.FindRequest
 import net.die.phoneapi.model.FindResult
 import net.die.phoneapi.model.GestureRequest
+import net.die.phoneapi.model.ImeShowRequest
 import net.die.phoneapi.model.IntentRequest
 import net.die.phoneapi.model.KeyRequest
 import net.die.phoneapi.model.LaunchRequest
@@ -59,6 +60,8 @@ interface InputService {
     suspend fun text(request: TextRequest): ActionResult
 
     suspend fun hideIme(): ActionResult
+
+    suspend fun showIme(request: ImeShowRequest): ActionResult
 }
 
 interface PowerService {

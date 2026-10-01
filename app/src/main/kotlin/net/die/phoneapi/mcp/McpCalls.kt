@@ -15,12 +15,14 @@ import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.core.ApiJson
 import net.die.phoneapi.core.ScreenshotScale
 import net.die.phoneapi.core.SnapshotOptions
+import net.die.phoneapi.core.checkLogTag
 import net.die.phoneapi.core.windowId
 import net.die.phoneapi.model.ActionMode
 import net.die.phoneapi.model.BrowserTapRequest
 import net.die.phoneapi.model.ConsoleRequest
 import net.die.phoneapi.model.EvalRequest
 import net.die.phoneapi.model.FindRequest
+import net.die.phoneapi.model.ImeShowRequest
 import net.die.phoneapi.model.IntentRequest
 import net.die.phoneapi.model.KeyRequest
 import net.die.phoneapi.model.LaunchRequest
@@ -129,6 +131,13 @@ internal suspend fun keyboardHide(services: ServerServices): CallToolResult = ru
     jsonText(services.input.hideIme())
 }
 
+internal suspend fun keyboardShow(
+    services: ServerServices,
+    request: CallToolRequest,
+): CallToolResult = runTool {
+    jsonText(services.input.showIme(request.args<ImeShowRequest>()))
+}
+
 internal suspend fun appLaunch(services: ServerServices, request: CallToolRequest): CallToolResult =
     runTool {
         val args = request.args<PackageArgs>()
@@ -158,15 +167,15 @@ internal suspend fun openIntent(
 }
 
 internal suspend fun deviceWake(services: ServerServices): CallToolResult = runTool {
-    jsonText(services.power().wake())
+    jsonText(services.power.wake())
 }
 
 internal suspend fun deviceUnlock(services: ServerServices): CallToolResult = runTool {
-    jsonText(services.power().unlock(UnlockRequest()))
+    jsonText(services.power.unlock(UnlockRequest()))
 }
 
 internal suspend fun deviceLock(services: ServerServices): CallToolResult = runTool {
-    jsonText(services.power().lock())
+    jsonText(services.power.lock())
 }
 
 internal suspend fun browserTargets(services: ServerServices): CallToolResult = runTool {
@@ -261,9 +270,7 @@ internal suspend fun logcatTail(
         throw ApiException.badRequest("lines must be 1..$MAX_LOG_LINES")
     }
     val tag = args.tag
-    if (tag != null && !LOG_TAG.matches(tag)) {
-        throw ApiException.badRequest("tag must be letters, digits, dots, or underscores")
-    }
+    if (tag != null) checkLogTag(tag, "tag")
     val argv = mutableListOf("logcat", "-d", "-t", args.lines.toString())
     if (tag != null) argv += "$tag:I"
     val result = services.shell(argv)
@@ -382,6 +389,5 @@ internal data class WaitArgs(
     @Doc("Include a fresh UI snapshot in the result.") val snapshot: Boolean = false,
 )
 
-private val LOG_TAG = Regex("[A-Za-z0-9._-]{1,80}")
 private const val MAX_PNG_BYTES = 1_500_000
 private const val MAX_LOG_LINES = 400

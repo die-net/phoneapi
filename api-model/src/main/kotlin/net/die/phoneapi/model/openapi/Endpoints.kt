@@ -20,6 +20,7 @@ import net.die.phoneapi.model.Event
 import net.die.phoneapi.model.FindRequest
 import net.die.phoneapi.model.FindResult
 import net.die.phoneapi.model.GestureRequest
+import net.die.phoneapi.model.ImeShowRequest
 import net.die.phoneapi.model.IntentRequest
 import net.die.phoneapi.model.KeyRequest
 import net.die.phoneapi.model.LaunchRequest
@@ -191,6 +192,14 @@ public val phoneApiEndpoints: List<ApiEndpoint> =
             response = serializer<ActionResult>(),
         ),
         endpoint(
+            ApiMethod.POST,
+            "/v1/ime/show",
+            Scope.CONTROL,
+            "Focus an editable node and show the soft keyboard.",
+            serializer<ImeShowRequest>(),
+            serializer<ActionResult>(),
+        ),
+        endpoint(
             ApiMethod.GET,
             "/v1/apps",
             Scope.OBSERVE,
@@ -299,7 +308,7 @@ public val phoneApiEndpoints: List<ApiEndpoint> =
             ApiMethod.WEBSOCKET,
             "/v1/events",
             Scope.OBSERVE,
-            "Stream device events as JSON text frames.",
+            "Stream device events as JSON text frames. Logcat is included only when types contains logcat.",
             response = serializer<Event>(),
         ),
         endpoint(

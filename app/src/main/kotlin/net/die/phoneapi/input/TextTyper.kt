@@ -11,14 +11,19 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction
 import android.view.inputmethod.EditorInfo
 import kotlin.random.Random
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import net.die.phoneapi.AppGraph
 import net.die.phoneapi.a11y.NodeCompat
+import net.die.phoneapi.a11y.NodeTargeting
+import net.die.phoneapi.a11y.PhoneAccessibilityService
+import net.die.phoneapi.a11y.SnapshotEngine
 import net.die.phoneapi.a11y.require
 import net.die.phoneapi.core.ApiException
+import net.die.phoneapi.core.DeviceStateTracker
 import net.die.phoneapi.model.ActionResult
 import net.die.phoneapi.model.InputBackend
 import net.die.phoneapi.model.NodeSelector
@@ -27,12 +32,22 @@ import net.die.phoneapi.model.TextMode
 import net.die.phoneapi.model.TextRequest
 
 /** Types text in one of the [TextMode]s, from most to least realistic. */
-class TextTyper(private val graph: AppGraph, private val random: Random = Random.Default) {
+class TextTyper(
+    private val a11y: StateFlow<PhoneAccessibilityService?>,
+    private val io: CoroutineDispatcher,
+    private val snapshots: SnapshotEngine,
+    private val targeting: NodeTargeting,
+    private val touch: TouchInput,
+    private val state: DeviceStateTracker,
+    private val touchBackends: TouchBackends,
+    private val keyBackends: KeyBackends,
+    private val random: Random = Random.Default,
+) {
 
     suspend fun type(request: TextRequest): ActionResult {
         validate(request)
-        val service = graph.a11y.require()
-        return withContext(graph.ioDispatcher) {
+        val service = a11y.require()
+        return withContext(io) {
             val points = ArrayList<Point>()
             request.selector?.let { focus(service, it, points) }
             val result =
@@ -63,10 +78,10 @@ class TextTyper(private val graph: AppGraph, private val random: Random = Random
         selector: NodeSelector,
         points: MutableList<Point>,
     ) {
-        val node = graph.snapshots.resolve(selector)
+        val node = snapshots.resolve(selector)
         try {
-            val target = graph.targeting.touchTarget(service, node, force = false)
-            val outcome = graph.touch.tap(target)
+            val target = targeting.touchTarget(service, node, force = false)
+            val outcome = touch.tap(target)
             points += outcome.points
             if (!outcome.ok) throw gestureCancelled()
             if (node.isEditable) {
@@ -172,7 +187,7 @@ class TextTyper(private val graph: AppGraph, private val random: Random = Random
     ): ActionResult? {
         val unsupported = request.text.filterNot { it == '\n' || it in ' '..'~' }.toSet()
         if (unsupported.isNotEmpty()) throw unsupportedChars(unsupported)
-        withTimeoutOrNull(IME_WAIT_MS) { graph.state.state.first { it.ime.visible } }
+        withTimeoutOrNull(IME_WAIT_MS) { state.state.first { it.ime.visible } }
         if (!KeyMatcher.looksLikeKeyboard(ImeKeyboard.scan(service))) return null
         if (request.clear) clearWithKeyboard(service, points)
         request.text.forEachIndexed { i, c ->
@@ -186,7 +201,7 @@ class TextTyper(private val graph: AppGraph, private val random: Random = Random
         }
         return ActionResult(
             ok = true,
-            backend = graph.touchBackends.select(DEFAULT_BACKEND).name,
+            backend = touchBackends.select(DEFAULT_BACKEND).name,
             message = message,
         )
     }
@@ -251,7 +266,7 @@ class TextTyper(private val graph: AppGraph, private val random: Random = Random
     }
 
     private suspend fun tapKey(key: ImeKey, points: MutableList<Point>) {
-        val outcome = graph.touch.tap(key.bounds, backend = DEFAULT_BACKEND)
+        val outcome = touch.tap(key.bounds, backend = DEFAULT_BACKEND)
         points += outcome.points
         if (!outcome.ok) throw gestureCancelled()
     }
@@ -300,22 +315,21 @@ class TextTyper(private val graph: AppGraph, private val random: Random = Random
 
     private suspend fun typeKeyEvents(request: TextRequest): ActionResult {
         val helper =
-            graph.keyBackends.helper?.takeIf { it.isAvailable }
-                ?: throw ApiException.helperUnavailable()
+            keyBackends.helper.takeIf { it.isAvailable } ?: throw ApiException.helperUnavailable()
         val map = KeyCharacterMap.load(KeyCharacterMap.VIRTUAL_KEYBOARD)
         val events =
             request.text.map { c ->
                 map.getEvents(charArrayOf(c)) ?: throw unsupportedChars(setOf(c))
             }
         if (request.clear) {
-            graph.keyBackends.press(KeyEvent.KEYCODE_A, KeyEvent.META_CTRL_ON, longPress = false)
-            graph.keyBackends.press(KeyEvent.KEYCODE_DEL, 0, longPress = false)
+            keyBackends.press(KeyEvent.KEYCODE_A, KeyEvent.META_CTRL_ON, longPress = false)
+            keyBackends.press(KeyEvent.KEYCODE_DEL, 0, longPress = false)
         }
         events.forEachIndexed { i, keyEvents ->
             if (i > 0) delay(cadence(request))
             keyEvents.forEach { helper.send(it) }
         }
-        if (request.submit) graph.keyBackends.press(KeyEvent.KEYCODE_ENTER, 0, longPress = false)
+        if (request.submit) keyBackends.press(KeyEvent.KEYCODE_ENTER, 0, longPress = false)
         return ActionResult(ok = true, backend = helper.name)
     }
 

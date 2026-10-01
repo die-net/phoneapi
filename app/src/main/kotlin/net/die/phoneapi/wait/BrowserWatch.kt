@@ -2,6 +2,7 @@ package net.die.phoneapi.wait
 
 import android.os.SystemClock
 import java.io.IOException
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow
@@ -13,7 +14,6 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
-import net.die.phoneapi.AppGraph
 import net.die.phoneapi.browser.CHROME_SOCKET
 import net.die.phoneapi.browser.CdpEvent
 import net.die.phoneapi.browser.CdpSession
@@ -22,6 +22,8 @@ import net.die.phoneapi.browser.HelperDevtoolsSocket
 import net.die.phoneapi.browser.decodeCdp
 import net.die.phoneapi.browser.parseBrowserTargetId
 import net.die.phoneapi.core.ApiException
+import net.die.phoneapi.core.BrowserService
+import net.die.phoneapi.helperclient.HelperConnection
 import net.die.phoneapi.model.ElementBy
 import net.die.phoneapi.model.ElementState
 import net.die.phoneapi.model.WaitCondition
@@ -30,7 +32,11 @@ import net.die.phoneapi.model.WaitCondition
  * CDP sessions held for one `POST /v1/wait`. Events update [PageModel] and wake the wait loop.
  * Closing the sockets unblocks the readers.
  */
-internal class BrowserWatch(private val graph: AppGraph) {
+internal class BrowserWatch(
+    private val browser: BrowserService,
+    private val io: CoroutineDispatcher,
+    private val helper: HelperConnection,
+) {
     private val signals =
         MutableSharedFlow<Unit>(
             extraBufferCapacity = 64,
@@ -139,7 +145,7 @@ internal class BrowserWatch(private val graph: AppGraph) {
     }
 
     private suspend fun resolveDefault(): String {
-        val pages = graph.browser.targets().filter { it.type == "page" }
+        val pages = browser.targets().filter { it.type == "page" }
         if (pages.isEmpty()) {
             throw ApiException.unavailable("browser_unavailable", "Chrome has no open page")
         }
@@ -153,7 +159,7 @@ internal class BrowserWatch(private val graph: AppGraph) {
     private suspend fun openPage(id: String, conditions: List<WaitCondition>, timeoutMs: Long) {
         val (socketName, chromeId) = parseBrowserTargetId(id)
         val devtools = openSocket(socketName, timeoutMs)
-        val session = CdpSession(devtools.input, devtools.output, graph.ioDispatcher)
+        val session = CdpSession(devtools.input, devtools.output, io)
         sessions += session
         session.open("/devtools/page/$chromeId")
         val model = PageModel(SystemClock.uptimeMillis())
@@ -171,7 +177,7 @@ internal class BrowserWatch(private val graph: AppGraph) {
     @Suppress("MissingUseCall") // The watch closes every socket it opened.
     private suspend fun openBrowser(timeoutMs: Long) {
         val devtools = openSocket(CHROME_SOCKET, timeoutMs)
-        val session = CdpSession(devtools.input, devtools.output, graph.ioDispatcher)
+        val session = CdpSession(devtools.input, devtools.output, io)
         sessions += session
         session.open("/devtools/browser")
         watch(session) { event ->
@@ -191,8 +197,7 @@ internal class BrowserWatch(private val graph: AppGraph) {
 
     @Suppress("MissingUseCall") // Closed with the rest of the watch.
     private fun openSocket(name: String, timeoutMs: Long): HelperDevtoolsSocket {
-        val socket =
-            HelperDevtoolsSocket(graph.helper, name, readTimeoutMs = timeoutMs + SOCKET_SLACK_MS)
+        val socket = HelperDevtoolsSocket(helper, name, readTimeoutMs = timeoutMs + SOCKET_SLACK_MS)
         sockets += socket
         return socket
     }

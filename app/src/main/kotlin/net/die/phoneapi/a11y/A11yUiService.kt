@@ -4,11 +4,13 @@ import android.accessibilityservice.AccessibilityService
 import android.os.Build
 import android.os.Bundle
 import android.view.accessibility.AccessibilityNodeInfo
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
-import net.die.phoneapi.AppGraph
 import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.core.SnapshotOptions
 import net.die.phoneapi.core.UiService
+import net.die.phoneapi.input.TouchInput
 import net.die.phoneapi.model.ActionMode
 import net.die.phoneapi.model.ActionResult
 import net.die.phoneapi.model.FindRequest
@@ -17,26 +19,33 @@ import net.die.phoneapi.model.NodeActionRequest
 import net.die.phoneapi.model.UiSnapshot
 
 /** [UiService] over the accessibility tree: snapshots and queries, plus actions on refs. */
-class A11yUiService(private val graph: AppGraph) : UiService {
+class A11yUiService(
+    private val prepare: suspend (Boolean, Boolean) -> Boolean,
+    private val snapshots: SnapshotEngine,
+    private val a11y: StateFlow<PhoneAccessibilityService?>,
+    private val io: CoroutineDispatcher,
+    private val nodes: NodeRegistry,
+    private val targeting: NodeTargeting,
+    private val touch: TouchInput,
+    private val seq: StateFlow<Long>,
+) : UiService {
     override suspend fun snapshot(options: SnapshotOptions): UiSnapshot {
-        graph.prepareForAction(options.autoWake, allowLocked = true)
-        return graph.snapshots.snapshot(options)
+        prepare(options.autoWake, true)
+        return snapshots.snapshot(options)
     }
 
     override suspend fun find(request: FindRequest): FindResult {
-        graph.prepareForAction(autoWake = true, allowLocked = true)
-        return graph.snapshots.find(request)
+        prepare(true, true)
+        return snapshots.find(request)
     }
 
     override suspend fun act(ref: String, request: NodeActionRequest): ActionResult {
-        val woke = graph.prepareForAction(request.autoWake)
-        val service = graph.a11y.require()
+        val woke = prepare(request.autoWake, false)
+        val service = a11y.require()
         val result =
-            withContext(graph.ioDispatcher) {
-                graph.nodes.withNode(ref) { node -> perform(service, node, request) }
-            }
-        graph.snapshots.invalidate()
-        return result.copy(woke = woke, seq = graph.uiTracker.seq.value)
+            withContext(io) { nodes.withNode(ref) { node -> perform(service, node, request) } }
+        snapshots.invalidate()
+        return result.copy(woke = woke, seq = seq.value)
     }
 
     private suspend fun perform(
@@ -48,8 +57,8 @@ class A11yUiService(private val graph: AppGraph) : UiService {
         val click = action.equals(ActionNames.CLICK, ignoreCase = true)
         val longClick = action.equals(ActionNames.LONG_CLICK, ignoreCase = true)
         if (request.mode == ActionMode.REAL && (click || longClick)) {
-            val target = graph.targeting.touchTarget(service, node, request.force)
-            val outcome = if (click) graph.touch.tap(target) else graph.touch.longPress(target)
+            val target = targeting.touchTarget(service, node, request.force)
+            val outcome = if (click) touch.tap(target) else touch.longPress(target)
             return ActionResult(
                 ok = outcome.ok,
                 backend = outcome.backend,

@@ -22,20 +22,21 @@ class DeviceInfoProvider(
 ) {
     private val cachedVersion: String by lazy { readVersion() }
 
-    fun info(): DeviceInfo =
-        DeviceInfo(
+    fun info(): DeviceInfo {
+        return DeviceInfo(
             manufacturer = Build.MANUFACTURER,
             model = Build.MODEL,
             sdkInt = Build.VERSION.SDK_INT,
             release = Build.VERSION.RELEASE,
             appVersion = cachedVersion,
             display = display(),
-            state = state.current,
+            state = state.refresh(),
             helper = helperStatus(),
             helperRecoveredAtMs = helperRecoveredAtMs(),
             accessibilityConnected = isA11yConnected(),
             capabilities = capabilities(),
         )
+    }
 
     /** Package version only, so a tool listing does not also query the display. */
     fun versionName(): String = cachedVersion

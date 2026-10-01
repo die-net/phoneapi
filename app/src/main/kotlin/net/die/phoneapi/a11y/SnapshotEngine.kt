@@ -5,12 +5,13 @@ import android.os.SystemClock
 import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import net.die.phoneapi.AppGraph
 import net.die.phoneapi.core.ApiException
+import net.die.phoneapi.core.DeviceStateTracker
 import net.die.phoneapi.core.SnapshotOptions
 import net.die.phoneapi.model.FindRequest
 import net.die.phoneapi.model.FindResult
@@ -21,7 +22,14 @@ import net.die.phoneapi.model.UiSnapshot
 import net.die.phoneapi.model.UiWindow
 
 /** Builds snapshots and runs node queries over the live accessibility tree. */
-class SnapshotEngine(private val graph: AppGraph) {
+class SnapshotEngine(
+    private val a11y: StateFlow<PhoneAccessibilityService?>,
+    private val io: CoroutineDispatcher,
+    private val seq: StateFlow<Long>,
+    private val device: DeviceStateTracker,
+    private val nodes: NodeRegistry,
+    private val screenRect: () -> Rect,
+) {
     private data class Built(
         val options: SnapshotOptions,
         val seq: Long,
@@ -39,12 +47,12 @@ class SnapshotEngine(private val graph: AppGraph) {
     }
 
     suspend fun snapshot(options: SnapshotOptions): UiSnapshot {
-        val service = graph.a11y.require()
+        val service = a11y.require()
         val key = options.copy(format = SnapshotFormat.COMPACT, autoWake = true)
         val built =
-            withContext(graph.ioDispatcher) {
+            withContext(io) {
                 mutex.withLock {
-                    val seq = graph.uiTracker.seq.value
+                    val seq = this@SnapshotEngine.seq.value
                     cache?.takeIf {
                         it.options == key &&
                             it.seq == seq &&
@@ -52,26 +60,26 @@ class SnapshotEngine(private val graph: AppGraph) {
                     } ?: build(service.windows, key, seq).also { cache = it }
                 }
             }
-        val state = graph.state.current
+        val summary = device.refresh()
         val compact =
             if (options.format == SnapshotFormat.JSON) null
             else
                 CompactFormatter.format(
-                    CompactFormatter.header(built.seq, state, built.truncated),
+                    CompactFormatter.header(built.seq, summary, built.truncated),
                     built.windows,
                 )
         val windows =
             if (options.format == SnapshotFormat.COMPACT) built.windows.map { it.copy(root = null) }
             else built.windows
-        return UiSnapshot(built.seq, System.currentTimeMillis(), state, windows, compact)
+        return UiSnapshot(built.seq, System.currentTimeMillis(), summary, windows, compact)
     }
 
     suspend fun find(request: FindRequest): FindResult {
-        val service = graph.a11y.require()
+        val service = a11y.require()
         val selector = request.selector
         val matcher = SelectorMatcher(selector)
-        return withContext(graph.ioDispatcher) {
-            val seq = graph.uiTracker.seq.value
+        return withContext(io) {
+            val seq = this@SnapshotEngine.seq.value
             val ref = selector.ref
             if (ref != null) {
                 return@withContext FindResult(
@@ -97,7 +105,7 @@ class SnapshotEngine(private val graph: AppGraph) {
             selector.ref?.takeIf { SelectorMatcher(selector).isEmpty }
                 ?: find(FindRequest(selector, limit = 1)).matches.firstOrNull()?.ref
                 ?: throw ApiException.notFound("No node matches the selector")
-        return graph.nodes.acquire(ref)
+        return nodes.acquire(ref)
     }
 
     private fun build(
@@ -106,9 +114,9 @@ class SnapshotEngine(private val graph: AppGraph) {
         seq: Long,
     ): Built {
         val started = SystemClock.uptimeMillis()
-        graph.nodes.beginSnapshot()
+        nodes.beginSnapshot()
         try {
-            val layout = ScreenLayout.capture(windows, graph.screenRect())
+            val layout = ScreenLayout.capture(windows, screenRect())
             val traversal = Traversal(layout, options)
             val out =
                 windows
@@ -117,7 +125,7 @@ class SnapshotEngine(private val graph: AppGraph) {
                     .filter { include(it, options, layout) }
                     .map { traversal.window(it, includeTree(it, options)) }
                     .toList()
-            graph.nodes.endSnapshot()
+            nodes.endSnapshot()
             Log.d(
                 TAG,
                 "snapshot: ${traversal.count} nodes, ${out.size} windows in " +
@@ -162,8 +170,8 @@ class SnapshotEngine(private val graph: AppGraph) {
         matcher: SelectorMatcher,
     ): UiNode? {
         try {
-            val layout = ScreenLayout.capture(windows, graph.screenRect())
-            return graph.nodes.withNode(ref) { node ->
+            val layout = ScreenLayout.capture(windows, screenRect())
+            return nodes.withNode(ref) { node ->
                 NodeConverter(layout).convert(node, ref, emptyList()).takeIf {
                     matcher.matches(it, node.packageName?.toString())
                 }
@@ -180,7 +188,7 @@ class SnapshotEngine(private val graph: AppGraph) {
         includeInvisible: Boolean,
     ): List<UiNode> {
         try {
-            val layout = ScreenLayout.capture(windows, graph.screenRect())
+            val layout = ScreenLayout.capture(windows, screenRect())
             val search = Search(NodeConverter(layout), matcher, wanted, includeInvisible)
             windows
                 .filter { it.type != AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY }
@@ -221,7 +229,7 @@ class SnapshotEngine(private val graph: AppGraph) {
             for (i in node.childCount - 1 downTo 0) node.getChild(i)?.let(stack::add)
             val converted = converter.convert(node, "", emptyList())
             if (matcher.matches(converted, node.packageName?.toString())) {
-                out += converted.copy(ref = graph.nodes.register(node))
+                out += converted.copy(ref = nodes.register(node))
             } else {
                 NodeCompat.recycle(node)
             }
@@ -252,7 +260,7 @@ class SnapshotEngine(private val graph: AppGraph) {
             val root = if (includeTree) w.root else null
             val pkg =
                 root?.packageName?.toString()
-                    ?: graph.state.ime.packageName.takeIf {
+                    ?: device.ime.packageName.takeIf {
                         w.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD
                     }
             return UiWindow(
@@ -279,7 +287,7 @@ class SnapshotEngine(private val graph: AppGraph) {
                 return null
             }
             count++
-            val ref = graph.nodes.register(n)
+            val ref = nodes.register(n)
             val maxDepth = options.maxDepth
             val children =
                 if (maxDepth != null && depth >= maxDepth) {

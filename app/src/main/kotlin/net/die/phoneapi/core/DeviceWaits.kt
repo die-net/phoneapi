@@ -7,9 +7,11 @@ import kotlinx.coroutines.withTimeoutOrNull
 import net.die.phoneapi.model.DeviceStateSummary
 
 /**
- * Waits until [predicate] holds for the live device state, or [timeoutMs] passes. Screen, keyguard
- * and IME changes arrive as broadcasts and accessibility events, so this re-reads the state on
- * every state change and every published event rather than polling.
+ * Waits until [predicate] holds for the live device state, or [timeoutMs] passes. Screen and
+ * keyguard are not broadcast for every change (a dismissal may not be), so every state change and
+ * published event re-reads them. Subscribing to [DeviceStateTracker.state] delivers its current
+ * value first, so a change between the caller's last check and the subscription is not lost. The
+ * re-read publishes on that same flow, which emits again only when the summary actually changed.
  */
 suspend fun awaitDeviceState(
     state: DeviceStateTracker,
@@ -17,7 +19,6 @@ suspend fun awaitDeviceState(
     timeoutMs: Long,
     predicate: (DeviceStateSummary) -> Boolean,
 ): Boolean {
-    if (predicate(state.current)) return true
     val changes: Flow<Any> = merge(state.state, bus.events)
-    return withTimeoutOrNull(timeoutMs) { changes.first { predicate(state.current) } } != null
+    return withTimeoutOrNull(timeoutMs) { changes.first { predicate(state.refresh()) } } != null
 }
