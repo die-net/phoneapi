@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
   security-events: write
 
 concurrency:
@@ -30,15 +31,16 @@ jobs:
       - name: Check, lint, test, build
         run: ./gradlew spotlessCheck detektMain detektTest lint testDebugUnitTest :api-model:test assembleDebug buildHealth --continue
 
+      # Code scanning on a private repository needs GitHub Code Security.
       - name: Upload detekt SARIF
-        if: always() && hashFiles('build/reports/detekt/merge.sarif') != ''
+        if: always() && !github.event.repository.private && hashFiles('build/reports/detekt/merge.sarif') != ''
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: build/reports/detekt/merge.sarif
           category: detekt
 
       - name: Upload Lint SARIF
-        if: always() && hashFiles('app/build/reports/lint-results-debug.sarif') != ''
+        if: always() && !github.event.repository.private && hashFiles('app/build/reports/lint-results-debug.sarif') != ''
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: app/build/reports/lint-results-debug.sarif
