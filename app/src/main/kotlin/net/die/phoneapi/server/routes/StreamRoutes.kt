@@ -6,6 +6,8 @@ import io.ktor.server.response.respondBytes
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
 import io.ktor.server.websocket.webSocket
+import io.ktor.websocket.CloseReason
+import io.ktor.websocket.close
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import net.die.phoneapi.core.ApiException
@@ -30,10 +32,23 @@ fun Route.streamRoutes(services: ServerServices) {
     scoped(Scope.STREAM) {
         get(VIEWER_PATH) { call.respondBytes(viewer.bytes(), ContentType.Text.Html) }
         webSocket("/v1/stream/video") {
+            if (!services.device.capabilities().streamVideoMirror) {
+                close(CloseReason(CloseReason.Codes.CANNOT_ACCEPT, "Video needs the shell helper"))
+                return@webSocket
+            }
             services.power.wake()
             services.video.serve(this, videoSpec(call))
         }
         webSocket("/v1/stream/audio") {
+            if (!services.device.capabilities().streamAudioSubmix) {
+                close(
+                    CloseReason(
+                        CloseReason.Codes.CANNOT_ACCEPT,
+                        "Audio needs Android 11 or later and the shell helper",
+                    )
+                )
+                return@webSocket
+            }
             services.power.wake()
             services.audio.serve(this)
         }

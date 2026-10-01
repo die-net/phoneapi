@@ -13,7 +13,9 @@ import android.os.RemoteException
 import android.util.Log
 import android.view.Display
 import io.ktor.server.websocket.DefaultWebSocketServerSession
+import io.ktor.websocket.CloseReason
 import io.ktor.websocket.Frame
+import io.ktor.websocket.close
 import java.io.IOException
 import java.nio.ByteBuffer
 import java.util.concurrent.CopyOnWriteArrayList
@@ -99,6 +101,11 @@ internal class VideoStream(
             config?.let { session.send(Frame.Binary(true, it)) }
             requestSync()
             sendFrames(session, viewer)
+            if (viewer.failed) {
+                session.close(
+                    CloseReason(CloseReason.Codes.INTERNAL_ERROR, "The video encoder stopped")
+                )
+            }
         } finally {
             if (attached) withContext(NonCancellable) { detach(viewer) }
             viewer.close()
@@ -375,7 +382,10 @@ internal class VideoStream(
     }
 
     private fun closeViewers() {
-        for (viewer in subscribers) viewer.close()
+        for (viewer in subscribers) {
+            viewer.failed = true
+            viewer.close()
+        }
     }
 
     private fun ensureListening() {
@@ -465,6 +475,8 @@ internal class VideoStream(
     private class Viewer {
         val frames = Channel<ByteArray>(CHANNEL_CAP, BufferOverflow.DROP_OLDEST)
         val headers = Channel<String>(Channel.CONFLATED)
+
+        @Volatile var failed = false
 
         fun close() {
             frames.close()

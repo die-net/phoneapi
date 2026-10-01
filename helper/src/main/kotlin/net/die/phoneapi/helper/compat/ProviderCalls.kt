@@ -85,12 +85,14 @@ internal object ProviderCalls {
             return invoke(modern, provider, arrayOf(source, authority, method, null, extras))
                 as? Bundle
         }
+        // Android 10: (callingPkg, authority, method, arg, extras). Android 11 adds a feature id
+        // after callingPkg.
         val legacy = calls.maxBy { it.parameterTypes.size }
         val args =
             if (legacy.parameterTypes.size >= TAGGED_CALL_ARITY) {
                 arrayOf(SHELL, null, authority, method, null, extras)
             } else {
-                arrayOf<Any?>(SHELL, method, null, extras)
+                arrayOf<Any?>(SHELL, authority, method, null, extras)
             }
         return invoke(legacy, provider, args) as? Bundle
     }
