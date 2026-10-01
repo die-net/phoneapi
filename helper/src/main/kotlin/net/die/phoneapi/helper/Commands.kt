@@ -16,13 +16,13 @@ internal object Commands {
     private const val TIMED_OUT = 124
     private const val BUFFER = 8 * 1024
 
-    fun exec(argv: List<String>, timeoutMs: Long, maxOutputBytes: Int): String {
+    fun exec(argv: List<String>, timeoutMs: Long, maxOutputBytes: Int): ShellResult {
         val process =
             try {
                 process(argv)
             } catch (e: IOException) {
                 val reason = e.message ?: "could not start ${argv.first()}"
-                return shellResultJson(NOT_FOUND, "", reason)
+                return shellResult(NOT_FOUND, "", reason)
             }
         val stdout = readAsync(process.inputStream, maxOutputBytes)
         val stderr = readAsync(process.errorStream, maxOutputBytes)
@@ -41,8 +41,15 @@ internal object Commands {
                 process.destroyForcibly()
                 TIMED_OUT
             }
-        return shellResultJson(exit, stdout.await(READ_JOIN_MS), stderr.await(READ_JOIN_MS))
+        return shellResult(exit, stdout.await(READ_JOIN_MS), stderr.await(READ_JOIN_MS))
     }
+
+    private fun shellResult(exitCode: Int, stdout: String, stderr: String): ShellResult =
+        ShellResult().apply {
+            this.exitCode = exitCode
+            this.stdout = stdout
+            this.stderr = stderr
+        }
 
     /** Runs [argv] and returns the read end of a pipe carrying its stdout. */
     fun pipe(argv: List<String>): ParcelFileDescriptor {

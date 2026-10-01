@@ -6,18 +6,19 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.net.SocketTimeoutException
 import java.util.Collections
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.coroutines.CoroutineContext
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.put
 import kotlinx.serialization.serializer
 import net.die.phoneapi.core.ApiException
@@ -36,20 +37,22 @@ import net.die.phoneapi.model.InputBackend
 import net.die.phoneapi.model.Rect
 
 /**
- * Talks to Chrome and WebView over the helper's DevTools file descriptor. Each call opens a socket,
- * speaks HTTP or one CDP session, and closes it.
+ * Talks to Chrome and WebView over the helper's DevTools pipe. One service call keeps a single
+ * connection. The last accessibility tree for a target is kept so a later tap can reuse a snapshot
+ * ref without fetching the tree again.
  */
 internal class BrowserServiceImpl(
     private val io: CoroutineContext,
     private val listSockets: suspend () -> String,
     private val open: (String) -> DevtoolsSocket,
     private val websocketKey: () -> String = ::websocketKey,
-    private val websocketMask: () -> ByteArray = ::websocketMask,
     private val contentBounds: suspend (String?) -> Rect = { Rect(0, 0, 0, 0) },
     private val touchAt: suspend (Rect, Boolean, InputBackend) -> ActionResult = { _, _, _ ->
         ActionResult(ok = false)
     },
 ) : BrowserService {
+    private val axTrees = ConcurrentHashMap<String, JsonObject>()
+
     override suspend fun targets(): List<BrowserTarget> {
         val sockets = socketList()
         val out = ArrayList<BrowserTarget>()
@@ -79,13 +82,11 @@ internal class BrowserServiceImpl(
                     "Chrome's DevTools socket is not open. Chrome has to be running.",
                 )
         val created =
-            useSocket(chrome.name) { input, output ->
-                val cdp = CdpConnection(input, output, websocketKey, websocketMask)
-                cdp.handshake("/devtools/browser")
+            useCdp(chrome.name, "/devtools/browser") { cdp ->
                 cdp.call("Target.createTarget", buildJsonObject { put("url", pageUrl) })
             }
         val chromeId =
-            (created["targetId"] as? JsonPrimitive)?.contentOrNull
+            created.decodeCdp<CreatedTarget>()?.targetId
                 ?: throw ApiException(502, "cdp_error", "Chrome did not return a target id")
         return BrowserTarget(
             id = browserTargetId(chrome.name, chromeId),
@@ -100,9 +101,12 @@ internal class BrowserServiceImpl(
     override suspend fun navigate(id: String, url: String): BrowserTarget {
         val pageUrl = webUrl(url)
         val (socket, chromeId) = parseBrowserTargetId(id)
+        axTrees.remove(id)
         usePage(socket, chromeId) { cdp ->
-            val result = cdp.call("Page.navigate", buildJsonObject { put("url", pageUrl) })
-            val error = (result["errorText"] as? JsonPrimitive)?.contentOrNull
+            val error =
+                cdp.call("Page.navigate", buildJsonObject { put("url", pageUrl) })
+                    .decodeCdp<NavigateResult>()
+                    ?.errorText
             if (!error.isNullOrBlank()) throw ApiException.badRequest(error)
         }
         return BrowserTarget(id = id, type = "page", url = pageUrl, socket = socket)
@@ -115,7 +119,7 @@ internal class BrowserServiceImpl(
         return usePage(socket, chromeId) { cdp ->
             cdp.call("Page.bringToFront")
             delay(FRONT_SETTLE_MS)
-            val quads = elementQuads(cdp, wanted)
+            val quads = elementQuads(cdp, id, wanted)
             val target = screenTarget(quads, cdp.call("Page.getLayoutMetrics"), contentBounds(pkg))
             touchAt(target, request.humanize, request.backend)
         }
@@ -137,51 +141,38 @@ internal class BrowserServiceImpl(
             throw ApiException.badRequest("timeoutMs must be 0..$MAX_CONSOLE_MS")
         }
         val (socket, chromeId) = parseBrowserTargetId(id)
-        return useSocket(socket) { input, output ->
-            val ws = WebSocketClient(input, output, websocketKey, websocketMask)
-            ws.handshake("/devtools/page/$chromeId")
-            collectLogs(ws, request.timeoutMs)
+        return useCdp(socket, "/devtools/page/$chromeId") { cdp ->
+            collectLogs(cdp, request.timeoutMs)
         }
     }
 
     override suspend fun snapshot(id: String): BrowserSnapshot {
         val (socket, chromeId) = parseBrowserTargetId(id)
         return usePage(socket, chromeId) { cdp ->
-            val url = frameUrl(cdp.call("Page.getFrameTree"))
+            val loaded = cdp.call("Page.getFrameTree").decodeCdp<FrameTreeResult>()
+            val url = loaded?.frameTree?.frame?.url
             cdp.call("Accessibility.enable")
-            val tree = formatAxTree(cdp.call("Accessibility.getFullAXTree"), url)
-            BrowserSnapshot(id = id, url = url, title = tree.title, compact = tree.compact)
+            val tree = cdp.call("Accessibility.getFullAXTree")
+            axTrees[id] = tree
+            val text = formatAxTree(tree, url)
+            BrowserSnapshot(id = id, url = url, title = text.title, compact = text.compact)
         }
     }
 
     private suspend fun listOne(socket: HelperSocket): List<BrowserTarget> =
         useSocket(socket.name) { input, output ->
-            output.write(httpRequest("GET", "/json/list"))
-            output.flush()
-            val response = input.readHttpResponse(MAX_BODY)
-            if (response.status != HTTP_OK) {
-                throw ApiException(
-                    502,
-                    "cdp_error",
-                    "DevTools list returned HTTP ${response.status}",
-                )
-            }
-            parseTargets(socket, response.body.decodeToString())
+            parseTargets(socket, httpGet(input, output, "/json/list", MAX_BODY))
         }
 
     private suspend fun <T> usePage(
         socket: String,
         chromeId: String,
-        block: suspend (CdpConnection) -> T,
+        block: suspend (CdpSession) -> T,
     ): T {
         var last: ApiException? = null
         repeat(PAGE_ATTEMPTS) { attempt ->
             try {
-                return useSocket(socket) { input, output ->
-                    val cdp = CdpConnection(input, output, websocketKey, websocketMask)
-                    cdp.handshake("/devtools/page/$chromeId")
-                    block(cdp)
-                }
+                return useCdp(socket, "/devtools/page/$chromeId", block)
             } catch (e: ApiException) {
                 if (e.status < HTTP_SERVER_ERROR || e.error == "helper_unavailable") throw e
                 last = e
@@ -191,40 +182,90 @@ internal class BrowserServiceImpl(
         throw last ?: ApiException(502, "cdp_error", "DevTools did not answer")
     }
 
-    private fun elementQuads(cdp: CdpConnection, target: TapTarget): JsonArray {
-        val params =
-            when (target) {
-                is TapTarget.Ref -> axNode(cdp, target.id)
-                is TapTarget.Css -> cssNode(cdp, target.selector)
+    private suspend fun <T> useCdp(
+        socket: String,
+        path: String,
+        block: suspend (CdpSession) -> T,
+    ): T =
+        useSocket(socket) { input, output ->
+            CdpSession(input, output, io, websocketKey).use { cdp ->
+                cdp.open(path)
+                block(cdp)
             }
-        cdp.call("DOM.scrollIntoViewIfNeeded", params)
-        val quads = cdp.call("DOM.getContentQuads", params)["quads"] as? JsonArray
-        if (quads == null || quads.isEmpty()) {
-            throw ApiException(409, "offscreen", "The node has no box on the page")
         }
+
+    private suspend fun elementQuads(
+        cdp: CdpSession,
+        targetId: String,
+        target: TapTarget,
+    ): JsonArray =
+        when (target) {
+            is TapTarget.Ref -> refQuads(cdp, targetId, target.id)
+            is TapTarget.Css -> boxed(cdp, cssNode(cdp, target.selector))
+        }
+
+    private suspend fun refQuads(cdp: CdpSession, targetId: String, ref: String): JsonArray {
+        val backend = cachedBackend(targetId, ref)
+        if (backend != null) {
+            try {
+                return boxed(cdp, backendParams(backend))
+            } catch (e: ApiException) {
+                if (e.error != "cdp_error") throw e
+                axTrees.remove(targetId)
+            }
+        }
+        return boxed(cdp, backendParams(fetchBackend(cdp, targetId, ref)))
+    }
+
+    private suspend fun boxed(cdp: CdpSession, params: JsonObject): JsonArray {
+        cdp.call("DOM.scrollIntoViewIfNeeded", params)
+        val quads = quadsOf(cdp.call("DOM.getContentQuads", params))
+        if (quads.isEmpty()) throw ApiException(409, "offscreen", "The node has no box on the page")
         return quads
     }
 
-    private fun axNode(cdp: CdpConnection, ref: String): JsonObject {
-        cdp.call("Accessibility.enable")
-        val backend = elementBackendId(cdp.call("Accessibility.getFullAXTree"), ref)
-        return buildJsonObject { put("backendNodeId", backend) }
+    private fun cachedBackend(targetId: String, ref: String): Int? {
+        val tree = axTrees[targetId] ?: return null
+        return try {
+            elementBackendId(tree, ref)
+        } catch (_: ApiException) {
+            null
+        }
     }
 
-    private fun cssNode(cdp: CdpConnection, selector: String): JsonObject {
-        val doc = cdp.call("DOM.getDocument", buildJsonObject { put("depth", 0) })
+    private suspend fun fetchBackend(cdp: CdpSession, targetId: String, ref: String): Int {
+        cdp.call("Accessibility.enable")
+        val tree = cdp.call("Accessibility.getFullAXTree")
+        axTrees[targetId] = tree
+        return elementBackendId(tree, ref)
+    }
+
+    private fun backendParams(backend: Int): JsonObject = buildJsonObject {
+        put("backendNodeId", backend)
+    }
+
+    private fun quadsOf(result: JsonObject): JsonArray {
+        val quads = result.decodeCdp<QuadResult>()?.quads ?: return JsonArray(emptyList())
+        return JsonArray(quads)
+    }
+
+    private suspend fun cssNode(cdp: CdpSession, selector: String): JsonObject {
         val root =
-            ((doc["root"] as? JsonObject)?.get("nodeId") as? JsonPrimitive)?.intOrNull
-                ?: throw ApiException(502, "cdp_error", "Chrome did not return a document")
-        val found =
+            cdp.call("DOM.getDocument", buildJsonObject { put("depth", 0) })
+                .decodeCdp<DocumentResult>()
+                ?.root
+                ?.nodeId ?: 0
+        if (root == 0) throw ApiException(502, "cdp_error", "Chrome did not return a document")
+        val nodeId =
             cdp.call(
-                "DOM.querySelector",
-                buildJsonObject {
-                    put("nodeId", root)
-                    put("selector", selector)
-                },
-            )
-        val nodeId = (found["nodeId"] as? JsonPrimitive)?.intOrNull ?: 0
+                    "DOM.querySelector",
+                    buildJsonObject {
+                        put("nodeId", root)
+                        put("selector", selector)
+                    },
+                )
+                .decodeCdp<QueryResult>()
+                ?.nodeId ?: 0
         if (nodeId == 0) throw ApiException.notFound("No element matches the selector")
         return buildJsonObject { put("nodeId", nodeId) }
     }
@@ -251,28 +292,27 @@ internal class BrowserServiceImpl(
         return selector
     }
 
-    private fun evaluateIn(
-        cdp: CdpConnection,
+    private suspend fun evaluateIn(
+        cdp: CdpSession,
         expression: String,
         awaitPromise: Boolean,
     ): EvalResult {
-        val tree = cdp.call("Page.getFrameTree")
-        val frame = (tree["frameTree"] as? JsonObject)?.get("frame") as? JsonObject
+        val loaded = cdp.call("Page.getFrameTree").decodeCdp<FrameTreeResult>()
         val frameId =
-            (frame?.get("id") as? JsonPrimitive)?.contentOrNull
+            loaded?.frameTree?.frame?.id
                 ?: throw ApiException(502, "cdp_error", "Chrome did not return a frame")
-        val world =
-            cdp.call(
-                "Page.createIsolatedWorld",
-                buildJsonObject {
-                    put("frameId", frameId)
-                    put("worldName", ISOLATED_WORLD)
-                },
-            )
         val contextId =
-            (world["executionContextId"] as? JsonPrimitive)?.intOrNull
+            cdp.call(
+                    "Page.createIsolatedWorld",
+                    buildJsonObject {
+                        put("frameId", frameId)
+                        put("worldName", ISOLATED_WORLD)
+                    },
+                )
+                .decodeCdp<WorldResult>()
+                ?.executionContextId
                 ?: throw ApiException(502, "cdp_error", "Chrome did not return an isolated world")
-        val result =
+        return evalResult(
             cdp.call(
                 "Runtime.evaluate",
                 buildJsonObject {
@@ -282,42 +322,36 @@ internal class BrowserServiceImpl(
                     put("awaitPromise", awaitPromise)
                 },
             )
-        return evalResult(result)
-    }
-
-    private fun evalResult(payload: JsonObject): EvalResult {
-        val details = payload["exceptionDetails"] as? JsonObject
-        if (details != null) {
-            val text = (details["text"] as? JsonPrimitive)?.contentOrNull ?: "exception"
-            return EvalResult(exception = text)
-        }
-        val remote = payload["result"] as? JsonObject ?: return EvalResult()
-        return EvalResult(
-            type = (remote["type"] as? JsonPrimitive)?.contentOrNull,
-            value = remote["value"],
         )
     }
 
-    private suspend fun collectLogs(socket: WebSocketClient, timeoutMs: Long): ConsoleResult {
-        val session = CdpSession(socket)
+    private fun evalResult(payload: JsonObject): EvalResult {
+        val parsed = payload.decodeCdp<EvalPayload>() ?: return EvalResult()
+        val details = parsed.exceptionDetails
+        if (details != null) return EvalResult(exception = details.text ?: "exception")
+        val remote = parsed.result ?: return EvalResult()
+        return EvalResult(type = remote.type, value = remote.value)
+    }
+
+    private suspend fun collectLogs(session: CdpSession, timeoutMs: Long): ConsoleResult {
         val entries = Collections.synchronizedList(mutableListOf<ConsoleEntry>())
-        session.onEvent { method, params -> appendLog(entries, method, params) }
-        session.start()
-        session.call("Log.enable")
-        delay(timeoutMs)
+        coroutineScope {
+            val job = launch { session.events.collect { event -> appendLog(entries, event) } }
+            try {
+                session.call("Log.enable")
+                delay(timeoutMs)
+            } finally {
+                job.cancel()
+            }
+        }
         return ConsoleResult(synchronized(entries) { entries.toList() })
     }
 
-    private fun appendLog(
-        entries: MutableList<ConsoleEntry>,
-        method: String,
-        params: JsonObject,
-    ) {
-        if (method != "Log.entryAdded") return
-        val entry = params["entry"] as? JsonObject ?: return
-        val text = (entry["text"] as? JsonPrimitive)?.contentOrNull ?: return
-        val level = (entry["level"] as? JsonPrimitive)?.contentOrNull ?: "info"
-        entries += ConsoleEntry(level, text)
+    private fun appendLog(entries: MutableList<ConsoleEntry>, event: CdpEvent) {
+        if (event.method != "Log.entryAdded") return
+        val entry = event.params.decodeCdp<LogAdded>()?.entry ?: return
+        val text = entry.text ?: return
+        entries += ConsoleEntry(entry.level ?: "info", text)
     }
 
     private fun nodeRef(ref: String): String {
@@ -396,11 +430,6 @@ internal class BrowserServiceImpl(
             }
     }
 
-    private fun frameUrl(tree: JsonObject): String? {
-        val frame = (tree["frameTree"] as? JsonObject)?.get("frame") as? JsonObject ?: return null
-        return (frame["url"] as? JsonPrimitive)?.contentOrNull
-    }
-
     private fun webUrl(url: String): String {
         val trimmed = url.trim()
         if (!acceptable(trimmed))
@@ -430,8 +459,36 @@ internal class BrowserServiceImpl(
         val url: String? = null,
     )
 
+    @Serializable private data class CreatedTarget(val targetId: String? = null)
+
+    @Serializable private data class NavigateResult(val errorText: String? = null)
+
+    @Serializable private data class DocumentResult(val root: NodeId? = null)
+
+    @Serializable private data class NodeId(val nodeId: Int = 0)
+
+    @Serializable private data class QueryResult(val nodeId: Int = 0)
+
+    @Serializable private data class WorldResult(val executionContextId: Int? = null)
+
+    @Serializable
+    private data class EvalPayload(
+        val result: RemoteObject? = null,
+        val exceptionDetails: ExceptionText? = null,
+    )
+
+    @Serializable
+    private data class RemoteObject(val type: String? = null, val value: JsonElement? = null)
+
+    @Serializable private data class ExceptionText(val text: String? = null)
+
+    @Serializable private data class QuadResult(val quads: List<JsonElement> = emptyList())
+
+    @Serializable private data class LogAdded(val entry: LogLine? = null)
+
+    @Serializable private data class LogLine(val text: String? = null, val level: String? = null)
+
     private companion object {
-        const val HTTP_OK = 200
         const val HTTP_SERVER_ERROR = 500
         val NODE_REF = Regex("[A-Za-z0-9_-]{1,64}")
         const val MAX_BODY = 4 * 1024 * 1024
@@ -453,3 +510,14 @@ internal class BrowserServiceImpl(
         data class Css(val selector: String) : TapTarget
     }
 }
+
+@Serializable internal data class FrameTreeResult(val frameTree: FrameNode? = null)
+
+@Serializable internal data class FrameNode(val frame: FrameInfo? = null)
+
+@Serializable
+internal data class FrameInfo(
+    val id: String? = null,
+    val url: String? = null,
+    val parentId: String? = null,
+)

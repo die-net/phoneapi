@@ -16,6 +16,7 @@ import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.launch
@@ -45,9 +46,10 @@ internal class HelperSupervisor(
     private val accessibilityComponent: String,
 ) {
     private val gate = Mutex()
-    private val finder = AdbEndpointFinder(context)
+    private val finder = AdbEndpointFinder(context, ioDispatcher)
     private val secure = SecureSettings(context.contentResolver)
     private var failures = 0
+    private val shizukuArrived = Shizuku.OnBinderReceivedListener { nudge() }
 
     fun start() {
         // Loads the provider class the manifest declares, and tells Kadb where the ADB key lives.
@@ -57,19 +59,18 @@ internal class HelperSupervisor(
             policy = KadbCertPolicy(autoHealInvalidPrivateKey = false),
         )
         helper.onDied = { scope.launch { runAttempt() } }
+        helper.onRejected = { scope.launch { runAttempt() } }
+        listenForShizuku()
+        scope.coroutineContext[Job]?.invokeOnCompletion { stopListeningForShizuku() }
         scope.launch {
-            network.lanAddress.drop(1).collect {
-                failures = 0
-                runAttempt()
-            }
+            network.lanAddress.drop(1).collect { runAttempt(resetFailures = true) }
         }
         scope.launch { runAttempt() }
     }
 
     /** User-driven retry. Resets the backoff counter. */
     fun nudge() {
-        failures = 0
-        scope.launch { runAttempt() }
+        scope.launch { runAttempt(resetFailures = true) }
     }
 
     fun shizukuAvailable(): Boolean =
@@ -168,11 +169,18 @@ internal class HelperSupervisor(
         throw failure ?: error("Wireless debugging pairing failed")
     }
 
-    private suspend fun runAttempt() {
-        val delayMs = gate.withLock { doAttempt() }
-        if (delayMs != null) {
+    private suspend fun runAttempt(resetFailures: Boolean = false) {
+        var reset = resetFailures
+        while (true) {
+            val delayMs =
+                gate.withLock {
+                    if (reset) {
+                        failures = 0
+                        reset = false
+                    }
+                    doAttempt()
+                } ?: return
             delay(delayMs)
-            runAttempt()
         }
     }
 
@@ -225,22 +233,52 @@ internal class HelperSupervisor(
         val connection =
             object : ServiceConnection {
                 override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
-                    if (service != null) helper.register(service)
-                    connected.complete(service != null)
+                    val accepted = service != null && helper.register(service)
+                    connected.complete(accepted)
                 }
 
                 override fun onServiceDisconnected(name: ComponentName?) {
                     if (!connected.isCompleted) connected.complete(false)
                 }
             }
+        val args = userServiceArgs()
+        var ok = false
         return try {
-            Shizuku.bindUserService(userServiceArgs(), connection)
-            withTimeoutOrNull(SHIZUKU_WAIT_MS) { connected.await() } == true
+            Shizuku.bindUserService(args, connection)
+            ok = withTimeoutOrNull(SHIZUKU_WAIT_MS) { connected.await() } == true
+            ok
         } catch (e: CancellationException) {
             throw e
         } catch (e: RuntimeException) {
             Log.w(TAG, "Shizuku did not start the helper", e)
             false
+        } finally {
+            if (!ok) abandonShizuku(args, connection)
+        }
+    }
+
+    @Suppress("TooGenericExceptionCaught") // Shizuku wraps binder failures in RuntimeException.
+    private fun abandonShizuku(args: Shizuku.UserServiceArgs, connection: ServiceConnection) {
+        try {
+            Shizuku.unbindUserService(args, connection, true)
+        } catch (e: RuntimeException) {
+            Log.w(TAG, "Could not unbind the Shizuku helper", e)
+        }
+    }
+
+    private fun listenForShizuku() {
+        try {
+            Shizuku.addBinderReceivedListenerSticky(shizukuArrived)
+        } catch (e: IllegalStateException) {
+            Log.i(TAG, "Shizuku is not available", e)
+        }
+    }
+
+    private fun stopListeningForShizuku() {
+        try {
+            Shizuku.removeBinderReceivedListener(shizukuArrived)
+        } catch (e: IllegalStateException) {
+            Log.i(TAG, "Shizuku is not available", e)
         }
     }
 

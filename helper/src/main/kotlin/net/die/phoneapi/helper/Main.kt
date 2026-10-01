@@ -49,6 +49,7 @@ object Main {
     private fun run(packageName: String) {
         HiddenApi.exempt()
         val helper = HelperImpl()
+        helper.pinPackage(packageName)
         val classpath = System.getenv("CLASSPATH").orEmpty()
         HelperDaemon.serve(helper, packageName, classpath)
     }

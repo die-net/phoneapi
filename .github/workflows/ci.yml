@@ -28,7 +28,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v6
 
       - name: Check, lint, test, build
-        run: ./gradlew spotlessCheck detektMain lint testDebugUnitTest :api-model:test assembleDebug --continue
+        run: ./gradlew spotlessCheck detektMain detektTest lint testDebugUnitTest :api-model:test assembleDebug buildHealth --continue
 
       - name: Upload detekt SARIF
         if: always() && hashFiles('build/reports/detekt/merge.sarif') != ''

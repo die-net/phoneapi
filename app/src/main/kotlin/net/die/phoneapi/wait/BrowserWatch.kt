@@ -2,28 +2,31 @@ package net.die.phoneapi.wait
 
 import android.os.SystemClock
 import java.io.IOException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.coroutines.launch
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.put
 import net.die.phoneapi.AppGraph
 import net.die.phoneapi.browser.CHROME_SOCKET
+import net.die.phoneapi.browser.CdpEvent
 import net.die.phoneapi.browser.CdpSession
+import net.die.phoneapi.browser.FrameTreeResult
 import net.die.phoneapi.browser.HelperDevtoolsSocket
-import net.die.phoneapi.browser.WebSocketClient
+import net.die.phoneapi.browser.decodeCdp
 import net.die.phoneapi.browser.parseBrowserTargetId
 import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.model.WaitCondition
 
 /**
  * CDP sessions held for one `POST /v1/wait`. Events update [PageModel] and wake the wait loop.
- * Closing the sockets unblocks the reader threads.
+ * Closing the sockets unblocks the readers.
  */
 internal class BrowserWatch(private val graph: AppGraph) {
     private val signals =
@@ -35,6 +38,8 @@ internal class BrowserWatch(private val graph: AppGraph) {
     private val pages = HashMap<String, PageSession>()
     private val targets = TargetModel()
     private val sockets = ArrayList<HelperDevtoolsSocket>()
+    private val sessions = ArrayList<CdpSession>()
+    private val jobs = ArrayList<Job>()
     private var defaultId: String? = null
 
     suspend fun open(conditions: List<WaitCondition>, timeoutMs: Long) {
@@ -104,6 +109,11 @@ internal class BrowserWatch(private val graph: AppGraph) {
         }
 
     fun close() {
+        jobs.forEach { it.cancel() }
+        jobs.clear()
+        val live = sessions.toList()
+        sessions.clear()
+        live.forEach { it.close() }
         val open = sockets.toList()
         sockets.clear()
         open.forEach { it.close() }
@@ -141,17 +151,16 @@ internal class BrowserWatch(private val graph: AppGraph) {
     private suspend fun openPage(id: String, conditions: List<WaitCondition>, timeoutMs: Long) {
         val (socketName, chromeId) = parseBrowserTargetId(id)
         val devtools = openSocket(socketName, timeoutMs)
-        val ws = WebSocketClient(devtools.input, devtools.output)
-        handshake(ws, "/devtools/page/$chromeId")
-        val session = CdpSession(ws)
+        val session = CdpSession(devtools.input, devtools.output, graph.ioDispatcher)
+        sessions += session
+        session.open("/devtools/page/$chromeId")
         val model = PageModel(SystemClock.uptimeMillis())
         val page = PageSession(model, session)
-        session.onEvent { method, params ->
-            model.apply(method, params, SystemClock.uptimeMillis())
-            if (method == "DOM.documentUpdated") page.forgetDocument()
+        watch(session) { event ->
+            model.apply(event.method, event.params, SystemClock.uptimeMillis())
+            if (event.method == "DOM.documentUpdated") page.forgetDocument()
             signals.tryEmit(Unit)
         }
-        session.start()
         enable(session, domainsFor(conditions.filter { onPage(it, id) }))
         seed(session, model)
         pages[id] = page
@@ -160,15 +169,22 @@ internal class BrowserWatch(private val graph: AppGraph) {
     @Suppress("MissingUseCall") // The watch closes every socket it opened.
     private suspend fun openBrowser(timeoutMs: Long) {
         val devtools = openSocket(CHROME_SOCKET, timeoutMs)
-        val ws = WebSocketClient(devtools.input, devtools.output)
-        handshake(ws, "/devtools/browser")
-        val session = CdpSession(ws)
-        session.onEvent { method, params ->
-            targets.apply(method, params)
+        val session = CdpSession(devtools.input, devtools.output, graph.ioDispatcher)
+        sessions += session
+        session.open("/devtools/browser")
+        watch(session) { event ->
+            targets.apply(event.method, event.params)
             signals.tryEmit(Unit)
         }
-        session.start()
         session.call("Target.setDiscoverTargets", buildJsonObject { put("discover", true) })
+    }
+
+    private suspend fun watch(session: CdpSession, block: (CdpEvent) -> Unit) {
+        val job =
+            CoroutineScope(currentCoroutineContext()).launch {
+                session.events.collect { event -> block(event) }
+            }
+        jobs += job
     }
 
     @Suppress("MissingUseCall") // Closed with the rest of the watch.
@@ -209,51 +225,60 @@ internal class BrowserWatch(private val graph: AppGraph) {
     }
 
     private suspend fun documentRoot(page: PageSession): Int {
-        val doc = page.cdp.call("DOM.getDocument", buildJsonObject { put("depth", 0) })
         val id =
-            ((doc["root"] as? JsonObject)?.get("nodeId") as? JsonPrimitive)?.intOrNull
-                ?: throw ApiException(502, "cdp_error", "Chrome did not return a document")
+            page.cdp
+                .call("DOM.getDocument", buildJsonObject { put("depth", 0) })
+                .decodeCdp<DocumentResult>()
+                ?.root
+                ?.nodeId ?: 0
+        if (id == 0) throw ApiException(502, "cdp_error", "Chrome did not return a document")
         page.rootId = id
         return id
     }
 
-    private suspend fun queryCss(page: PageSession, root: Int, selector: String): Int {
-        val result =
-            page.cdp.call(
+    private suspend fun queryCss(page: PageSession, root: Int, selector: String): Int =
+        page.cdp
+            .call(
                 "DOM.querySelector",
                 buildJsonObject {
                     put("nodeId", root)
                     put("selector", selector)
                 },
             )
-        return (result["nodeId"] as? JsonPrimitive)?.intOrNull ?: 0
-    }
+            .decodeCdp<QueryResult>()
+            ?.nodeId ?: 0
 
     private suspend fun querySearch(page: PageSession, query: String): Int {
-        val started = page.cdp.call("DOM.performSearch", buildJsonObject { put("query", query) })
-        val count = (started["resultCount"] as? JsonPrimitive)?.intOrNull ?: 0
-        val searchId = (started["searchId"] as? JsonPrimitive)?.contentOrNull
+        val started =
+            page.cdp
+                .call("DOM.performSearch", buildJsonObject { put("query", query) })
+                .decodeCdp<SearchStarted>()
+        val searchId = started?.searchId
+        val count = started?.resultCount ?: 0
         if (count == 0 || searchId == null) return 0
         val results =
-            page.cdp.call(
-                "DOM.getSearchResults",
-                buildJsonObject {
-                    put("searchId", searchId)
-                    put("fromIndex", 0)
-                    put("toIndex", 1)
-                },
-            )
+            page.cdp
+                .call(
+                    "DOM.getSearchResults",
+                    buildJsonObject {
+                        put("searchId", searchId)
+                        put("fromIndex", 0)
+                        put("toIndex", 1)
+                    },
+                )
+                .decodeCdp<SearchResults>()
         page.cdp.call("DOM.discardSearchResults", buildJsonObject { put("searchId", searchId) })
-        val ids = results["nodeIds"] as? JsonArray
-        return (ids?.firstOrNull() as? JsonPrimitive)?.intOrNull ?: 0
+        return results?.nodeIds?.firstOrNull() ?: 0
     }
 
     private suspend fun visible(page: PageSession, nodeId: Int): Boolean =
         try {
             val quads =
-                page.cdp.call("DOM.getContentQuads", buildJsonObject { put("nodeId", nodeId) })
-            val list = quads["quads"] as? JsonArray
-            list != null && list.isNotEmpty()
+                page.cdp
+                    .call("DOM.getContentQuads", buildJsonObject { put("nodeId", nodeId) })
+                    .decodeCdp<QuadList>()
+                    ?.quads
+            !quads.isNullOrEmpty()
         } catch (e: ApiException) {
             if (e.error != "cdp_error") throw e
             false
@@ -268,25 +293,10 @@ internal class BrowserWatch(private val graph: AppGraph) {
     }
 
     private suspend fun seed(session: CdpSession, model: PageModel) {
-        val tree = session.call("Page.getFrameTree")
-        val frame = (tree["frameTree"] as? JsonObject)?.get("frame") as? JsonObject ?: return
-        model.seed(
-            (frame["id"] as? JsonPrimitive)?.contentOrNull,
-            (frame["url"] as? JsonPrimitive)?.contentOrNull,
-        )
-    }
-
-    private fun handshake(socket: WebSocketClient, path: String) {
-        try {
-            socket.handshake(path)
-        } catch (e: IOException) {
-            throw ApiException(
-                502,
-                "cdp_error",
-                e.message ?: "DevTools connection failed",
-                cause = e,
-            )
-        }
+        val frame =
+            session.call("Page.getFrameTree").decodeCdp<FrameTreeResult>()?.frameTree?.frame
+                ?: return
+        model.seed(frame.id, frame.url)
     }
 
     private class PageSession(val model: PageModel, val cdp: CdpSession) {
@@ -296,6 +306,19 @@ internal class BrowserWatch(private val graph: AppGraph) {
             rootId = null
         }
     }
+
+    @Serializable private data class DocumentResult(val root: NodeRef? = null)
+
+    @Serializable private data class NodeRef(val nodeId: Int = 0)
+
+    @Serializable private data class QueryResult(val nodeId: Int = 0)
+
+    @Serializable
+    private data class SearchStarted(val resultCount: Int = 0, val searchId: String? = null)
+
+    @Serializable private data class SearchResults(val nodeIds: List<Int> = emptyList())
+
+    @Serializable private data class QuadList(val quads: List<JsonElement> = emptyList())
 
     private companion object {
         const val SOCKET_SLACK_MS = 20_000L

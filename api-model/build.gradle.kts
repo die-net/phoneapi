@@ -7,7 +7,5 @@ kotlin { explicitApi() }
 
 dependencies {
     api(libs.kotlinx.serialization.json)
-
-    testImplementation(libs.junit.jupiter)
-    testRuntimeOnly(libs.junit.platform.launcher)
+    api(libs.kotlinx.serialization.core)
 }

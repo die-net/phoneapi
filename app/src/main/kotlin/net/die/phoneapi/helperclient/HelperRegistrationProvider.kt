@@ -29,8 +29,14 @@ class HelperRegistrationProvider : ContentProvider() {
                 val binder =
                     extras?.getBinder(Registration.EXTRA_BINDER)
                         ?: throw IllegalArgumentException("no binder")
-                PhoneApiApp.graph.helper.register(binder)
-                Bundle().apply { putInt(Registration.EXTRA_APP_UID, Process.myUid()) }
+                if (!PhoneApiApp.graph.helper.register(binder)) {
+                    Log.w(TAG, "Rejected helper registration")
+                    return null
+                }
+                Bundle().apply {
+                    putInt(Registration.EXTRA_APP_UID, Process.myUid())
+                    putBinder(Registration.EXTRA_APP_BINDER, appBinder)
+                }
             }
             else -> null
         }
@@ -60,5 +66,8 @@ class HelperRegistrationProvider : ContentProvider() {
     companion object {
         const val SHELL_UID = 2000
         private const val TAG = "PhoneApiHelper"
+
+        /** Dies with this process. The helper links to it and registers again when it does. */
+        private val appBinder = Binder()
     }
 }

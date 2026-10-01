@@ -14,12 +14,6 @@ class TextJsonTest {
     }
 
     @Test
-    fun `builds a shell result`() {
-        val json = shellResultJson(0, "ok", "")
-        assertEquals("""{"exit":0,"stdout":"ok","stderr":""}""", json)
-    }
-
-    @Test
     fun `omits unknown socket owners`() {
         val json = devtoolsJson(listOf(DevtoolsEntry("chrome_devtools_remote", pid = 4)))
         assertTrue(json.contains(""""name":"chrome_devtools_remote""""))

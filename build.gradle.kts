@@ -26,4 +26,15 @@ tasks.register<dev.detekt.gradle.report.ReportMergeTask>("detektReportMerge") {
     output.set(layout.buildDirectory.file("reports/detekt/merge.sarif"))
 }
 
-dependencyAnalysis { issues { all { onAny { severity("fail") } } } }
+dependencyAnalysis {
+    issues {
+        all {
+            onAny { severity("fail") }
+            onUnusedDependencies {
+                // The JUnit Platform loads the engine through ServiceLoader, so bytecode
+                // analysis never sees a reference to it.
+                exclude("org.junit.jupiter:junit-jupiter-engine")
+            }
+        }
+    }
+}

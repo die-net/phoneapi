@@ -1,55 +1,74 @@
 package net.die.phoneapi.browser
 
+import java.io.Closeable
 import java.io.IOException
-import java.util.concurrent.ConcurrentHashMap
+import java.io.InputStream
+import java.io.OutputStream
+import java.net.SocketTimeoutException
 import java.util.concurrent.atomic.AtomicInteger
+import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.cancellation.CancellationException
-import kotlin.coroutines.resumeWithException
-import kotlinx.coroutines.CancellableContinuation
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.TimeoutCancellationException
-import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.withTimeout
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.intOrNull
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.core.ApiJson
 
+internal data class CdpEvent(val method: String, val params: JsonObject)
+
 /**
- * One DevTools WebSocket with a reader thread. Commands wait for their id; events are delivered to
- * [onEvent] on the reader thread.
+ * One DevTools WebSocket. Commands are matched by id; everything without an id is an [events] item.
+ * The reader runs on [dispatcher].
  */
-internal class CdpSession(private val socket: WebSocketClient) {
-    private val pending = ConcurrentHashMap<Int, CancellableContinuation<JsonObject>>()
+internal class CdpSession(
+    input: InputStream,
+    output: OutputStream,
+    dispatcher: CoroutineContext,
+    newKey: () -> String = ::websocketKey,
+) : Closeable {
+    private val socket = ChromeSocket(input, output, dispatcher, newKey)
+    private val pending = HashMap<Int, CompletableDeferred<JsonObject>>()
+    private val early = HashMap<Int, Result<JsonObject>>()
+    private val gate = Any()
     private val nextId = AtomicInteger(0)
-    private var onEvent: (String, JsonObject) -> Unit = { _, _ -> }
-    private var reader: Thread? = null
+    private val eventsFlow =
+        MutableSharedFlow<CdpEvent>(
+            replay = EVENT_BUFFER,
+            onBufferOverflow = BufferOverflow.DROP_OLDEST,
+        )
+    val events: Flow<CdpEvent> = eventsFlow.asSharedFlow()
 
-    fun onEvent(handler: (String, JsonObject) -> Unit) {
-        onEvent = handler
-    }
-
-    fun start() {
-        val thread = Thread(::readLoop)
-        thread.isDaemon = true
-        thread.name = "cdp"
-        reader = thread
-        thread.start()
+    fun open(path: String) {
+        socket.handshake(path)
+        socket.connect()
+        socket.launch { readLoop() }
     }
 
     suspend fun call(method: String, params: JsonObject? = null): JsonObject =
         try {
-            withTimeout(CALL_TIMEOUT_MS) { send(method, params) }
+            withTimeout(CALL_TIMEOUT_MS) { roundTrip(method, params) }
         } catch (e: TimeoutCancellationException) {
             throw ApiException(503, "cdp_timeout", "DevTools did not answer in time", cause = e)
         } catch (e: CancellationException) {
             throw e
+        } catch (e: ApiException) {
+            throw e
+        } catch (e: SocketTimeoutException) {
+            throw ApiException(
+                503,
+                "cdp_timeout",
+                e.message ?: "DevTools did not answer in time",
+                cause = e,
+            )
         } catch (e: IOException) {
             throw ApiException(
                 502,
@@ -59,62 +78,85 @@ internal class CdpSession(private val socket: WebSocketClient) {
             )
         }
 
-    private suspend fun send(method: String, params: JsonObject?): JsonObject =
-        suspendCancellableCoroutine { cont ->
-            val id = nextId.incrementAndGet()
-            pending[id] = cont
-            cont.invokeOnCancellation { pending.remove(id) }
-            try {
-                socket.sendText(command(id, method, params))
-            } catch (e: IOException) {
-                pending.remove(id)
-                if (cont.isActive) cont.resumeWithException(e)
-            }
-        }
+    override fun close() {
+        socket.close()
+    }
 
-    private fun readLoop() {
+    private suspend fun roundTrip(method: String, params: JsonObject?): JsonObject {
+        val id = nextId.incrementAndGet()
+        val deferred = CompletableDeferred<JsonObject>()
+        val ready =
+            synchronized(gate) {
+                early.remove(id)
+                    ?: run {
+                        pending[id] = deferred
+                        null
+                    }
+            }
         try {
-            while (true) dispatch(message())
-        } catch (e: IOException) {
-            failAll(e)
+            socket.sendText(command(id, method, params))
+            return ready?.getOrThrow() ?: deferred.await()
+        } finally {
+            synchronized(gate) { pending.remove(id) }
         }
     }
 
-    private fun dispatch(message: JsonObject) {
-        val id = (message["id"] as? JsonPrimitive)?.intOrNull
+    private suspend fun readLoop() {
+        var failure: IOException? = null
+        try {
+            socket.relayText(::dispatch)
+        } catch (e: IOException) {
+            failure = e
+        } finally {
+            failAll(failure ?: IOException("DevTools closed the WebSocket"))
+        }
+    }
+
+    private suspend fun dispatch(text: String) {
+        val message =
+            try {
+                ApiJson.decodeFromString<Envelope>(text)
+            } catch (e: SerializationException) {
+                throw IOException("DevTools sent malformed JSON", e)
+            } catch (e: IllegalArgumentException) {
+                throw IOException("DevTools sent malformed JSON", e)
+            }
+        val id = message.id
         if (id == null) {
-            val method = (message["method"] as? JsonPrimitive)?.contentOrNull ?: return
-            val params = message["params"] as? JsonObject ?: JsonObject(emptyMap())
-            onEvent(method, params)
+            val method = message.method ?: return
+            eventsFlow.emit(CdpEvent(method, message.params ?: JsonObject(emptyMap())))
             return
         }
-        val cont = pending.remove(id) ?: return
-        if (!cont.isActive) return
-        val error = message["error"]?.jsonObject
+        val error = message.error
         if (error != null) {
-            val text = error["message"]?.jsonPrimitive?.content ?: "DevTools rejected the command"
-            cont.resumeWithException(ApiException(502, "cdp_error", text))
+            val reason = error.message ?: "DevTools rejected the command"
+            deliver(id, Result.failure(ApiException(502, "cdp_error", reason)))
             return
         }
-        cont.resumeWith(Result.success(message["result"] as? JsonObject ?: JsonObject(emptyMap())))
+        deliver(id, Result.success(message.result ?: JsonObject(emptyMap())))
+    }
+
+    private fun deliver(id: Int, result: Result<JsonObject>) {
+        val waiter =
+            synchronized(gate) {
+                pending.remove(id)
+                    ?: run {
+                        early[id] = result
+                        null
+                    }
+            } ?: return
+        result.fold(onSuccess = waiter::complete, onFailure = waiter::completeExceptionally)
     }
 
     private fun failAll(error: IOException) {
-        val waiting = pending.values.toList()
-        pending.clear()
-        waiting.forEach { cont ->
-            if (cont.isActive) cont.resumeWithException(error)
-        }
+        val waiting =
+            synchronized(gate) {
+                val values = pending.values.toList()
+                pending.clear()
+                values
+            }
+        waiting.forEach { it.completeExceptionally(error) }
     }
-
-    private fun message(): JsonObject =
-        try {
-            ApiJson.parseToJsonElement(socket.nextText()).jsonObject
-        } catch (e: SerializationException) {
-            throw IOException("DevTools sent malformed JSON", e)
-        } catch (e: IllegalArgumentException) {
-            throw IOException("DevTools sent malformed JSON", e)
-        }
 
     private fun command(id: Int, method: String, params: JsonObject?): String = buildJsonObject {
         put("id", id)
@@ -123,7 +165,19 @@ internal class CdpSession(private val socket: WebSocketClient) {
     }
         .toString()
 
+    @Serializable
+    private data class Envelope(
+        val id: Int? = null,
+        val method: String? = null,
+        val params: JsonObject? = null,
+        val result: JsonObject? = null,
+        val error: Rejected? = null,
+    )
+
+    @Serializable private data class Rejected(val message: String? = null)
+
     private companion object {
         const val CALL_TIMEOUT_MS = 15_000L
+        const val EVENT_BUFFER = 64
     }
 }

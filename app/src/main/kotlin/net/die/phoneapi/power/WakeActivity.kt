@@ -1,15 +1,14 @@
 package net.die.phoneapi.power
 
-import android.app.Activity
 import android.app.KeyguardManager
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.view.WindowManager
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
+import androidx.activity.ComponentActivity
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import net.die.phoneapi.PhoneApiApp
@@ -21,43 +20,31 @@ import net.die.phoneapi.core.awaitDeviceState
  * from recents and has no history, so it never shows up as a task.
  *
  * With [EXTRA_DISMISS_KEYGUARD] it also asks the keyguard to go away, which is the only supported
- * way to dismiss a non-secure lock screen from an app.
+ * way to dismiss a non-secure lock screen from an app. Showing over the keyguard and turning the
+ * screen on are declared on the activity in the manifest.
  */
-class WakeActivity : Activity() {
+class WakeActivity : ComponentActivity() {
     private val graph
         get() = PhoneApiApp.graph
 
-    private var scope: CoroutineScope? = null
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setShowWhenLocked(true)
-        setTurnScreenOn(true)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-    }
-
-    override fun onResume() {
-        super.onResume()
-        // Our window is showing, so the display is on whether or not the broadcast has landed yet.
-        graph.state.refresh()
-        val dismiss = intent?.getBooleanExtra(EXTRA_DISMISS_KEYGUARD, false) == true
-        if (dismiss) {
-            getSystemService(KeyguardManager::class.java).requestDismissKeyguard(this, null)
-        }
-        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main).also { this.scope = it }
-        scope.launch {
-            if (dismiss) {
-                awaitDeviceState(graph.state, graph.bus, DISMISS_WAIT_MS) { !it.keyguard.locked }
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.RESUMED) {
+                graph.state.refresh()
+                val dismiss = intent?.getBooleanExtra(EXTRA_DISMISS_KEYGUARD, false) == true
+                if (dismiss) {
+                    getSystemService(KeyguardManager::class.java)
+                        .requestDismissKeyguard(this@WakeActivity, null)
+                    awaitDeviceState(graph.state, graph.bus, DISMISS_WAIT_MS) {
+                        !it.keyguard.locked
+                    }
+                }
+                delay(LINGER_MS)
+                finish()
             }
-            delay(LINGER_MS)
-            finish()
         }
-    }
-
-    override fun onPause() {
-        scope?.cancel()
-        scope = null
-        super.onPause()
     }
 
     companion object {

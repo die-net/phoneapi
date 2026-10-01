@@ -12,10 +12,20 @@ import java.io.IOException
 import java.io.InputStream
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineName
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.helperclient.HelperConnection
 
@@ -23,95 +33,117 @@ import net.die.phoneapi.helperclient.HelperConnection
  * One audio encoder shared by every audio viewer. The helper writes PCM from remote submix, and
  * this encodes Opus when the device has that encoder, otherwise AAC.
  */
-internal class AudioStream(private val lease: StreamLease, private val helper: HelperConnection) {
-    private val lifecycle = Any()
+internal class AudioStream(
+    private val lease: StreamLease,
+    private val helper: HelperConnection,
+    private val io: CoroutineDispatcher,
+) {
+    private val gate = Mutex()
+    private val scope = CoroutineScope(SupervisorJob() + io)
     private val subscribers = CopyOnWriteArrayList<Channel<ByteArray>>()
-    private var codec: MediaCodec? = null
-    private var pipe: ParcelFileDescriptor? = null
-    private var reader: Thread? = null
-    private var headerJson: String = ""
-    private var frameBytes: Int = OPUS_BYTES
-    private var frameUs: Long = OPUS_US
-    private val pcmLock = Any()
-    private val pendingPcm = ArrayDeque<Pair<ByteArray, Long>>()
-    private val freeInputs = ArrayDeque<Int>()
+
+    @Volatile private var codec: MediaCodec? = null
 
     @Volatile private var running = false
 
     @Volatile private var configFrame: ByteArray? = null
+
+    @Volatile private var inputs: Channel<Int>? = null
+
+    private var pipe: ParcelFileDescriptor? = null
+    private var reader: Job? = null
+    private var pcm: Channel<Pcm>? = null
+    private var headerJson: String = ""
+    private var frameBytes: Int = OPUS_BYTES
+    private var frameUs: Long = OPUS_US
 
     suspend fun serve(session: DefaultWebSocketServerSession) {
         val channel = Channel<ByteArray>(CHANNEL_CAP, BufferOverflow.DROP_OLDEST)
         lease.opened()
         var attached = false
         try {
-            val header =
-                synchronized(lifecycle) {
+            val (header, config) =
+                gate.withLock {
                     subscribers.add(channel)
                     attached = true
-                    if (subscribers.size == 1) startEncoder()
-                    headerJson
+                    if (subscribers.size == 1) withContext(io) { startEncoder() }
+                    headerJson to configFrame
                 }
             session.send(Frame.Text(header))
-            configFrame?.let { session.send(Frame.Binary(true, it)) }
+            config?.let { session.send(Frame.Binary(true, it)) }
             for (frame in channel) session.send(Frame.Binary(true, frame))
         } finally {
-            if (attached) {
-                synchronized(lifecycle) {
-                    subscribers.remove(channel)
-                    if (subscribers.isEmpty()) stopEncoder()
-                }
-            }
+            if (attached) withContext(NonCancellable) { detach(channel) }
             channel.close()
             lease.closed()
         }
     }
 
-    private fun startEncoder() {
-        synchronized(pcmLock) {
-            pendingPcm.clear()
-            freeInputs.clear()
+    private suspend fun detach(channel: Channel<ByteArray>) {
+        gate.withLock {
+            subscribers.remove(channel)
+            if (subscribers.isEmpty()) withContext(io) { stopEncoder() }
         }
+    }
+
+    private suspend fun startEncoder() {
         val opened = openCodec()
         frameBytes = opened.frameBytes
         frameUs = opened.frameUs
-        headerJson =
-            buildJsonObject {
-                put("codec", opened.codecName)
-                put("sampleRate", SAMPLE_RATE)
-                put("channels", CHANNELS)
-            }
-                .toString()
+        headerJson = audioHeader(opened.codecName, SAMPLE_RATE, CHANNELS)
         val encoder = opened.encoder
+        val inputQueue = Channel<Int>(Channel.UNLIMITED)
+        val pcmQueue = Channel<Pcm>(MAX_PENDING, BufferOverflow.DROP_OLDEST)
+        inputs = inputQueue
+        pcm = pcmQueue
         codec = encoder
-        encoder.setCallback(callback())
-        configure(encoder, opened.format)
-        encoder.start()
-        running = true
-        val capture =
-            try {
+        try {
+            encoder.setCallback(callback(encoder))
+            configure(encoder, opened.format)
+            encoder.start()
+            running = true
+            val capture =
                 helper.require().startAudioCapture(SAMPLE_RATE, CHANNELS)
-            } catch (e: CancellationException) {
-                running = false
-                throw e
-            } catch (e: RemoteException) {
-                running = false
-                throw streamError(e)
-            } catch (e: IllegalStateException) {
-                running = false
-                throw streamError(e)
-            }
-        if (capture == null) {
-            running = false
-            throw ApiException.unavailable("audio_error", "The helper did not return an audio pipe")
+                    ?: throw ApiException.unavailable(
+                        "audio_error",
+                        "The helper did not return an audio pipe",
+                    )
+            pipe = capture
+            reader = launchReader(encoder, capture, inputQueue, pcmQueue)
+        } catch (e: CancellationException) {
+            stopEncoder()
+            throw e
+        } catch (e: RemoteException) {
+            stopEncoder()
+            throw streamError(e)
+        } catch (e: IllegalStateException) {
+            stopEncoder()
+            throw streamError(e)
+        } catch (e: ApiException) {
+            stopEncoder()
+            throw e
         }
-        pipe = capture
-        reader =
-            Thread({ readPcm(capture) }, "phoneapi-pcm").also {
-                it.isDaemon = true
-                it.start()
-            }
     }
+
+    private fun launchReader(
+        encoder: MediaCodec,
+        capture: ParcelFileDescriptor,
+        inputQueue: Channel<Int>,
+        pcmQueue: Channel<Pcm>,
+    ): Job =
+        scope.launch(CoroutineName("phoneapi-pcm")) {
+            val feeding = launch { feed(encoder, inputQueue, pcmQueue) }
+            try {
+                readPcm(capture, pcmQueue)
+            } finally {
+                pcmQueue.close()
+                withContext(NonCancellable) { feeding.cancelAndJoin() }
+            }
+            if (running) {
+                running = false
+                closeViewers()
+            }
+        }
 
     private fun openCodec(): Opened {
         try {
@@ -141,15 +173,11 @@ internal class AudioStream(private val lease: StreamLease, private val helper: H
         }
     }
 
-    private fun callback(): MediaCodec.Callback =
+    private fun callback(owner: MediaCodec): MediaCodec.Callback =
         object : MediaCodec.Callback() {
             override fun onInputBufferAvailable(codec: MediaCodec, index: Int) {
-                val frame = synchronized(pcmLock) { pendingPcm.removeFirstOrNull() }
-                if (frame == null) {
-                    synchronized(pcmLock) { freeInputs.addLast(index) }
-                    return
-                }
-                writeInput(codec, index, frame.first, frame.second)
+                if (this@AudioStream.codec !== owner) return
+                inputs?.trySend(index)
             }
 
             override fun onOutputBufferAvailable(
@@ -157,14 +185,21 @@ internal class AudioStream(private val lease: StreamLease, private val helper: H
                 index: Int,
                 info: MediaCodec.BufferInfo,
             ) {
-                handleOutput(codec, index, info)
+                if (this@AudioStream.codec !== owner) {
+                    releaseQuietly(owner, index)
+                    return
+                }
+                handleOutput(owner, index, info)
             }
 
             override fun onError(codec: MediaCodec, error: MediaCodec.CodecException) {
+                if (this@AudioStream.codec !== owner) return
                 Log.e(TAG, "audio encoder", error)
+                scope.launch { failLive(owner) }
             }
 
             override fun onOutputFormatChanged(codec: MediaCodec, format: MediaFormat) {
+                if (this@AudioStream.codec !== owner) return
                 val csd = format.getByteBuffer("csd-0") ?: return
                 val view = csd.duplicate()
                 val bytes = ByteArray(view.remaining())
@@ -172,6 +207,14 @@ internal class AudioStream(private val lease: StreamLease, private val helper: H
                 publishConfig(bytes)
             }
         }
+
+    private suspend fun failLive(owner: MediaCodec) {
+        gate.withLock {
+            if (codec !== owner) return@withLock
+            withContext(io) { stopEncoder() }
+            closeViewers()
+        }
+    }
 
     private fun handleOutput(codec: MediaCodec, index: Int, info: MediaCodec.BufferInfo) {
         val data =
@@ -190,8 +233,8 @@ internal class AudioStream(private val lease: StreamLease, private val helper: H
     }
 
     private fun readOutput(codec: MediaCodec, index: Int, info: MediaCodec.BufferInfo): ByteArray? {
-        if (!running) {
-            codec.releaseOutputBuffer(index, false)
+        if (!running || this.codec !== codec) {
+            releaseQuietly(codec, index)
             return null
         }
         val output = codec.getOutputBuffer(index)
@@ -208,19 +251,19 @@ internal class AudioStream(private val lease: StreamLease, private val helper: H
     }
 
     private fun publishConfig(data: ByteArray) {
-        if (data.isEmpty()) return
+        if (!running || data.isEmpty()) return
         val packed = packFrame(FRAME_CONFIG, 0, data)
         configFrame = packed
         emit(packed)
     }
 
-    private fun readPcm(capture: ParcelFileDescriptor) {
+    private fun readPcm(capture: ParcelFileDescriptor, pcm: Channel<Pcm>) {
         val frame = ByteArray(frameBytes)
         var pts = 0L
         try {
             ParcelFileDescriptor.AutoCloseInputStream(capture).use { input ->
                 while (running && readFull(input, frame)) {
-                    queue(frame, pts)
+                    pcm.trySend(Pcm(frame.copyOf(), pts))
                     pts += frameUs
                 }
             }
@@ -239,27 +282,15 @@ internal class AudioStream(private val lease: StreamLease, private val helper: H
         return true
     }
 
-    private fun queue(frame: ByteArray, pts: Long) {
-        if (!running) return
-        val copy = frame.copyOf()
-        val index: Int
-        val current: MediaCodec
-        synchronized(pcmLock) {
-            val encoder = codec
-            val free = freeInputs.removeFirstOrNull()
-            if (encoder == null || free == null) {
-                while (pendingPcm.size >= MAX_PENDING) pendingPcm.removeFirst()
-                pendingPcm.addLast(copy to pts)
-                return
-            }
-            current = encoder
-            index = free
+    private suspend fun feed(encoder: MediaCodec, inputs: Channel<Int>, pcm: Channel<Pcm>) {
+        for (index in inputs) {
+            val frame = pcm.receiveCatching().getOrNull() ?: return
+            writeInput(encoder, index, frame.data, frame.pts)
         }
-        writeInput(current, index, copy, pts)
     }
 
     private fun writeInput(encoder: MediaCodec, index: Int, frame: ByteArray, pts: Long) {
-        if (!running) return
+        if (!running || codec !== encoder) return
         try {
             val buffer = encoder.getInputBuffer(index) ?: return
             buffer.clear()
@@ -274,12 +305,33 @@ internal class AudioStream(private val lease: StreamLease, private val helper: H
         for (subscriber in subscribers) subscriber.trySend(frame)
     }
 
-    private fun stopEncoder() {
-        running = false
-        synchronized(pcmLock) {
-            pendingPcm.clear()
-            freeInputs.clear()
+    private fun closeViewers() {
+        for (subscriber in subscribers) subscriber.close()
+    }
+
+    private suspend fun stopEncoder() {
+        withContext(NonCancellable) {
+            running = false
+            val current = codec
+            codec = null
+            configFrame = null
+            val job = reader
+            reader = null
+            inputs?.close()
+            inputs = null
+            pcm?.close()
+            pcm = null
+            stopAudioQuietly()
+            closePipe()
+            job?.cancel()
+            if (job != null && withTimeoutOrNull(JOIN_MS) { job.join() } == null) {
+                Log.w(TAG, "pcm reader did not stop")
+            }
+            if (current != null) releaseEncoder(current)
         }
+    }
+
+    private fun stopAudioQuietly() {
         try {
             helper.getOrNull()?.stopAudioCapture()
         } catch (e: RemoteException) {
@@ -287,20 +339,19 @@ internal class AudioStream(private val lease: StreamLease, private val helper: H
         } catch (e: IllegalStateException) {
             Log.w(TAG, "stopAudio", e)
         }
-        pipe?.let { end ->
-            try {
-                end.close()
-            } catch (e: IOException) {
-                Log.i(TAG, "pcm close", e)
-            }
-        }
+    }
+
+    private fun closePipe() {
+        val end = pipe ?: return
         pipe = null
-        reader?.join(JOIN_MS)
-        reader = null
-        val current = codec
-        codec = null
-        configFrame = null
-        if (current == null) return
+        try {
+            end.close()
+        } catch (e: IOException) {
+            Log.i(TAG, "pcm close", e)
+        }
+    }
+
+    private fun releaseEncoder(current: MediaCodec) {
         try {
             current.stop()
         } catch (e: IllegalStateException) {
@@ -309,8 +360,19 @@ internal class AudioStream(private val lease: StreamLease, private val helper: H
         current.release()
     }
 
+    private fun releaseQuietly(codec: MediaCodec, index: Int) {
+        try {
+            codec.releaseOutputBuffer(index, false)
+        } catch (e: IllegalStateException) {
+            Log.w(TAG, "audio release", e)
+        }
+    }
+
     private fun streamError(error: Throwable): ApiException =
         ApiException(502, "stream_error", error.message ?: "audio encoder failed", cause = error)
+
+    // ByteArray equality is referential, so this stays a plain holder.
+    @Suppress("UseDataClass") private class Pcm(val data: ByteArray, val pts: Long)
 
     private data class Opened(
         val encoder: MediaCodec,

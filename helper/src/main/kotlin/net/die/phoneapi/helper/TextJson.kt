@@ -24,9 +24,6 @@ internal fun jsonString(value: String): String {
     return out.toString()
 }
 
-internal fun shellResultJson(exit: Int, stdout: String, stderr: String): String =
-    """{"exit":$exit,"stdout":${jsonString(stdout)},"stderr":${jsonString(stderr)}}"""
-
 internal fun devtoolsJson(entries: List<DevtoolsEntry>): String =
     entries.joinToString(prefix = "[", postfix = "]") { entry ->
         val fields = ArrayList<String>(FIELDS)

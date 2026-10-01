@@ -9,7 +9,6 @@ import java.security.SecureRandom
 import java.security.cert.X509Certificate
 import java.security.spec.ECGenParameterSpec
 import java.util.Date
-import net.die.phoneapi.core.toHex
 import org.bouncycastle.asn1.x500.X500Name
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter
 import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder
@@ -29,7 +28,14 @@ class TlsManager(private val dir: File, private val password: CharArray) {
 
     /** Uppercase hex SHA-256 of the DER certificate, colon-separated. */
     val fingerprint: String by lazy {
-        MessageDigest.getInstance("SHA-256").digest(certificate.encoded).toHex(":", upper = true)
+        MessageDigest.getInstance("SHA-256")
+            .digest(certificate.encoded)
+            .toHexString(
+                HexFormat {
+                    upperCase = true
+                    bytes.byteSeparator = ":"
+                }
+            )
     }
 
     private fun loadOrCreate(): KeyStore {

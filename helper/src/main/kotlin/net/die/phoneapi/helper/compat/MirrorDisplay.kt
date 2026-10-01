@@ -13,24 +13,33 @@ import java.lang.reflect.Method
  * call, and falls back to `SurfaceControl.createDisplay` where that method is absent.
  */
 internal class MirrorDisplay {
+    private val lock = Any()
     private var virtual: VirtualDisplay? = null
     private var token: IBinder? = null
 
     fun start(surface: Surface, width: Int, height: Int, displayId: Int) {
-        stop()
-        require(width >= 2 && height >= 2) { "mirror size ${width}x$height is too small" }
-        require(width % 2 == 0 && height % 2 == 0) { "mirror size ${width}x$height must be even" }
-        try {
-            virtual = createVirtualDisplay(surface, width, height, displayId)
-            Log.i(TAG, "Mirroring display $displayId at ${width}x$height via DisplayManager")
-        } catch (e: ReflectiveOperationException) {
-            Log.w(TAG, "DisplayManager mirror is unavailable", unwrap(e))
-            token = surfaceDisplay(surface, width, height, displayId)
-            Log.i(TAG, "Mirroring display $displayId at ${width}x$height via SurfaceControl")
+        synchronized(lock) {
+            releaseLocked()
+            require(width >= 2 && height >= 2) { "mirror size ${width}x$height is too small" }
+            require(width % 2 == 0 && height % 2 == 0) {
+                "mirror size ${width}x$height must be even"
+            }
+            try {
+                virtual = createVirtualDisplay(surface, width, height, displayId)
+                Log.i(TAG, "Mirroring display $displayId at ${width}x$height via DisplayManager")
+            } catch (e: ReflectiveOperationException) {
+                Log.w(TAG, "DisplayManager mirror is unavailable", unwrap(e))
+                token = surfaceDisplay(surface, width, height, displayId)
+                Log.i(TAG, "Mirroring display $displayId at ${width}x$height via SurfaceControl")
+            }
         }
     }
 
     fun stop() {
+        synchronized(lock) { releaseLocked() }
+    }
+
+    private fun releaseLocked() {
         virtual?.release()
         virtual = null
         token?.let { destroyDisplay(it) }

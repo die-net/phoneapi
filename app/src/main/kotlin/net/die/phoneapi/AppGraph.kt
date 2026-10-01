@@ -4,6 +4,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.graphics.Rect
 import android.os.Build
+import java.io.File
 import java.io.FileInputStream
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -66,15 +67,16 @@ import net.die.phoneapi.wait.WaitServiceImpl
 /** Process-wide object graph, created once by [PhoneApiApp]. */
 class AppGraph(
     val context: Context,
+    filesDir: File = context.filesDir,
     val dispatcher: CoroutineDispatcher = Dispatchers.Default,
     val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
     val scope = CoroutineScope(SupervisorJob() + dispatcher)
     val bus = EventBus()
-    val settings = SettingsStore(context.filesDir)
-    val tokens = TokenStore(context.filesDir)
+    val settings = SettingsStore(filesDir)
+    val tokens = TokenStore(filesDir)
     val tls by lazy {
-        TlsManager(context.filesDir, settings.current.keystorePassword.toCharArray())
+        TlsManager(filesDir, settings.current.keystorePassword.toCharArray())
     }
     val state = DeviceStateTracker(context, bus)
     val helper =
@@ -93,7 +95,7 @@ class AppGraph(
         HelperSupervisor(
             context = context,
             helper = helper,
-            keys = KeystorePrivateKeyStore(context.filesDir),
+            keys = KeystorePrivateKeyStore(filesDir),
             network = network,
             scope = scope,
             ioDispatcher = ioDispatcher,
@@ -102,7 +104,7 @@ class AppGraph(
         )
 
     /** The lock-screen PIN, provisioned over ADB and never returned by the API. */
-    val pins = PinStore(context.filesDir)
+    val pins = PinStore(filesDir)
 
     /** The connected accessibility service, or null when it is disabled. */
     val a11y = MutableStateFlow<PhoneAccessibilityService?>(null)
@@ -142,8 +144,14 @@ class AppGraph(
     val waits: WaitService = WaitServiceImpl(this)
     val browser: BrowserService = browserService()
     internal val video =
-        VideoStream(StreamLease(context, settings), helper) { deviceInfo.display() }
-    internal val audio = AudioStream(StreamLease(context, settings), helper)
+        VideoStream(
+            StreamLease(context, settings),
+            helper,
+            { deviceInfo.display() },
+            context,
+            ioDispatcher,
+        )
+    internal val audio = AudioStream(StreamLease(context, settings), helper, ioDispatcher)
 
     val server = ApiServer(this)
     val serverController =

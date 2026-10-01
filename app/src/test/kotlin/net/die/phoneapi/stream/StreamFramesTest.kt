@@ -1,5 +1,9 @@
 package net.die.phoneapi.stream
 
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.int
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 
@@ -61,5 +65,36 @@ class StreamFramesTest {
         assertEquals(11, annex.size)
         assertEquals(0x65.toByte(), annex[4])
         assertEquals(0x41.toByte(), annex[10])
+    }
+
+    @Test
+    fun `video header names the size`() {
+        val json =
+            Json.parseToJsonElement(videoHeader(288, 640, VideoSpec(640, 30, 4_000_000))).jsonObject
+        assertEquals("avc", json.getValue("codec").jsonPrimitive.content)
+        assertEquals(288, json.getValue("width").jsonPrimitive.int)
+        assertEquals(640, json.getValue("height").jsonPrimitive.int)
+        assertEquals(30, json.getValue("fps").jsonPrimitive.int)
+        assertEquals(4_000_000, json.getValue("bitRate").jsonPrimitive.int)
+    }
+
+    @Test
+    fun `audio header names the codec`() {
+        val json = Json.parseToJsonElement(audioHeader("opus", 48_000, 2)).jsonObject
+        assertEquals("opus", json.getValue("codec").jsonPrimitive.content)
+        assertEquals(48_000, json.getValue("sampleRate").jsonPrimitive.int)
+        assertEquals(2, json.getValue("channels").jsonPrimitive.int)
+    }
+
+    @Test
+    fun `rotation changes encoder size`() {
+        assertEquals(false, shouldReconfigure(288, 640, 1080, 2400, 640))
+        assertEquals(true, shouldReconfigure(288, 640, 2400, 1080, 640))
+        assertEquals(640 to 288, scaledSize(2400, 1080, 640))
+    }
+
+    @Test
+    fun `same even size keeps encoder`() {
+        assertEquals(false, shouldReconfigure(100, 100, 100, 101, 1000))
     }
 }

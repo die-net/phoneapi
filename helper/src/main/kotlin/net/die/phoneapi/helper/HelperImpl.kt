@@ -21,11 +21,32 @@ internal open class HelperImpl : IHelper.Stub() {
     private val mirror = MirrorDisplay()
     private val audio = AudioTap()
 
-    fun bindToApp(uid: Int) {
+    /**
+     * Resolves [packageName]'s uid before any binder call is served. `cmd package` is used because
+     * this process has no application Context.
+     */
+    fun pinPackage(packageName: String) {
+        val uid = PackageUids.resolve(packageName)
+        if (uid == null) {
+            Log.e(TAG, "Could not resolve uid of $packageName")
+            return
+        }
+        Log.i(TAG, "Pinned $packageName to uid $uid")
         appUid = uid
     }
 
-    override fun protocolVersion(): Int = PROTOCOL
+    /** Uses the app's own uid when [pinPackage] could not resolve one. Never trusts the caller. */
+    fun adoptRegisteredUid(uid: Int) {
+        if (uid < Process.FIRST_APPLICATION_UID) return
+        val pinned = appUid
+        if (pinned == UNKNOWN_UID) {
+            appUid = uid
+        } else if (pinned != uid) {
+            Log.w(TAG, "Registration uid $uid does not match pinned uid $pinned")
+        }
+    }
+
+    override fun protocolVersion(): Int = Registration.PROTOCOL_VERSION
 
     override fun pid(): Int = Process.myPid()
 
@@ -41,7 +62,7 @@ internal open class HelperImpl : IHelper.Stub() {
     override fun injectKeyEvent(event: KeyEvent, mode: Int): Boolean =
         privileged("injectKey") { injector.inject(event, mode) }
 
-    override fun touchscreenInfo(): String = privileged("touchscreen") { touchscreenJson() }
+    override fun touchscreenInfo(): TouchscreenInfo = privileged("touchscreen") { touchscreen() }
 
     @Suppress("MissingUseCall") // The app reads this descriptor; closing it here would break that.
     override fun openAbstractSocket(name: String): ParcelFileDescriptor =
@@ -50,7 +71,7 @@ internal open class HelperImpl : IHelper.Stub() {
     override fun listDevtoolsSockets(): String =
         privileged("sockets") { AbstractSockets.devtools() }
 
-    override fun exec(argv: Array<out String>, timeoutMs: Long, maxOutputBytes: Int): String =
+    override fun exec(argv: Array<out String>, timeoutMs: Long, maxOutputBytes: Int): ShellResult =
         privileged("exec") {
             if (argv.isEmpty()) throw RemoteException("argv is empty")
             Commands.exec(argv.toList(), timeoutMs, maxOutputBytes)
@@ -92,10 +113,8 @@ internal open class HelperImpl : IHelper.Stub() {
     private fun enforceCaller() {
         val uid = Binder.getCallingUid()
         if (uid == Process.ROOT_UID) return
-        // Shizuku delivers the binder straight to the app, which never gets a chance to tell us
-        // its uid through the content provider. The first app caller becomes the bound uid.
-        if (appUid == UNKNOWN_UID && uid >= Process.FIRST_APPLICATION_UID) appUid = uid
-        if (uid != appUid) throw SecurityException("caller uid $uid")
+        val expected = appUid
+        if (expected == UNKNOWN_UID || uid != expected) throw SecurityException("caller uid $uid")
     }
 
     @Suppress("TooGenericExceptionCaught") // Log binder failures, then rethrow them to the app.
@@ -112,32 +131,52 @@ internal open class HelperImpl : IHelper.Stub() {
         }
     }
 
-    private fun touchscreenJson(): String {
+    private fun touchscreen(): TouchscreenInfo {
         val touch = ArrayList<InputDevice>()
         for (id in InputDevice.getDeviceIds()) {
             val candidate = InputDevice.getDevice(id) ?: continue
             if (candidate.sources and InputDevice.SOURCE_TOUCHSCREEN != 0) touch += candidate
         }
         val device = touch.firstOrNull { !it.isVirtual } ?: touch.firstOrNull()
-        if (device == null) return "null"
-        return buildString {
-            append("""{"deviceId":${device.id},"source":${InputDevice.SOURCE_TOUCHSCREEN}""")
-            append(""","maxX":${axisMax(device, MotionEvent.AXIS_X)}""")
-            append(""","maxY":${axisMax(device, MotionEvent.AXIS_Y)}""")
-            append(""","pressure":${axisRange(device, MotionEvent.AXIS_PRESSURE)}""")
-            append(""","touchMajor":${axisRange(device, MotionEvent.AXIS_TOUCH_MAJOR)}""")
-            append(""","touchMinor":${axisRange(device, MotionEvent.AXIS_TOUCH_MINOR)}""")
-            append(""","orientation":${axisRange(device, MotionEvent.AXIS_ORIENTATION)}""")
-            append(""","size":${axisRange(device, MotionEvent.AXIS_SIZE)}}""")
-        }
+        return if (device == null) defaultTouchscreen() else deviceTouchscreen(device)
     }
 
-    private fun axisRange(device: InputDevice, axis: Int): String {
+    private fun defaultTouchscreen(): TouchscreenInfo =
+        TouchscreenInfo().apply {
+            deviceId = 0
+            source = InputDevice.SOURCE_TOUCHSCREEN
+            maxX = 0f
+            maxY = 0f
+            pressure = axis(0f, 1f)
+            touchMajor = axis(0f, 1f)
+            touchMinor = axis(0f, 1f)
+            orientation = axis(0f, 0f)
+            size = axis(0f, 1f)
+        }
+
+    private fun deviceTouchscreen(device: InputDevice): TouchscreenInfo =
+        TouchscreenInfo().apply {
+            deviceId = device.id
+            source = InputDevice.SOURCE_TOUCHSCREEN
+            maxX = axisMax(device, MotionEvent.AXIS_X)
+            maxY = axisMax(device, MotionEvent.AXIS_Y)
+            pressure = axisRange(device, MotionEvent.AXIS_PRESSURE)
+            touchMajor = axisRange(device, MotionEvent.AXIS_TOUCH_MAJOR)
+            touchMinor = axisRange(device, MotionEvent.AXIS_TOUCH_MINOR)
+            orientation = axisRange(device, MotionEvent.AXIS_ORIENTATION)
+            size = axisRange(device, MotionEvent.AXIS_SIZE)
+        }
+
+    private fun axisRange(device: InputDevice, axis: Int): AxisRange {
         val range = device.getMotionRange(axis)
-        val min = range?.min ?: 0f
-        val max = range?.max ?: 1f
-        return """{"min":$min,"max":$max}"""
+        return axis(range?.min ?: 0f, range?.max ?: 1f)
     }
+
+    private fun axis(min: Float, max: Float): AxisRange =
+        AxisRange().apply {
+            this.min = min
+            this.max = max
+        }
 
     private fun axisMax(device: InputDevice, axis: Int): Float =
         device.getMotionRange(axis)?.max ?: 0f
@@ -147,7 +186,6 @@ internal open class HelperImpl : IHelper.Stub() {
 
     private companion object {
         const val TAG = "PhoneApiHelper"
-        const val PROTOCOL = 1
         const val UNKNOWN_UID = -1
     }
 }

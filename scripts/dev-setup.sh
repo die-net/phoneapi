@@ -35,8 +35,17 @@ adb install -r -g app/build/outputs/apk/debug/app-debug.apk >/dev/null
 adb shell pm grant "$PKG" android.permission.WRITE_SECURE_SETTINGS
 
 # Enabling right after install can race the package scan and get cleared; retry until bound.
+# Append to the existing colon-separated list so other services stay enabled.
 for _ in $(seq 1 10); do
-  adb shell settings put secure enabled_accessibility_services "$SERVICE"
+  current="$(adb shell settings get secure enabled_accessibility_services | tr -d '\r')"
+  if [[ -z "$current" || "$current" == "null" ]]; then
+    desired="$SERVICE"
+  elif [[ ":$current:" == *":$SERVICE:"* ]]; then
+    desired="$current"
+  else
+    desired="$current:$SERVICE"
+  fi
+  adb shell settings put secure enabled_accessibility_services "$desired"
   adb shell settings put secure accessibility_enabled 1
   sleep 1
   if adb shell dumpsys accessibility | grep -q "Bound services:{Service\[label=PhoneAPI"; then break; fi

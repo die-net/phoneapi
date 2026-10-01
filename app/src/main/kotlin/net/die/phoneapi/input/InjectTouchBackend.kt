@@ -8,12 +8,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.SerializationException
-import kotlinx.serialization.serializer
 import net.die.phoneapi.core.ApiException
-import net.die.phoneapi.core.ApiJson
+import net.die.phoneapi.helper.AxisRange
 import net.die.phoneapi.helper.IHelper
+import net.die.phoneapi.helper.TouchscreenInfo
 import net.die.phoneapi.helperclient.HelperConnection
 import net.die.phoneapi.model.TimedPoint
 
@@ -32,7 +30,10 @@ class InjectTouchBackend(
 
     private val gestures = Mutex()
     private val screenLock = Mutex()
-    private var screen: Touchscreen? = null
+
+    /** Dropped when [helper] hands out a different binder proxy. */
+    @Volatile private var screenProxy: IHelper? = null
+    @Volatile private var screen: TouchscreenInfo? = null
 
     override suspend fun perform(pointers: List<List<TimedPoint>>): Boolean = gestures.withLock {
         val proxy = helper.require()
@@ -59,15 +60,20 @@ class InjectTouchBackend(
         }
     }
 
-    private suspend fun touchscreen(proxy: IHelper): Touchscreen {
-        screen?.let {
-            return it
-        }
-        return screenLock.withLock {
+    private suspend fun touchscreen(proxy: IHelper): TouchscreenInfo {
+        if (screenProxy === proxy) {
             screen?.let {
                 return it
             }
-            val parsed = withContext(io) { parseTouchscreen(proxy.touchscreenInfo()) }
+        }
+        return screenLock.withLock {
+            if (screenProxy === proxy) {
+                screen?.let {
+                    return it
+                }
+            }
+            val parsed = withContext(io) { proxy.touchscreenInfo() }
+            screenProxy = proxy
             screen = parsed
             parsed
         }
@@ -79,31 +85,9 @@ class InjectTouchBackend(
     }
 }
 
-@Serializable
-internal data class Touchscreen(
-    val deviceId: Int = 0,
-    val source: Int = InputDevice.SOURCE_TOUCHSCREEN,
-    val pressure: AxisRange = AxisRange(0f, 1f),
-    val touchMajor: AxisRange = AxisRange(0f, 1f),
-    val touchMinor: AxisRange = AxisRange(0f, 1f),
-    val orientation: AxisRange = AxisRange(0f, 0f),
-    val size: AxisRange = AxisRange(0f, 1f),
-)
-
-@Serializable internal data class AxisRange(val min: Float = 0f, val max: Float = 1f)
-
-internal fun parseTouchscreen(json: String): Touchscreen {
-    if (json.isBlank() || json == "null") return Touchscreen()
-    return try {
-        ApiJson.decodeFromString(serializer<Touchscreen>(), json)
-    } catch (_: SerializationException) {
-        Touchscreen()
-    }
-}
-
 private fun motionEvents(
     samples: List<TouchSample>,
-    screen: Touchscreen,
+    screen: TouchscreenInfo,
     start: Long,
 ): List<MotionEvent> {
     val active = LinkedHashMap<Int, TouchSample>()
@@ -161,7 +145,7 @@ private fun obtain(
     eventTime: Long,
     action: Int,
     pointers: List<TouchSample>,
-    screen: Touchscreen,
+    screen: TouchscreenInfo,
 ): MotionEvent {
     val properties =
         Array(pointers.size) { index ->

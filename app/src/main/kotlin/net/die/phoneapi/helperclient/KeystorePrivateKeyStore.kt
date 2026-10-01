@@ -1,17 +1,11 @@
 package net.die.phoneapi.helperclient
 
-import android.security.keystore.KeyGenParameterSpec
-import android.security.keystore.KeyProperties
 import android.util.Log
 import com.flyfishxu.kadb.cert.KadbPrivateKeyStore
 import java.io.File
 import java.io.IOException
 import java.security.GeneralSecurityException
-import java.security.KeyStore
-import javax.crypto.Cipher
-import javax.crypto.KeyGenerator
-import javax.crypto.SecretKey
-import javax.crypto.spec.GCMParameterSpec
+import net.die.phoneapi.core.KeystoreAes
 
 /**
  * Persists the ADB private key Kadb uses to pair with wireless debugging.
@@ -22,6 +16,7 @@ import javax.crypto.spec.GCMParameterSpec
 internal class KeystorePrivateKeyStore(dir: File) : KadbPrivateKeyStore {
     private val file = File(dir, "adb-key.bin")
     private val paired = File(dir, "adb-paired")
+    private val cipher = KeystoreAes(ALIAS)
 
     /** True after a pairing or a wireless shell has been accepted by this device. */
     val isPaired: Boolean
@@ -34,7 +29,12 @@ internal class KeystorePrivateKeyStore(dir: File) : KadbPrivateKeyStore {
     override fun readPrivateKeyPem(): ByteArray? {
         if (!file.isFile) return null
         return try {
-            decrypt(file.readBytes())
+            cipher.decrypt(file.readBytes())
+                ?: run {
+                    Log.w(TAG, "ADB key could not be decrypted; it will be created again")
+                    clear()
+                    null
+                }
         } catch (e: GeneralSecurityException) {
             Log.w(TAG, "ADB key could not be decrypted; it will be created again", e)
             clear()
@@ -52,7 +52,7 @@ internal class KeystorePrivateKeyStore(dir: File) : KadbPrivateKeyStore {
     override fun writePrivateKeyPemAtomic(privateKeyPem: ByteArray) {
         val blob =
             try {
-                encrypt(privateKeyPem)
+                cipher.encrypt(privateKeyPem)
             } catch (e: GeneralSecurityException) {
                 throw IllegalStateException("Could not encrypt the ADB key", e)
             }
@@ -73,49 +73,8 @@ internal class KeystorePrivateKeyStore(dir: File) : KadbPrivateKeyStore {
         paired.delete()
     }
 
-    private fun encrypt(plain: ByteArray): ByteArray {
-        val cipher = Cipher.getInstance(TRANSFORMATION)
-        cipher.init(Cipher.ENCRYPT_MODE, key(create = true))
-        return cipher.iv + cipher.doFinal(plain)
-    }
-
-    private fun decrypt(blob: ByteArray): ByteArray {
-        val cipher = Cipher.getInstance(TRANSFORMATION)
-        cipher.init(
-            Cipher.DECRYPT_MODE,
-            key(create = false) ?: error("ADB keystore key is missing"),
-            GCMParameterSpec(TAG_BITS, blob, 0, IV_BYTES),
-        )
-        return cipher.doFinal(blob, IV_BYTES, blob.size - IV_BYTES)
-    }
-
-    private fun key(create: Boolean): SecretKey? {
-        val store = KeyStore.getInstance(PROVIDER).apply { load(null) }
-        (store.getKey(ALIAS, null) as? SecretKey)?.let {
-            return it
-        }
-        if (!create) return null
-        val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, PROVIDER)
-        generator.init(
-            KeyGenParameterSpec.Builder(
-                    ALIAS,
-                    KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
-                )
-                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                .setKeySize(KEY_BITS)
-                .build()
-        )
-        return generator.generateKey()
-    }
-
     private companion object {
         const val TAG = "PhoneApiHelper"
-        const val PROVIDER = "AndroidKeyStore"
         const val ALIAS = "phoneapi_adb_key"
-        const val TRANSFORMATION = "AES/GCM/NoPadding"
-        const val KEY_BITS = 256
-        const val TAG_BITS = 128
-        const val IV_BYTES = 12
     }
 }

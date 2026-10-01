@@ -1,6 +1,8 @@
 package net.die.phoneapi.stream
 
 import kotlin.math.max
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 internal const val FRAME_CONFIG = 1
 internal const val FRAME_KEY = 2
@@ -24,9 +26,30 @@ internal const val MIN_BIT_RATE = 100_000
 internal const val MAX_BIT_RATE = 20_000_000
 internal const val DEFAULT_BIT_RATE = 4_000_000
 
+/** Text frame sent on the video socket before binary frames, and again when the size changes. */
+internal fun videoHeader(width: Int, height: Int, spec: VideoSpec): String = buildJsonObject {
+    put("codec", "avc")
+    put("width", width)
+    put("height", height)
+    put("fps", spec.fps)
+    put("bitRate", spec.bitRate)
+}
+    .toString()
+
+/** Text frame sent once on the audio socket before binary frames. */
+internal fun audioHeader(codec: String, sampleRate: Int, channels: Int): String = buildJsonObject {
+    put("codec", codec)
+    put("sampleRate", sampleRate)
+    put("channels", channels)
+}
+    .toString()
+
 /**
  * One binary websocket frame: type byte, big-endian presentation timestamp in microseconds, then
  * the payload. Video payloads are Annex-B. Audio payloads are raw Opus or AAC access units.
+ *
+ * Each socket also sends text frames of [videoHeader] or [audioHeader]. Video sends that JSON again
+ * when the encoded size changes; the binary layout above stays the same.
  */
 internal fun packFrame(type: Int, ptsUs: Long, payload: ByteArray): ByteArray {
     val out = ByteArray(HEADER_BYTES + payload.size)
@@ -56,6 +79,18 @@ internal fun scaledSize(width: Int, height: Int, maxSize: Int): Pair<Int, Int> {
 }
 
 private fun even(value: Int): Int = (value and 1.inv()).coerceAtLeast(2)
+
+/** True when [scaledSize] of the display differs from the running encoder. */
+internal fun shouldReconfigure(
+    encodedWidth: Int,
+    encodedHeight: Int,
+    displayWidthPx: Int,
+    displayHeightPx: Int,
+    maxSize: Int,
+): Boolean {
+    val (width, height) = scaledSize(displayWidthPx, displayHeightPx, maxSize)
+    return width != encodedWidth || height != encodedHeight
+}
 
 internal fun isAnnexB(data: ByteArray): Boolean {
     if (data.size >= START_CODE_4 && data[0] == 0.toByte() && data[1] == 0.toByte()) {

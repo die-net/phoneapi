@@ -1,10 +1,14 @@
 package net.die.phoneapi.stream
 
+import android.content.Context
+import android.hardware.display.DisplayManager
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.RemoteException
 import android.util.Log
 import android.view.Display
@@ -14,10 +18,19 @@ import java.io.IOException
 import java.nio.ByteBuffer
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.selects.select
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.helperclient.HelperConnection
 import net.die.phoneapi.model.DisplayInfo
@@ -27,90 +40,184 @@ internal data class VideoSpec(val maxSize: Int, val fps: Int, val bitRate: Int)
 /**
  * One H.264 encoder shared by every video viewer. The helper mirrors the display onto the encoder's
  * input surface. A joining client receives the parameter sets and a new keyframe.
+ *
+ * When the display size changes, the encoder and mirror are rebuilt and each viewer receives
+ * another [videoHeader] text frame, then a codec-config frame and a keyframe. Binary frames stay
+ * [packFrame] encoded.
  */
 internal class VideoStream(
     private val lease: StreamLease,
     private val helper: HelperConnection,
     private val display: () -> DisplayInfo,
+    private val context: Context,
+    private val io: CoroutineDispatcher,
 ) {
-    private val lifecycle = Any()
-    private val subscribers = CopyOnWriteArrayList<Channel<ByteArray>>()
-    private var codec: MediaCodec? = null
-    private var headerJson: String = ""
-    private var spsPps: ByteArray? = null
+    private val gate = Mutex()
+    private val scope = CoroutineScope(SupervisorJob() + io)
+    private val subscribers = CopyOnWriteArrayList<Viewer>()
+    private val displayChanges = Channel<Unit>(Channel.CONFLATED)
+
+    @Volatile private var codec: MediaCodec? = null
 
     @Volatile private var running = false
 
     @Volatile private var configFrame: ByteArray? = null
 
+    private var headerJson: String = ""
+    private var spsPps: ByteArray? = null
+    private var activeSpec: VideoSpec? = null
+    private var activeWidth = 0
+    private var activeHeight = 0
+    private var listening = false
+    private var displayJob: Job? = null
+
+    private val displayListener =
+        object : DisplayManager.DisplayListener {
+            override fun onDisplayAdded(displayId: Int) = Unit
+
+            override fun onDisplayRemoved(displayId: Int) = Unit
+
+            override fun onDisplayChanged(displayId: Int) {
+                if (displayId != Display.DEFAULT_DISPLAY) return
+                displayChanges.trySend(Unit)
+            }
+        }
+
     suspend fun serve(session: DefaultWebSocketServerSession, spec: VideoSpec) {
-        val channel = Channel<ByteArray>(CHANNEL_CAP, BufferOverflow.DROP_OLDEST)
+        val viewer = Viewer()
         lease.opened()
         var attached = false
         try {
-            val header =
-                synchronized(lifecycle) {
-                    subscribers.add(channel)
+            val (header, config) =
+                gate.withLock {
+                    subscribers.add(viewer)
                     attached = true
-                    if (subscribers.size == 1) startEncoder(spec)
-                    headerJson
+                    if (subscribers.size == 1) withContext(io) { startEncoder(spec) }
+                    headerJson to configFrame
                 }
             session.send(Frame.Text(header))
-            configFrame?.let { session.send(Frame.Binary(true, it)) }
+            config?.let { session.send(Frame.Binary(true, it)) }
             requestSync()
-            for (frame in channel) session.send(Frame.Binary(true, frame))
+            sendFrames(session, viewer)
         } finally {
-            if (attached) {
-                synchronized(lifecycle) {
-                    subscribers.remove(channel)
-                    if (subscribers.isEmpty()) stopEncoder()
+            if (attached) withContext(NonCancellable) { detach(viewer) }
+            viewer.close()
+            lease.closed()
+        }
+    }
+
+    private suspend fun detach(viewer: Viewer) {
+        gate.withLock {
+            subscribers.remove(viewer)
+            if (subscribers.isEmpty()) withContext(io) { stopEncoder() }
+        }
+    }
+
+    private suspend fun sendFrames(session: DefaultWebSocketServerSession, viewer: Viewer) {
+        var open = true
+        while (open) {
+            // select is biased to the first clause, so a size-change header always goes out
+            // before the codec-config frame of the encoder that follows it.
+            val out: Frame? = select {
+                viewer.headers.onReceiveCatching { it.getOrNull()?.let(Frame::Text) }
+                viewer.frames.onReceiveCatching { result ->
+                    result.getOrNull()?.let { Frame.Binary(true, it) }
                 }
             }
-            channel.close()
-            lease.closed()
+            if (out == null) open = false else session.send(out)
         }
     }
 
     private fun startEncoder(spec: VideoSpec) {
         val screen = display()
         val (width, height) = scaledSize(screen.widthPx, screen.heightPx, spec.maxSize)
-        headerJson =
-            buildJsonObject {
-                put("codec", "avc")
-                put("width", width)
-                put("height", height)
-                put("fps", spec.fps)
-                put("bitRate", spec.bitRate)
-            }
-                .toString()
-        val format = videoFormat(width, height, spec)
+        beginEncoder(spec, width, height)
+    }
+
+    private suspend fun watchDisplay() {
+        while (listening) {
+            withTimeoutOrNull(DISPLAY_POLL_MS) { displayChanges.receive() }
+            reconfigureIfNeeded()
+        }
+    }
+
+    private suspend fun reconfigureIfNeeded() {
+        gate.withLock {
+            val spec = activeSpec ?: return@withLock
+            if (!running || subscribers.isEmpty()) return@withLock
+            withContext(io) { reconfigure(spec) }
+        }
+    }
+
+    private fun reconfigure(spec: VideoSpec) {
+        val screen = display()
+        val (width, height) = scaledSize(screen.widthPx, screen.heightPx, spec.maxSize)
+        if (
+            !shouldReconfigure(
+                activeWidth,
+                activeHeight,
+                screen.widthPx,
+                screen.heightPx,
+                spec.maxSize,
+            )
+        ) {
+            return
+        }
+        releaseEncoder()
+        headerJson = videoHeader(width, height, spec)
+        emitHeader(headerJson)
+        try {
+            beginEncoder(spec, width, height)
+        } catch (e: CancellationException) {
+            stopEncoder()
+            closeViewers()
+            throw e
+        } catch (e: ApiException) {
+            Log.w(TAG, "reconfigure", e)
+            stopEncoder()
+            closeViewers()
+            return
+        }
+        requestSync()
+    }
+
+    private fun beginEncoder(spec: VideoSpec, width: Int, height: Int) {
+        headerJson = videoHeader(width, height, spec)
         val encoder =
             try {
                 MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
             } catch (e: IOException) {
                 throw streamError(e)
             }
-        codec = encoder
-        encoder.setCallback(callback())
-        configure(encoder, format)
-        val surface = encoder.createInputSurface()
-        encoder.start()
-        running = true
         try {
+            encoder.setCallback(callback(encoder))
+            configure(encoder, videoFormat(width, height, spec))
+            val surface = encoder.createInputSurface()
+            encoder.start()
+            running = true
+            codec = encoder
             val started =
                 helper.require().startMirror(surface, width, height, Display.DEFAULT_DISPLAY)
             if (!started) {
                 throw ApiException.unavailable("stream_error", "The helper did not start mirroring")
             }
+            activeSpec = spec
+            activeWidth = width
+            activeHeight = height
+            ensureListening()
+            Log.i(TAG, "encoder ${width}x$height")
         } catch (e: CancellationException) {
-            running = false
+            failStart(encoder)
             throw e
         } catch (e: RemoteException) {
-            running = false
+            failStart(encoder)
             throw streamError(e)
         } catch (e: IllegalStateException) {
-            running = false
+            failStart(encoder)
             throw streamError(e)
+        } catch (e: ApiException) {
+            failStart(encoder)
+            throw e
         }
     }
 
@@ -139,7 +246,7 @@ internal class VideoStream(
             }
         }
 
-    private fun callback(): MediaCodec.Callback =
+    private fun callback(owner: MediaCodec): MediaCodec.Callback =
         object : MediaCodec.Callback() {
             override fun onInputBufferAvailable(codec: MediaCodec, index: Int) = Unit
 
@@ -148,19 +255,34 @@ internal class VideoStream(
                 index: Int,
                 info: MediaCodec.BufferInfo,
             ) {
-                handleOutput(codec, index, info)
+                if (this@VideoStream.codec !== owner) {
+                    releaseQuietly(owner, index)
+                    return
+                }
+                handleOutput(owner, index, info)
             }
 
             override fun onError(codec: MediaCodec, error: MediaCodec.CodecException) {
+                if (this@VideoStream.codec !== owner) return
                 Log.e(TAG, "encoder", error)
+                scope.launch { failLive(owner) }
             }
 
             override fun onOutputFormatChanged(codec: MediaCodec, format: MediaFormat) {
+                if (this@VideoStream.codec !== owner) return
                 val csd0 = format.getByteBuffer("csd-0")?.let(::copyBuffer) ?: return
                 val csd1 = format.getByteBuffer("csd-1")?.let(::copyBuffer)
                 publishParameterSets(csd0, csd1)
             }
         }
+
+    private suspend fun failLive(owner: MediaCodec) {
+        gate.withLock {
+            if (codec !== owner) return@withLock
+            withContext(io) { stopEncoder() }
+            closeViewers()
+        }
+    }
 
     private fun handleOutput(codec: MediaCodec, index: Int, info: MediaCodec.BufferInfo) {
         val data =
@@ -179,13 +301,13 @@ internal class VideoStream(
         val key = info.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME != 0
         val payload = if (key) withParameterSets(annex) else annex
         val type = if (key) FRAME_KEY else FRAME_DELTA
-        emit(packFrame(type, info.presentationTimeUs, payload))
+        emitFrame(packFrame(type, info.presentationTimeUs, payload))
         lease.renew()
     }
 
     private fun readOutput(codec: MediaCodec, index: Int, info: MediaCodec.BufferInfo): ByteArray? {
-        if (!running) {
-            codec.releaseOutputBuffer(index, false)
+        if (!running || this.codec !== codec) {
+            releaseQuietly(codec, index)
             return null
         }
         val output = codec.getOutputBuffer(index)
@@ -202,6 +324,7 @@ internal class VideoStream(
     }
 
     private fun publishParameterSets(csd0: ByteArray, csd1: ByteArray?) {
+        if (!running) return
         val annex =
             try {
                 codecConfigAnnexB(csd0, csd1)
@@ -213,7 +336,7 @@ internal class VideoStream(
         spsPps = annex
         val packed = packFrame(FRAME_CONFIG, 0, annex)
         configFrame = packed
-        emit(packed)
+        emitFrame(packed)
     }
 
     private fun withParameterSets(annex: ByteArray): ByteArray {
@@ -234,16 +357,71 @@ internal class VideoStream(
         }
     }
 
-    private fun emit(frame: ByteArray) {
-        for (subscriber in subscribers) subscriber.trySend(frame)
+    private fun emitFrame(frame: ByteArray) {
+        for (viewer in subscribers) viewer.frames.trySend(frame)
     }
 
-    private fun stopEncoder() {
+    private fun emitHeader(json: String) {
+        for (viewer in subscribers) {
+            drain(viewer.frames)
+            viewer.headers.trySend(json)
+        }
+    }
+
+    /** Drops queued frames so they are not shown at the new picture size. */
+    private fun drain(frames: Channel<ByteArray>) {
+        var skipped = frames.tryReceive()
+        while (skipped.isSuccess) skipped = frames.tryReceive()
+    }
+
+    private fun closeViewers() {
+        for (viewer in subscribers) viewer.close()
+    }
+
+    private fun ensureListening() {
+        if (listening) return
+        val manager = context.getSystemService(DisplayManager::class.java) ?: return
+        listening = true
+        displayJob = scope.launch { watchDisplay() }
+        manager.registerDisplayListener(displayListener, Handler(Looper.getMainLooper()))
+    }
+
+    private fun stopListening() {
+        if (!listening) return
+        listening = false
+        context
+            .getSystemService(DisplayManager::class.java)
+            ?.unregisterDisplayListener(displayListener)
+        displayJob?.cancel()
+        displayJob = null
+    }
+
+    private fun failStart(encoder: MediaCodec) {
+        running = false
+        if (codec === encoder) codec = null
+        configFrame = null
+        spsPps = null
+        stopMirrorQuietly()
+        releaseCodec(encoder)
+    }
+
+    private fun releaseEncoder() {
         running = false
         val current = codec
         codec = null
         configFrame = null
         spsPps = null
+        stopMirrorQuietly()
+        if (current != null) releaseCodec(current)
+    }
+
+    private fun stopEncoder() {
+        releaseEncoder()
+        activeSpec = null
+        stopListening()
+    }
+
+    private fun stopMirrorQuietly() {
         try {
             helper.getOrNull()?.stopMirror()
         } catch (e: RemoteException) {
@@ -251,7 +429,6 @@ internal class VideoStream(
         } catch (e: IllegalStateException) {
             Log.w(TAG, "stopMirror", e)
         }
-        if (current != null) releaseCodec(current)
     }
 
     private fun releaseCodec(current: MediaCodec) {
@@ -261,6 +438,14 @@ internal class VideoStream(
             Log.w(TAG, "encoder stop", e)
         }
         current.release()
+    }
+
+    private fun releaseQuietly(codec: MediaCodec, index: Int) {
+        try {
+            codec.releaseOutputBuffer(index, false)
+        } catch (e: IllegalStateException) {
+            Log.w(TAG, "encoder release", e)
+        }
     }
 
     private fun copyBuffer(buffer: ByteBuffer): ByteArray {
@@ -273,9 +458,24 @@ internal class VideoStream(
     private fun streamError(error: Throwable): ApiException =
         ApiException(502, "stream_error", error.message ?: "encoder failed", cause = error)
 
+    /**
+     * Frames and a size-change header travel on separate channels so a full frame queue cannot drop
+     * the header.
+     */
+    private class Viewer {
+        val frames = Channel<ByteArray>(CHANNEL_CAP, BufferOverflow.DROP_OLDEST)
+        val headers = Channel<String>(Channel.CONFLATED)
+
+        fun close() {
+            frames.close()
+            headers.close()
+        }
+    }
+
     private companion object {
         const val TAG = "PhoneApiStream"
         const val CHANNEL_CAP = 4
         const val REPEAT_US = 100_000
+        const val DISPLAY_POLL_MS = 400L
     }
 }

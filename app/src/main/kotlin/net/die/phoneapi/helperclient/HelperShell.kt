@@ -3,14 +3,10 @@ package net.die.phoneapi.helperclient
 import android.os.RemoteException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.SerializationException
-import kotlinx.serialization.serializer
 import net.die.phoneapi.core.ApiException
-import net.die.phoneapi.core.ApiJson
+import net.die.phoneapi.helper.ShellResult as HelperShellResult
 
 /** One finished helper command. Output is truncated by the helper, not here. */
-@Serializable
 data class ShellResult(val exit: Int, val stdout: String = "", val stderr: String = "") {
     val ok: Boolean
         get() = exit == 0
@@ -45,7 +41,7 @@ class HelperShell(
     ): ShellResult {
         require(argv.isNotEmpty()) { "argv must not be empty" }
         val proxy = helper.require()
-        val json =
+        val delivered =
             withContext(dispatcher) {
                 try {
                     proxy.exec(argv.toTypedArray(), timeoutMs, maxOutputBytes)
@@ -53,7 +49,7 @@ class HelperShell(
                     throw helperError("`${argv.first()}` did not run: ${e.message.orEmpty()}", e)
                 }
             }
-        return parseShellResult(json)
+        return delivered.toShellResult()
     }
 
     private companion object {
@@ -62,14 +58,8 @@ class HelperShell(
     }
 }
 
-internal fun parseShellResult(json: String): ShellResult =
-    try {
-        // Reified serializer<T>() resolves without the serialization compiler plugin, which
-        // detekt's type resolution does not load. ShellResult.serializer() does not.
-        ApiJson.decodeFromString(serializer<ShellResult>(), json)
-    } catch (e: SerializationException) {
-        throw helperError("The helper returned ${json.take(80)}", e)
-    }
+private fun HelperShellResult.toShellResult(): ShellResult =
+    ShellResult(exit = exitCode, stdout = stdout.orEmpty(), stderr = stderr.orEmpty())
 
 private fun helperError(message: String, cause: Throwable? = null) =
     ApiException(503, "helper_error", message, cause = cause)

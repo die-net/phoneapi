@@ -2,10 +2,9 @@ package net.die.phoneapi.wait
 
 import java.util.ArrayDeque
 import java.util.regex.PatternSyntaxException
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.intOrNull
+import net.die.phoneapi.browser.decodeCdp
 import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.model.WaitCondition
 
@@ -115,45 +114,46 @@ internal class PageModel(startedMs: Long) {
     }
 
     private fun frameNavigated(params: JsonObject) {
-        val frame = params.obj("frame") ?: return
-        val parent = frame.string("parentId")
-        if (parent != null && frame.string("id") != mainFrameId) return
-        frame.string("id")?.let { mainFrameId = it }
-        frame.string("url")?.let { url = it }
+        val frame = params.decodeCdp<FrameNavigated>()?.frame ?: return
+        if (frame.parentId != null && frame.id != mainFrameId) return
+        frame.id?.let { mainFrameId = it }
+        frame.url?.let { url = it }
     }
 
     private fun navigatedWithin(params: JsonObject) {
-        val frameId = params.string("frameId")
+        val event = params.decodeCdp<NavigatedWithin>() ?: return
         val main = mainFrameId
-        if (main != null && frameId != main) return
-        params.string("url")?.let { url = it }
+        if (main != null && event.frameId != main) return
+        event.url?.let { url = it }
     }
 
     private fun lifecycle(params: JsonObject) {
-        val frameId = params.string("frameId")
+        val event = params.decodeCdp<LifecycleEvent>() ?: return
         val main = mainFrameId
-        if (main != null && frameId != null && frameId != main) return
-        params.string("name")?.let { lifecycle += it }
+        if (main != null && event.frameId != null && event.frameId != main) return
+        event.name?.let { lifecycle += it }
     }
 
     private fun requestSent(params: JsonObject, now: Long) {
-        val id = params.string("requestId") ?: return
-        val request = params.obj("request") ?: return
-        val url = request.string("url") ?: return
-        open[id] = Request(url, request.string("method") ?: "GET", status = null)
+        val event = params.decodeCdp<RequestSent>() ?: return
+        val id = event.requestId ?: return
+        val request = event.request ?: return
+        val url = request.url ?: return
+        open[id] = Request(url, request.method ?: "GET", status = null)
         inflight++
         lastNetMs = now
     }
 
     private fun responseReceived(params: JsonObject) {
-        val id = params.string("requestId") ?: return
-        val status = params.obj("response")?.int("status") ?: return
+        val event = params.decodeCdp<ResponseReceived>() ?: return
+        val id = event.requestId ?: return
+        val status = event.response?.status ?: return
         val request = open[id] ?: return
         open[id] = request.copy(status = status)
     }
 
     private fun requestDone(params: JsonObject, now: Long, failed: Boolean) {
-        val id = params.string("requestId") ?: return
+        val id = params.decodeCdp<RequestDone>()?.requestId ?: return
         val request = open.remove(id)
         if (inflight > 0) inflight--
         lastNetMs = now
@@ -161,9 +161,9 @@ internal class PageModel(startedMs: Long) {
     }
 
     private fun logAdded(params: JsonObject) {
-        val entry = params.obj("entry") ?: return
-        val text = entry.string("text") ?: return
-        remember(logs, LogHit(entry.string("level") ?: "info", text))
+        val entry = params.decodeCdp<LogAdded>()?.entry ?: return
+        val text = entry.text ?: return
+        remember(logs, LogHit(entry.level ?: "info", text))
     }
 
     private fun <T> remember(items: ArrayDeque<T>, item: T) {
@@ -174,6 +174,40 @@ internal class PageModel(startedMs: Long) {
     private data class Request(val url: String, val method: String, val status: Int?)
 
     private data class LogHit(val level: String, val text: String)
+
+    @Serializable private data class FrameNavigated(val frame: FrameBody? = null)
+
+    @Serializable
+    private data class FrameBody(
+        val id: String? = null,
+        val url: String? = null,
+        val parentId: String? = null,
+    )
+
+    @Serializable
+    private data class NavigatedWithin(val frameId: String? = null, val url: String? = null)
+
+    @Serializable
+    private data class LifecycleEvent(val frameId: String? = null, val name: String? = null)
+
+    @Serializable
+    private data class RequestSent(val requestId: String? = null, val request: NetRequest? = null)
+
+    @Serializable private data class NetRequest(val url: String? = null, val method: String? = null)
+
+    @Serializable
+    private data class ResponseReceived(
+        val requestId: String? = null,
+        val response: NetResponse? = null,
+    )
+
+    @Serializable private data class NetResponse(val status: Int? = null)
+
+    @Serializable private data class RequestDone(val requestId: String? = null)
+
+    @Serializable private data class LogAdded(val entry: LogBody? = null)
+
+    @Serializable private data class LogBody(val text: String? = null, val level: String? = null)
 
     private companion object {
         const val CAP = 50
@@ -186,9 +220,9 @@ internal class TargetModel {
 
     fun apply(method: String, params: JsonObject) {
         if (method != "Target.targetCreated") return
-        val info = params.obj("targetInfo") ?: return
-        if (info.string("type") != "page") return
-        val url = info.string("url") ?: return
+        val info = params.decodeCdp<TargetCreated>()?.targetInfo ?: return
+        if (info.type != "page") return
+        val url = info.url ?: return
         if (urls.size == CAP) urls.removeFirst()
         urls.addLast(url)
     }
@@ -330,11 +364,9 @@ private fun addDomains(domains: MutableSet<String>, condition: WaitCondition) {
 
 private fun bad(message: String): Nothing = throw ApiException.badRequest(message)
 
-private fun JsonObject.obj(name: String): JsonObject? = this[name] as? JsonObject
+@Serializable private data class TargetCreated(val targetInfo: TargetInfoBody? = null)
 
-private fun JsonObject.string(name: String): String? = (this[name] as? JsonPrimitive)?.contentOrNull
-
-private fun JsonObject.int(name: String): Int? = (this[name] as? JsonPrimitive)?.intOrNull
+@Serializable private data class TargetInfoBody(val type: String? = null, val url: String? = null)
 
 private val ELEMENT_BY = setOf("css", "xpath", "text")
 private val ELEMENT_STATE = setOf("present", "absent", "visible")

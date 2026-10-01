@@ -1,9 +1,12 @@
 package net.die.phoneapi.core
 
+import androidx.core.util.AtomicFile
 import java.io.File
+import java.io.IOException
 import java.security.SecureRandom
 import java.util.Base64
-import java.util.Locale
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.Executors
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -30,37 +33,60 @@ data class Settings(
     val instanceId: String,
 )
 
+/**
+ * Disk reads and writes for the JSON stores. Callers stay synchronous; work that would otherwise
+ * run on the main thread is moved to a single background thread.
+ */
+internal object StoreIo {
+    @Volatile private var main: Thread? = null
+
+    private val executor by lazy {
+        Executors.newSingleThreadExecutor { runnable ->
+            Thread(runnable, "phoneapi-store").apply { isDaemon = true }
+        }
+    }
+
+    fun markMain(thread: Thread) {
+        main = thread
+    }
+
+    fun <T> call(block: () -> T): T {
+        if (Thread.currentThread() !== main) return block()
+        return CompletableFuture.supplyAsync(block, executor).join()
+    }
+}
+
 /** Small JSON-file settings store in the app's private files directory. */
 class SettingsStore(private val dir: File) {
-    private val file = File(dir, "settings.json")
-    private val state = MutableStateFlow(load())
+    private val atomic = AtomicFile(File(dir, "settings.json"))
+    private val state: MutableStateFlow<Settings> by lazy { MutableStateFlow(load()) }
 
-    val settings: StateFlow<Settings> = state.asStateFlow()
+    val settings: StateFlow<Settings> by lazy { state.asStateFlow() }
 
     val current: Settings
         get() = state.value
 
     @Synchronized
     fun update(transform: (Settings) -> Settings) {
-        val next = transform(state.value)
-        AtomicFiles.write(file, ApiJson.encodeToString(serializer<Settings>(), next))
+        val next = transform(current)
+        StoreIo.call { atomic.writeUtf8(ApiJson.encodeToString(serializer<Settings>(), next)) }
         state.value = next
     }
 
-    private fun load(): Settings {
-        if (file.exists()) {
-            return ApiJson.decodeFromString(serializer<Settings>(), file.readText())
-        }
-        val random = SecureRandom()
-        val created =
-            Settings(
-                port = EPHEMERAL_MIN + random.nextInt(EPHEMERAL_MAX - EPHEMERAL_MIN),
-                keystorePassword = randomToken(random, 24),
-                instanceId = randomToken(random, 6),
-            )
-        dir.mkdirs()
-        AtomicFiles.write(file, ApiJson.encodeToString(serializer<Settings>(), created))
-        return created
+    private fun load(): Settings = StoreIo.call {
+        atomic.readUtf8()?.let { ApiJson.decodeFromString(serializer<Settings>(), it) }
+            ?: run {
+                val random = SecureRandom()
+                val created =
+                    Settings(
+                        port = EPHEMERAL_MIN + random.nextInt(EPHEMERAL_MAX - EPHEMERAL_MIN),
+                        keystorePassword = randomToken(random, 24),
+                        instanceId = randomToken(random, 6),
+                    )
+                dir.mkdirs()
+                atomic.writeUtf8(ApiJson.encodeToString(serializer<Settings>(), created))
+                created
+            }
     }
 
     private companion object {
@@ -76,20 +102,19 @@ fun randomToken(random: SecureRandom, bytes: Int): String {
     return Base64.getUrlEncoder().withoutPadding().encodeToString(buf)
 }
 
-private const val HEX = "0123456789abcdef"
-
-fun ByteArray.toHex(separator: String = "", upper: Boolean = false): String {
-    val digits = if (upper) HEX.uppercase(Locale.ROOT) else HEX
-    return joinToString(separator) { b ->
-        val v = b.toInt() and 0xff
-        "${digits[v ushr 4]}${digits[v and 0x0f]}"
-    }
+internal fun AtomicFile.readUtf8(): String? {
+    if (!baseFile.exists()) return null
+    return readFully().decodeToString()
 }
 
-object AtomicFiles {
-    fun write(file: File, text: String) {
-        val tmp = File(file.parentFile, "${file.name}.tmp")
-        tmp.writeText(text)
-        check(tmp.renameTo(file)) { "Failed to replace ${file.path}" }
+@Suppress("MissingUseCall") // finishWrite and failWrite close the stream.
+internal fun AtomicFile.writeUtf8(text: String) {
+    val out = startWrite()
+    try {
+        out.write(text.toByteArray(Charsets.UTF_8))
+    } catch (e: IOException) {
+        failWrite(out)
+        throw e
     }
+    finishWrite(out)
 }

@@ -4,9 +4,7 @@ import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.io.OutputStream
-import kotlin.coroutines.AbstractCoroutineContextElement
-import kotlin.coroutines.Continuation
-import kotlin.coroutines.ContinuationInterceptor
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.model.ActionResult
@@ -18,6 +16,7 @@ import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
+@Suppress("InjectDispatcher") // Scripted sockets are read on a real dispatcher.
 class BrowserServiceTest {
     @Test
     fun `lists a page`() {
@@ -83,7 +82,7 @@ class BrowserServiceTest {
                 serverTextFrame(
                     """{"id":5,"result":{"quads":[[165.619049,453.68454,246.56548,453.68454,246.56548,479.27979,165.61905,479.27979]]}}"""
                 ) +
-                serverTextFrame(METRICS)
+                serverTextFrame(metrics(6))
         var touched = Rect(0, 0, 0, 0)
         val service =
             service(
@@ -117,7 +116,7 @@ class BrowserServiceTest {
                 serverTextFrame(
                     """{"id":5,"result":{"quads":[[165.619049,453.68454,246.56548,453.68454,246.56548,479.27979,165.61905,479.27979]]}}"""
                 ) +
-                serverTextFrame(METRICS)
+                serverTextFrame(metrics(6))
         var touched = Rect(0, 0, 0, 0)
         val service =
             service(
@@ -146,6 +145,99 @@ class BrowserServiceTest {
         assertEquals(400, error.status)
     }
 
+    @Test
+    @Suppress("MissingUseCall") // The service closes each socket it opens.
+    fun `reuses a snapshot ref`() {
+        val snapshot =
+            switched() +
+                serverTextFrame(
+                    """{"id":1,"result":{"frameTree":{"frame":{"url":"https://example.com/"}}}}"""
+                ) +
+                serverTextFrame("""{"id":2,"result":{}}""") +
+                serverTextFrame(
+                    """{"id":3,"result":{"nodes":[{"nodeId":"9","role":{"value":"link"},"backendDOMNodeId":9}]}}"""
+                )
+        val tap =
+            switched() +
+                serverTextFrame("""{"id":1,"result":{}}""") +
+                serverTextFrame("""{"id":2,"result":{}}""") +
+                serverTextFrame(quad(3)) +
+                serverTextFrame(metrics(4))
+        var opens = 0
+        val service =
+            service(
+                byteArrayOf(),
+                sockets = CHROME,
+                content = { Rect(0, 283, 1080, 2339) },
+                touch = { _, _, _ -> ActionResult(ok = true, backend = "inject") },
+                open = {
+                    opens++
+                    ScriptedSocket(if (opens == 1) snapshot else tap)
+                },
+            )
+        val result = runBlocking {
+            service.snapshot("chrome_devtools_remote~abc")
+            service.tap(
+                "chrome_devtools_remote~abc",
+                BrowserTapRequest(ref = "9", humanize = false),
+            )
+        }
+        assertTrue(result.ok)
+        assertEquals(2, opens)
+    }
+
+    @Test
+    @Suppress("MissingUseCall") // The service closes each socket it opens.
+    fun `refetches a stale ref`() {
+        val snapshot =
+            switched() +
+                serverTextFrame(
+                    """{"id":1,"result":{"frameTree":{"frame":{"url":"https://example.com/"}}}}"""
+                ) +
+                serverTextFrame("""{"id":2,"result":{}}""") +
+                serverTextFrame(
+                    """{"id":3,"result":{"nodes":[{"nodeId":"9","role":{"value":"link"},"backendDOMNodeId":9}]}}"""
+                )
+        val tap =
+            switched() +
+                serverTextFrame("""{"id":1,"result":{}}""") +
+                serverTextFrame(
+                    """{"id":2,"error":{"code":-32000,"message":"No node with given id found"}}"""
+                ) +
+                serverTextFrame("""{"id":3,"result":{}}""") +
+                serverTextFrame(
+                    """{"id":4,"result":{"nodes":[{"nodeId":"9","role":{"value":"link"},"backendDOMNodeId":9}]}}"""
+                ) +
+                serverTextFrame("""{"id":5,"result":{}}""") +
+                serverTextFrame(quad(6)) +
+                serverTextFrame(metrics(7))
+        var opens = 0
+        var touched = Rect(0, 0, 0, 0)
+        val service =
+            service(
+                byteArrayOf(),
+                sockets = CHROME,
+                content = { Rect(0, 283, 1080, 2339) },
+                touch = { rect, _, _ ->
+                    touched = rect
+                    ActionResult(ok = true, backend = "inject")
+                },
+                open = {
+                    opens++
+                    ScriptedSocket(if (opens == 1) snapshot else tap)
+                },
+            )
+        val result = runBlocking {
+            service.snapshot("chrome_devtools_remote~abc")
+            service.tap(
+                "chrome_devtools_remote~abc",
+                BrowserTapRequest(ref = "9", humanize = false),
+            )
+        }
+        assertTrue(result.ok)
+        assertEquals(Rect(435, 1474, 647, 1541), touched)
+    }
+
     @Suppress("MissingUseCall")
     private fun service(
         response: ByteArray,
@@ -154,13 +246,13 @@ class BrowserServiceTest {
         touch: suspend (Rect, Boolean, InputBackend) -> ActionResult = { _, _, _ ->
             ActionResult(ok = true)
         },
+        open: (String) -> DevtoolsSocket = { ScriptedSocket(response) },
     ) =
         BrowserServiceImpl(
-            io = Inline,
+            io = Dispatchers.IO,
             listSockets = { sockets },
-            open = { ScriptedSocket(response) },
+            open = open,
             websocketKey = { KEY },
-            websocketMask = { byteArrayOf(0, 0, 0, 0) },
             contentBounds = content,
             touchAt = touch,
         )
@@ -182,17 +274,31 @@ class BrowserServiceTest {
             "Sec-WebSocket-Accept: ${websocketAccept(KEY)}",
         )
 
-    private object Inline :
-        AbstractCoroutineContextElement(ContinuationInterceptor), ContinuationInterceptor {
-        override fun <T> interceptContinuation(continuation: Continuation<T>): Continuation<T> =
-            continuation
+    private fun serverTextFrame(text: String): ByteArray {
+        val payload = text.toByteArray(Charsets.UTF_8)
+        val out = ByteArrayOutputStream()
+        out.write(0x81)
+        val length = payload.size
+        if (length < 126) {
+            out.write(length)
+        } else {
+            out.write(126)
+            out.write(length ushr 8)
+            out.write(length and 0xFF)
+        }
+        out.write(payload)
+        return out.toByteArray()
     }
+
+    private fun metrics(id: Int) =
+        """{"id":$id,"result":{"cssVisualViewport":{"pageX":0,"pageY":0,"clientWidth":412.19049072265625,"clientHeight":783.2380981445312},"visualViewport":{"clientWidth":1082,"clientHeight":2056}}}"""
+
+    private fun quad(id: Int) =
+        """{"id":$id,"result":{"quads":[[165.619049,453.68454,246.56548,453.68454,246.56548,479.27979,165.61905,479.27979]]}}"""
 
     private companion object {
         const val KEY = "dGhlIHNhbXBsZSBub25jZQ=="
         const val CHROME =
             """[{"name":"chrome_devtools_remote","pid":4,"package":"com.android.chrome"}]"""
-        const val METRICS =
-            """{"id":6,"result":{"cssVisualViewport":{"pageX":0,"pageY":0,"clientWidth":412.19049072265625,"clientHeight":783.2380981445312},"visualViewport":{"clientWidth":1082,"clientHeight":2056}}}"""
     }
 }

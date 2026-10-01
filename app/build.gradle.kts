@@ -75,25 +75,42 @@ configurations.configureEach {
 }
 
 dependencies {
+    constraints {
+        // activity 1.13 still requests core-ktx 1.18. Those Kotlin extensions now live in core
+        // 1.19, so the older jar duplicates them.
+        implementation(libs.androidx.core.ktx)
+    }
     implementation(project(":api-model"))
     implementation(project(":helper"))
 
     implementation(libs.androidx.core)
     implementation(libs.androidx.activity)
-    implementation(libs.kotlinx.coroutines.android)
+    implementation(libs.androidx.lifecycle.common)
+    implementation(libs.androidx.lifecycle.runtime)
+    implementation(libs.kotlinx.coroutines.core)
+    runtimeOnly(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
+    implementation(libs.kotlinx.serialization.core)
+    implementation(libs.kotlinx.io.core)
 
     implementation(libs.ktor.server.core)
+    implementation(libs.ktor.http)
+    implementation(libs.ktor.io)
+    implementation(libs.ktor.utils)
     implementation(libs.ktor.server.netty)
     runtimeOnly(libs.netty.transport.classes.epoll)
     runtimeOnly(libs.netty.transport.classes.kqueue)
     implementation(libs.ktor.server.websockets)
+    implementation(libs.ktor.websockets)
     implementation(libs.ktor.server.content.negotiation)
     implementation(libs.ktor.server.status.pages)
+    implementation(libs.ktor.serialization)
     implementation(libs.ktor.serialization.json)
     implementation(libs.mcp.server)
+    implementation(libs.mcp.core)
 
     implementation(libs.bouncycastle.pkix)
+    implementation(libs.bouncycastle.prov)
     implementation(libs.zxing.core)
     implementation(libs.kadb)
     implementation(libs.kadb.mdns)
@@ -101,7 +118,6 @@ dependencies {
     implementation(libs.shizuku.provider)
 
     testImplementation(libs.junit.jupiter)
-    testImplementation(libs.kotlinx.coroutines.test)
-    testImplementation(libs.ktor.server.test.host)
+    testRuntimeOnly(libs.junit.jupiter.engine)
     testRuntimeOnly(libs.junit.platform.launcher)
 }

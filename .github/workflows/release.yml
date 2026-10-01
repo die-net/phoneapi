@@ -37,7 +37,7 @@ jobs:
           PHONEAPI_KEYSTORE_PASSWORD: ${{ secrets.PHONEAPI_KEYSTORE_PASSWORD }}
           PHONEAPI_KEY_ALIAS: ${{ secrets.PHONEAPI_KEY_ALIAS }}
           PHONEAPI_KEY_PASSWORD: ${{ secrets.PHONEAPI_KEY_PASSWORD }}
-        run: ./gradlew spotlessCheck detektMain lint testDebugUnitTest :api-model:test assembleRelease
+        run: ./gradlew spotlessCheck detektMain detektTest lint testDebugUnitTest :api-model:test assembleRelease buildHealth
 
       - name: Collect artifacts
         run: |

@@ -14,6 +14,7 @@ class AndroidApplicationConventionPlugin : Plugin<Project> {
             extensions.configure<ApplicationExtension> { configureAndroidApp(target) }
             configureKotlin()
             configureDetekt()
+            pluginManager.apply("com.autonomousapps.dependency-analysis")
             tasks.withType<Test>().configureEach { useJUnitPlatform() }
         }
 }
@@ -25,6 +26,7 @@ class AndroidLibraryConventionPlugin : Plugin<Project> {
             extensions.configure<LibraryExtension> { configureAndroidLibrary(target) }
             configureKotlin()
             configureDetekt()
+            pluginManager.apply("com.autonomousapps.dependency-analysis")
             tasks.withType<Test>().configureEach { useJUnitPlatform() }
         }
 }
@@ -39,6 +41,7 @@ class JvmLibraryConventionPlugin : Plugin<Project> {
             }
             configureKotlin()
             configureDetekt()
+            pluginManager.apply("com.autonomousapps.dependency-analysis")
             tasks.withType<Test>().configureEach { useJUnitPlatform() }
         }
 }

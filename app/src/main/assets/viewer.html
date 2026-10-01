@@ -86,23 +86,43 @@ function decoderConfig(nals) {
   return { codec, description };
 }
 
-const video = new VideoDecoder({
-  output(frame) {
-    if (canvas.width !== frame.displayWidth) canvas.width = frame.displayWidth;
-    if (canvas.height !== frame.displayHeight) canvas.height = frame.displayHeight;
-    ctx.drawImage(frame, 0, 0);
-    frame.close();
-    status.textContent = canvas.width + "×" + canvas.height;
-  },
-  error(e) { status.textContent = String(e); }
-});
+let epoch = 0;
+function makeDecoder() {
+  const mine = ++epoch;
+  return new VideoDecoder({
+    output(frame) {
+      if (mine !== epoch) { frame.close(); return; }
+      if (canvas.width !== frame.displayWidth) canvas.width = frame.displayWidth;
+      if (canvas.height !== frame.displayHeight) canvas.height = frame.displayHeight;
+      ctx.drawImage(frame, 0, 0);
+      frame.close();
+      status.textContent = canvas.width + "×" + canvas.height;
+    },
+    error(e) { if (mine === epoch) status.textContent = String(e); }
+  });
+}
+let video = makeDecoder();
 let configured = false;
+let streamWidth = 0;
+let streamHeight = 0;
 
 function configureVideo(payload) {
   const config = decoderConfig(startCodes(payload));
   if (!config || configured) return;
+  if (video.state === "closed") return;
   video.configure({ codec: config.codec, description: config.description, optimizeForLatency: true });
   configured = true;
+}
+
+function onHeader(info) {
+  const changed = streamWidth !== 0 && (info.width !== streamWidth || info.height !== streamHeight);
+  streamWidth = info.width;
+  streamHeight = info.height;
+  status.textContent = info.width + "×" + info.height;
+  if (!changed) return;
+  if (video.state !== "closed") video.close();
+  video = makeDecoder();
+  configured = false;
 }
 
 function onVideo(data) {
@@ -127,8 +147,7 @@ const vs = socket("/v1/stream/video");
 vs.binaryType = "arraybuffer";
 vs.onmessage = (event) => {
   if (typeof event.data === "string") {
-    const info = JSON.parse(event.data);
-    status.textContent = info.width + "×" + info.height;
+    onHeader(JSON.parse(event.data));
     return;
   }
   onVideo(event.data);

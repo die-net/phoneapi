@@ -7,13 +7,19 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.helperclient.HelperConnection
 
 /**
- * Opens an abstract DevTools socket through the helper. [readTimeoutMs] closes the pipe so a read
- * cannot block past it; zero means the caller closes the pipe, which is what a long-lived session
- * needs.
+ * Opens an abstract DevTools socket through the helper. [readTimeoutMs] is how long a blocked read
+ * may sit before the pipe is closed. The helper owns the socket, and this process is not allowed to
+ * `setsockopt` it, so the deadline closes the pipe from a coroutine. Zero waits until the caller
+ * closes it, which a long-lived session needs.
  */
 internal class HelperDevtoolsSocket(
     helper: HelperConnection,
@@ -21,44 +27,34 @@ internal class HelperDevtoolsSocket(
     readTimeoutMs: Long = READ_TIMEOUT_MS,
 ) : DevtoolsSocket {
     private val pipe: ParcelFileDescriptor = open(helper, name)
+    private val watchdog = CoroutineScope(SupervisorJob())
 
     override val input: InputStream = FileInputStream(pipe.fileDescriptor)
     override val output: OutputStream = FileOutputStream(pipe.fileDescriptor)
 
-    private val deadline =
-        if (readTimeoutMs <= 0) {
-            null
-        } else {
-            Thread {
-                try {
-                    Thread.sleep(readTimeoutMs)
-                    pipe.close()
-                } catch (_: InterruptedException) {
-                    Thread.currentThread().interrupt()
-                } catch (_: IOException) {
-                    // The request finished and already closed the socket.
-                }
-            }
-        }
-
     init {
-        deadline?.let {
-            it.isDaemon = true
-            it.start()
+        if (readTimeoutMs > 0) {
+            watchdog.launch {
+                delay(readTimeoutMs)
+                closePipe()
+            }
         }
     }
 
     override fun close() {
-        deadline?.interrupt()
+        watchdog.cancel()
+        closePipe()
+    }
+
+    private fun closePipe() {
         try {
             pipe.close()
         } catch (_: IOException) {
-            // The deadline thread may have closed it already.
+            // Already closed.
         }
     }
 
     private companion object {
-        const val TAG = "PhoneApiBrowser"
         const val READ_TIMEOUT_MS = 15_000L
 
         private fun open(helper: HelperConnection, name: String): ParcelFileDescriptor {

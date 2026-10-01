@@ -5,19 +5,22 @@ import android.os.SystemClock
 import android.util.Log
 import com.flyfishxu.kadb.mdns.KadbMdnsAndroid
 import java.io.IOException
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 /** Finds this device's wireless-debugging ports via `getprop`, then mDNS. */
-internal class AdbEndpointFinder(private val context: Context) {
+internal class AdbEndpointFinder(
+    private val context: Context,
+    private val io: CoroutineDispatcher,
+) {
     suspend fun connectPort(timeoutMs: Long = CONNECT_WAIT_MS): Int? =
         wait(timeoutMs, pairing = false)
 
     suspend fun pairingPort(timeoutMs: Long = PAIR_WAIT_MS): Int? = wait(timeoutMs, pairing = true)
 
     private suspend fun wait(timeoutMs: Long, pairing: Boolean): Int? =
-        withContext(Dispatchers.Main) {
+        withContext(io) {
             KadbMdnsAndroid(context).use { mdns ->
                 mdns.start()
                 poll(mdns, timeoutMs, pairing)

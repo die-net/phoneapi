@@ -23,6 +23,7 @@ internal class ShellService : HelperImpl {
 
     private fun boot(packageName: String?) {
         HiddenApi.exempt()
+        if (packageName != null) pinPackage(packageName)
         val classpath = System.getenv("CLASSPATH").orEmpty()
         thread(name = "phoneapi-helper", isDaemon = false) {
             HelperDaemon.serve(this, packageName, classpath)

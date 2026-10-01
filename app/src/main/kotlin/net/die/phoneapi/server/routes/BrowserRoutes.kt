@@ -11,11 +11,12 @@ import io.ktor.server.websocket.webSocket
 import io.ktor.websocket.Frame
 import io.ktor.websocket.readText
 import java.io.IOException
-import kotlinx.coroutines.isActive
+import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import net.die.phoneapi.AppGraph
+import net.die.phoneapi.browser.ChromeSocket
 import net.die.phoneapi.browser.HelperDevtoolsSocket
-import net.die.phoneapi.browser.WebSocketClient
 import net.die.phoneapi.browser.parseBrowserTargetId
 import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.model.BrowserTapRequest
@@ -76,36 +77,43 @@ private suspend fun proxyCdp(
 ) {
     val (socket, chromeId) = parseBrowserTargetId(id)
     HelperDevtoolsSocket(graph.helper, socket, readTimeoutMs = 0).use { devtools ->
-        val chrome = WebSocketClient(devtools.input, devtools.output)
-        try {
-            chrome.handshake("/devtools/page/$chromeId")
-        } catch (e: IOException) {
-            throw ApiException(
-                502,
-                "cdp_error",
-                e.message ?: "DevTools connection failed",
-                cause = e,
-            )
-        }
-        val reader = session.launch(graph.ioDispatcher) { relayChrome(session, chrome) }
-        try {
-            for (frame in session.incoming) {
-                if (frame is Frame.Text) forward(chrome, frame.readText())
+        ChromeSocket(devtools.input, devtools.output, graph.ioDispatcher).use { chrome ->
+            try {
+                chrome.handshake("/devtools/page/$chromeId")
+                chrome.connect()
+                coroutineScope {
+                    val reader =
+                        launch(graph.ioDispatcher) {
+                            chrome.relayText { text -> session.send(Frame.Text(text)) }
+                        }
+                    try {
+                        for (frame in session.incoming) {
+                            if (frame is Frame.Text) forward(chrome, frame.readText())
+                        }
+                    } finally {
+                        reader.cancel()
+                    }
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: IOException) {
+                throw ApiException(
+                    502,
+                    "cdp_error",
+                    e.message ?: "DevTools connection failed",
+                    cause = e,
+                )
             }
-        } finally {
-            reader.cancel()
         }
     }
 }
 
-private suspend fun relayChrome(session: DefaultWebSocketServerSession, chrome: WebSocketClient) {
-    while (session.isActive) session.send(Frame.Text(chrome.nextText()))
-}
-
-private fun forward(chrome: WebSocketClient, text: String) {
+private suspend fun forward(chrome: ChromeSocket, text: String) {
     if (text.length > MAX_CDP_FRAME) throw ApiException.badRequest("CDP frame is too large")
     try {
         chrome.sendText(text)
+    } catch (e: CancellationException) {
+        throw e
     } catch (e: IOException) {
         throw ApiException(502, "cdp_error", e.message ?: "DevTools connection failed", cause = e)
     }
