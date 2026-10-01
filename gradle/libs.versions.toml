@@ -2,7 +2,7 @@
 agp = "9.4.1"
 kotlin = "2.4.20"
 ktor = "3.6.0"
-netty = "4.2.17.Final"
+netty = "4.2.18.Final"
 detekt = "2.0.0-alpha.6"
 spotless = "8.10.3"
 ktfmt = "0.64"
