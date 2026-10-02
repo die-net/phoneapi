@@ -256,20 +256,20 @@ internal class VideoStream(
             setInteger(MediaFormat.KEY_FRAME_RATE, spec.fps)
             setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
             setInteger(MediaFormat.KEY_REPEAT_PREVIOUS_FRAME_AFTER, REPEAT_US)
-            if (supportsLowLatency(encoder)) {
-                setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
-            }
+            applyLowLatency(encoder, this)
         }
 
-    private fun supportsLowLatency(encoder: MediaCodec): Boolean {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return false
-        return try {
-            encoder.codecInfo
-                .getCapabilitiesForType(MediaFormat.MIMETYPE_VIDEO_AVC)
-                .isFeatureSupported(MediaCodecInfo.CodecCapabilities.FEATURE_LowLatency)
-        } catch (_: IllegalArgumentException) {
-            false
-        }
+    private fun applyLowLatency(encoder: MediaCodec, format: MediaFormat) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+        val supported =
+            try {
+                encoder.codecInfo
+                    .getCapabilitiesForType(MediaFormat.MIMETYPE_VIDEO_AVC)
+                    .isFeatureSupported(MediaCodecInfo.CodecCapabilities.FEATURE_LowLatency)
+            } catch (_: IllegalArgumentException) {
+                false
+            }
+        if (supported) format.setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
     }
 
     private fun callback(owner: MediaCodec): MediaCodec.Callback =
