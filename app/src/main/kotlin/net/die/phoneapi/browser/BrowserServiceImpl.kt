@@ -24,7 +24,9 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.put
 import kotlinx.serialization.serializer
 import net.die.phoneapi.core.ApiException
@@ -43,14 +45,14 @@ import net.die.phoneapi.model.InputBackend
 import net.die.phoneapi.model.Rect
 
 /**
- * Talks to Chrome and WebView over the helper's DevTools pipe. One service call keeps a single
+ * Talks to Chrome and WebView over an adb DevTools stream. One service call keeps a single
  * connection. The last accessibility tree for a target is kept so a later tap can reuse a snapshot
  * ref without fetching the tree again.
  */
 internal class BrowserServiceImpl(
     private val io: CoroutineContext,
     private val listSockets: suspend () -> String,
-    private val open: (String) -> DevtoolsSocket,
+    private val open: suspend (String) -> DevtoolsSocket,
     private val websocketKey: () -> String = ::websocketKey,
     private val contentBounds: suspend (String?) -> Rect = { Rect(0, 0, 0, 0) },
     private val touchAt: suspend (Rect, Boolean, InputBackend) -> ActionResult = { _, _, _ ->
@@ -61,13 +63,21 @@ internal class BrowserServiceImpl(
     private val prepare: suspend (Boolean) -> Boolean = { false },
     private val sequence: () -> Long = { 0L },
     private val invalidateSnapshots: () -> Unit = {},
+    private val showPackage: suspend (String) -> Unit = {},
+    private val devtoolsGap: (BrowserGap) -> String = { gap ->
+        browserGapMessage(gap, chromeInstalled = true, usbDebugging = true)
+    },
 ) : BrowserService {
     private val axTrees = newAxCache()
 
     private fun newAxCache(): AxTreeCache = AxTreeCache(axTreeCap)
 
     override suspend fun targets(): List<BrowserTarget> {
-        val found = queryTargets(socketList())
+        val sockets = socketList()
+        if (sockets.isEmpty()) {
+            throw ApiException.unavailable("browser_unavailable", devtoolsGap(BrowserGap.NONE))
+        }
+        val found = queryTargets(sockets)
         axTrees.retain(found.map { it.id }.toSet())
         return found
     }
@@ -109,7 +119,7 @@ internal class BrowserServiceImpl(
             socketList().firstOrNull { it.name == CHROME_SOCKET }
                 ?: throw ApiException.unavailable(
                     "browser_unavailable",
-                    "Chrome's DevTools socket is not open. Chrome has to be running.",
+                    devtoolsGap(BrowserGap.CHROME),
                 )
         val created =
             useCdp(chrome.name, "/devtools/browser") { cdp ->
@@ -147,14 +157,18 @@ internal class BrowserServiceImpl(
         try {
             val wanted = tapTarget(request)
             val (socket, chromeId) = parseBrowserTargetId(id)
-            val pkg = socketList().firstOrNull { it.name == socket }?.packageName
+            val pkg = browserPackage(socketList().firstOrNull { it.name == socket }, socket)
             val result =
                 usePage(socket, chromeId) { cdp ->
                     cdp.call("Page.bringToFront")
                     delay(FRONT_SETTLE_MS)
                     val quads = elementQuads(cdp, id, wanted)
                     val target =
-                        screenTarget(quads, cdp.call("Page.getLayoutMetrics"), contentBounds(pkg))
+                        screenTarget(
+                            quads,
+                            cdp.call("Page.getLayoutMetrics"),
+                            contentOnScreen(pkg),
+                        )
                     touchAt(target, request.humanize, request.backend)
                 }
             return result.copy(woke = woke, seq = sequence())
@@ -235,7 +249,7 @@ internal class BrowserServiceImpl(
             throw ApiException(
                 502,
                 "cdp_error",
-                e.message ?: "DevTools connection failed",
+                e.message?.takeIf { it.isNotBlank() } ?: DEVTOOLS_CLOSED,
                 cause = e,
             )
         }
@@ -404,9 +418,18 @@ internal class BrowserServiceImpl(
     private fun evalResult(payload: JsonObject): EvalResult {
         val parsed = payload.decodeCdp<EvalPayload>() ?: return EvalResult()
         val details = parsed.exceptionDetails
-        if (details != null) return EvalResult(exception = details.text ?: "exception")
+        if (details != null) return EvalResult(exception = exceptionMessage(details))
         val remote = parsed.result ?: return EvalResult()
         return EvalResult(type = remote.type, value = remote.value)
+    }
+
+    private fun exceptionMessage(details: ExceptionText): String {
+        val description = details.exception?.description
+        val described = description?.lineSequence()?.firstOrNull()?.trim()
+        if (!described.isNullOrEmpty()) return described
+        val value = details.exception?.value
+        if (value is JsonPrimitive && value.isString) return value.content
+        return details.text ?: "exception"
     }
 
     private suspend fun collectLogs(session: CdpSession, timeoutMs: Long): ConsoleResult {
@@ -414,7 +437,10 @@ internal class BrowserServiceImpl(
         coroutineScope {
             val job = launch { session.events.collect { event -> appendLog(entries, event) } }
             try {
+                session.call("Runtime.enable")
                 session.call("Log.enable")
+                // Enabling replays Chrome's buffer. The wait starts after that.
+                synchronized(entries) { entries.clear() }
                 delay(timeoutMs)
             } finally {
                 job.cancel()
@@ -424,11 +450,46 @@ internal class BrowserServiceImpl(
     }
 
     private fun appendLog(entries: MutableList<ConsoleEntry>, event: CdpEvent) {
-        if (event.method != "Log.entryAdded") return
-        val entry = event.params.decodeCdp<LogAdded>()?.entry ?: return
-        val text = entry.text ?: return
-        entries += ConsoleEntry(entry.level ?: "info", text)
+        when (event.method) {
+            "Runtime.consoleAPICalled" -> {
+                val call = event.params.decodeCdp<ConsoleCall>() ?: return
+                val text = consoleText(call.args) ?: return
+                entries += ConsoleEntry(call.type ?: "log", text)
+            }
+            "Log.entryAdded" -> {
+                val entry = event.params.decodeCdp<LogAdded>()?.entry ?: return
+                // console.log also arrives as Runtime.consoleAPICalled.
+                if (entry.source == "console-api") return
+                val text = entry.text ?: return
+                entries += ConsoleEntry(entry.level ?: "info", text)
+            }
+        }
     }
+
+    private fun consoleText(args: List<ConsoleArg>): String? {
+        val text = args.mapNotNull(::argText).joinToString(" ").trim()
+        return text.ifEmpty { null }
+    }
+
+    private fun argText(arg: ConsoleArg): String? {
+        val value = arg.value
+        if (value is JsonPrimitive) return value.contentOrNull
+        return arg.unserializableValue ?: arg.description
+    }
+
+    private suspend fun contentOnScreen(pkg: String?): Rect {
+        try {
+            return contentBounds(pkg)
+        } catch (e: ApiException) {
+            if (e.error != "content_unavailable" || pkg.isNullOrEmpty()) throw e
+            showPackage(pkg)
+            delay(APPEAR_MS)
+            return contentBounds(pkg)
+        }
+    }
+
+    private fun browserPackage(socket: HelperSocket?, name: String): String? =
+        socket?.packageName ?: if (name == CHROME_SOCKET) "com.android.chrome" else null
 
     private fun nodeRef(ref: String): String {
         val trimmed = ref.trim().removeSurrounding("[", "]")
@@ -457,7 +518,7 @@ internal class BrowserServiceImpl(
                     throw ApiException(
                         502,
                         "cdp_error",
-                        e.message ?: "DevTools connection failed",
+                        e.message?.takeIf { it.isNotBlank() } ?: DEVTOOLS_CLOSED,
                         cause = e,
                     )
                 }
@@ -470,7 +531,7 @@ internal class BrowserServiceImpl(
                 try {
                     listSockets()
                 } catch (e: RemoteException) {
-                    throw ApiException(503, "helper_error", e.message.orEmpty(), cause = e)
+                    throw ApiException.helperDropped(e)
                 }
             try {
                 ApiJson.decodeFromString(serializer<List<HelperSocket>>(), json)
@@ -556,13 +617,41 @@ internal class BrowserServiceImpl(
     @Serializable
     private data class RemoteObject(val type: String? = null, val value: JsonElement? = null)
 
-    @Serializable private data class ExceptionText(val text: String? = null)
+    @Serializable
+    private data class ExceptionText(
+        val text: String? = null,
+        val exception: ExceptionObject? = null,
+    )
+
+    @Serializable
+    private data class ExceptionObject(
+        val description: String? = null,
+        val value: JsonElement? = null,
+    )
 
     @Serializable private data class QuadResult(val quads: List<JsonElement> = emptyList())
 
     @Serializable private data class LogAdded(val entry: LogLine? = null)
 
-    @Serializable private data class LogLine(val text: String? = null, val level: String? = null)
+    @Serializable
+    private data class LogLine(
+        val text: String? = null,
+        val level: String? = null,
+        val source: String? = null,
+    )
+
+    @Serializable
+    private data class ConsoleCall(
+        val type: String? = null,
+        val args: List<ConsoleArg> = emptyList(),
+    )
+
+    @Serializable
+    private data class ConsoleArg(
+        val value: JsonElement? = null,
+        val description: String? = null,
+        val unserializableValue: String? = null,
+    )
 
     private companion object {
         const val HTTP_SERVER_ERROR = 500
@@ -577,6 +666,7 @@ internal class BrowserServiceImpl(
         const val PAGE_ATTEMPTS = 4
         const val PAGE_RETRY_MS = 200L
         const val FRONT_SETTLE_MS = 200L
+        const val APPEAR_MS = 500L
         const val ERROR_SNIPPET = 80
         val SKIPPED_TYPES = setOf("service_worker", "shared_worker", "worker")
     }

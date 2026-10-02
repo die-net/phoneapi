@@ -32,6 +32,8 @@ data class Settings(
     val instanceId: String,
     /** The pairing screen shows the IP address instead of the `.local` name. */
     val pairingShowsIp: Boolean = false,
+    /** When on, an HTTPS listener splices onto the abstract socket and mDNS is advertised. */
+    val tlsEnabled: Boolean = false,
 )
 
 /**

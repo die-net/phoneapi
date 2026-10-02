@@ -1,8 +1,8 @@
-package net.die.phoneapi.a11y
+package net.die.phoneapi.helper.tree
 
 import android.os.Build
 import android.view.accessibility.AccessibilityNodeInfo
-import net.die.phoneapi.core.ApiException
+import net.die.phoneapi.model.ApiException
 
 /**
  * Hands out short refs (`e1`, `e2`, ...) that stay the same across snapshots for as long as a node

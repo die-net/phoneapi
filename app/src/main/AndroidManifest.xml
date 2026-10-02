@@ -6,13 +6,15 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <uses-permission
         android:name="android.permission.NEARBY_WIFI_DEVICES"
         android:usesPermissionFlags="neverForLocation"
         tools:targetApi="tiramisu" />
-    <!-- Granted once over ADB (pm grant); lets the app heal its accessibility service and
-         re-enable Wireless Debugging after reboots. -->
+    <!-- Granted once over ADB (pm grant); lets the app re-enable Wireless Debugging. -->
     <uses-permission
         android:name="android.permission.WRITE_SECURE_SETTINGS"
         tools:ignore="ProtectedPermissions" />
@@ -22,7 +24,6 @@
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
         </intent>
-        <package android:name="moe.shizuku.privileged.api" />
     </queries>
 
     <application
@@ -38,7 +39,8 @@
 
         <activity
             android:name=".ui.MainActivity"
-            android:exported="true">
+            android:exported="true"
+            android:theme="@style/Theme.PhoneApi">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -58,19 +60,6 @@
             android:theme="@style/Theme.PhoneApi.Wake"
             android:turnScreenOn="true" />
 
-        <service
-            android:name=".a11y.PhoneAccessibilityService"
-            android:exported="true"
-            android:label="@string/app_name"
-            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
-            <intent-filter>
-                <action android:name="android.accessibilityservice.AccessibilityService" />
-            </intent-filter>
-            <meta-data
-                android:name="android.accessibilityservice"
-                android:resource="@xml/accessibility_service" />
-        </service>
-
         <!-- The shell-UID helper registers its Binder here; the caller's UID is checked in code. -->
         <provider
             android:name=".helperclient.HelperRegistrationProvider"
@@ -78,18 +67,24 @@
             android:exported="true"
             tools:ignore="ExportedContentProvider" />
 
-        <provider
-            android:name="rikka.shizuku.ShizukuProvider"
-            android:authorities="${applicationId}.shizuku"
-            android:enabled="true"
+        <!-- Only shell and root hold DUMP, so only `adb shell am start-foreground-service` can start this. -->
+        <service
+            android:name=".server.ListenerService"
             android:exported="true"
-            android:multiprocess="false"
-            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL"
-            tools:ignore="ExportedContentProvider">
-            <meta-data
-                android:name="moe.shizuku.client.V3_SUPPORT"
-                android:value="true" />
-        </provider>
+            android:permission="android.permission.DUMP"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Holds the PhoneAPI listener for an adb session or, when HTTPS is on, across reboots." />
+        </service>
+
+        <receiver
+            android:name=".server.BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
 
         <receiver
             android:name=".helperclient.HelperStartReceiver"

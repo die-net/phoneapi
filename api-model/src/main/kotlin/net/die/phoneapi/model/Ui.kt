@@ -61,6 +61,17 @@ public enum class SnapshotFormat {
     @SerialName("both") BOTH,
 }
 
+@Serializable
+public data class SnapshotOptions(
+    val format: SnapshotFormat = SnapshotFormat.COMPACT,
+    val windowId: Int? = null,
+    val maxDepth: Int? = null,
+    val includeInvisible: Boolean = false,
+    /** Include every window, not just the ones that are interesting to act on. */
+    val allWindows: Boolean = false,
+    val autoWake: Boolean = true,
+)
+
 @Doc("All non-null fields must match. String matches are case-insensitive unless noted.")
 @Serializable
 public data class NodeSelector(

@@ -48,7 +48,6 @@ class McpCatalogTest {
         val caps =
             allOn()
                 .copy(
-                    screenshotA11y = false,
                     screenshotHelper = false,
                     logcatAll = false,
                     appsManage = false,
@@ -62,13 +61,13 @@ class McpCatalogTest {
     }
 
     @Test
-    fun `keyboard show needs a11y`() {
+    fun `keyboard show needs the tree`() {
         val control = visibleMcpTools(setOf(Scope.CONTROL), allOn()).map { it.name }
         assertTrue("keyboard_show" in control)
         assertTrue("keyboard_hide" in control)
-        val noA11y =
-            visibleMcpTools(setOf(Scope.CONTROL), allOn().copy(inputA11y = false)).map { it.name }
-        assertFalse("keyboard_show" in noA11y)
+        val noTree =
+            visibleMcpTools(setOf(Scope.CONTROL), allOn().copy(uiSnapshot = false)).map { it.name }
+        assertFalse("keyboard_show" in noTree)
         val show = mcpToolTemplates().first { it.name == "keyboard_show" }
         assertTrue(show.schema.properties!!.keys.containsAll(listOf("selector", "autoWake")))
     }
@@ -122,16 +121,13 @@ class McpCatalogTest {
     }
 
     @Test
-    fun `reduced mode notes weaker path`() {
+    fun `unstable ids are noted`() {
         val full = visibleMcpTools(setOf(Scope.CONTROL), allOn()).first { it.name == "tap" }
         assertFalse(full.description.contains("Reduced mode"))
         val reduced =
-            visibleMcpTools(
-                    setOf(Scope.CONTROL),
-                    allOn().copy(inputInject = false, uiStableIds = false),
-                )
-                .first { it.name == "tap" }
-        assertTrue(reduced.description.contains("accessibility gestures only"))
+            visibleMcpTools(setOf(Scope.CONTROL), allOn().copy(uiStableIds = false)).first {
+                it.name == "tap"
+            }
         assertTrue(reduced.description.contains("node ids are not stable"))
     }
 
@@ -163,19 +159,14 @@ class McpCatalogTest {
     private fun allOn() =
         Capabilities(
             uiSnapshot = true,
-            inputA11y = true,
             inputInject = true,
-            textIme = true,
             textKeyevent = true,
-            screenshotA11y = true,
             screenshotHelper = true,
             uiStableIds = true,
             appsManage = true,
             logcatAll = true,
             browserCdp = true,
-            streamVideoProjection = false,
             streamVideoMirror = true,
-            streamAudioPlaybackCapture = false,
             streamAudioSubmix = true,
             encoderLowLatency = true,
             adbWireless = true,

@@ -106,7 +106,8 @@ internal class AudioStream(
                 helper.require().startAudioCapture(SAMPLE_RATE, CHANNELS)
                     ?: throw ApiException.unavailable(
                         "audio_error",
-                        "The helper did not return an audio pipe",
+                        "The helper did not open audio capture. Remote submix needs Android 11 " +
+                            "or later and a running shell helper.",
                     )
             pipe = capture
             reader = launchReader(encoder, capture, inputQueue, pcmQueue)
@@ -369,7 +370,13 @@ internal class AudioStream(
     }
 
     private fun streamError(error: Throwable): ApiException =
-        ApiException(502, "stream_error", error.message ?: "audio encoder failed", cause = error)
+        ApiException(
+            502,
+            "stream_error",
+            error.message?.takeIf { it.isNotBlank() }
+                ?: "The shell helper stopped during audio capture",
+            cause = error,
+        )
 
     // ByteArray equality is referential, so this stays a plain holder.
     @Suppress("UseDataClass") private class Pcm(val data: ByteArray, val pts: Long)

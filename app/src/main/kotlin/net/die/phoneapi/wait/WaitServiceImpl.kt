@@ -8,24 +8,21 @@ import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
-import net.die.phoneapi.a11y.PhoneAccessibilityService
-import net.die.phoneapi.a11y.SnapshotEngine
-import net.die.phoneapi.a11y.UiChangeTracker
+import net.die.phoneapi.browser.DevtoolsSocket
 import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.core.BrowserService
 import net.die.phoneapi.core.DeviceStateTracker
 import net.die.phoneapi.core.EventBus
 import net.die.phoneapi.core.SnapshotOptions
 import net.die.phoneapi.core.WaitService
-import net.die.phoneapi.helperclient.HelperConnection
 import net.die.phoneapi.model.Scope
 import net.die.phoneapi.model.WaitRequest
 import net.die.phoneapi.model.WaitResult
+import net.die.phoneapi.tree.TreeSession
 
 /**
  * The single condition engine behind `POST /v1/wait`. Conditions are re-evaluated when something
@@ -36,16 +33,14 @@ import net.die.phoneapi.model.WaitResult
  * Browser conditions open a DevTools session for the wait and wake the same loop when Chrome
  * reports a page, network, or target event.
  */
-class WaitServiceImpl(
+internal class WaitServiceImpl(
     private val prepare: suspend (Boolean, Boolean) -> Boolean,
-    private val uiTracker: UiChangeTracker,
+    private val tree: TreeSession,
     private val state: DeviceStateTracker,
     private val bus: EventBus,
-    private val snapshots: SnapshotEngine,
-    private val a11y: StateFlow<PhoneAccessibilityService?>,
     private val io: CoroutineDispatcher,
     private val browser: BrowserService,
-    private val helper: HelperConnection,
+    private val openDevtools: suspend (String, Long) -> DevtoolsSocket,
 ) : WaitService {
     private data class Outcome(
         val matched: Boolean,
@@ -61,16 +56,15 @@ class WaitServiceImpl(
         // underneath a long wait.
         prepare(false, true)
         val browserWatch =
-            BrowserWatch(browser, io, helper).takeIf {
+            BrowserWatch(browser, io, openDevtools).takeIf {
                 (request.all + request.any).any(::isBrowserCondition)
             }
         val watchers =
             ConditionWatchers(
-                snapshots = snapshots,
+                tree = tree,
                 state = state,
-                a11y = a11y,
                 io = io,
-                lastChangeMs = { uiTracker.lastChangeMs },
+                lastChangeMs = { tree.lastChangeMs },
                 browser = browserWatch,
             )
         val all = request.all.map(watchers::watcher)
@@ -144,7 +138,7 @@ class WaitServiceImpl(
         if (settleMs <= 0) return
         while (true) {
             val now = SystemClock.uptimeMillis()
-            val quietAt = uiTracker.lastChangeMs + settleMs
+            val quietAt = tree.lastChangeMs + settleMs
             if (now >= quietAt || now >= deadline) return
             withTimeoutOrNull((minOf(quietAt, deadline) - now).coerceAtLeast(1)) {
                 changes.receive()
@@ -155,8 +149,8 @@ class WaitServiceImpl(
     private fun changeSources(browser: BrowserWatch?): Flow<Any> {
         val device =
             merge(
-                uiTracker.seq.drop(1),
-                uiTracker.windowsVersion.drop(1),
+                tree.seq.drop(1),
+                tree.windowsVersion.drop(1),
                 state.state.drop(1),
                 bus.events,
             )
@@ -164,7 +158,7 @@ class WaitServiceImpl(
         return merge(device, page)
     }
 
-    private suspend fun result(
+    private fun result(
         request: WaitRequest,
         outcome: Outcome,
         elapsedMs: Long,
@@ -177,7 +171,7 @@ class WaitServiceImpl(
             matchedAny = outcome.matchedAny,
             snapshot =
                 if (request.snapshot) {
-                    snapshots.snapshot(SnapshotOptions(format = request.snapshotFormat))
+                    tree.snapshot(SnapshotOptions(format = request.snapshotFormat))
                 } else {
                     null
                 },

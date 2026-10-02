@@ -52,52 +52,8 @@ private val destructive =
 
 private val always: (Capabilities) -> Boolean = { true }
 
-private fun reducedNote(name: String, caps: Capabilities): String? {
-    val notes = ArrayList<String>()
-    backendNote(name, caps)?.let { notes += it }
-    if (!caps.uiStableIds && name in REF_TOOLS) {
-        notes += "Reduced mode: node ids are not stable."
-    }
-    return notes.takeIf { it.isNotEmpty() }?.joinToString(" ")
-}
-
-private fun backendNote(name: String, caps: Capabilities): String? =
-    when (name) {
-        "tap",
-        "swipe" -> injectNote(caps)
-        "press_key" -> keyNote(caps)
-        "type_text" -> imeNote(caps)
-        "screenshot" -> shotNote(caps)
-        else -> null
-    }
-
-private fun injectNote(caps: Capabilities): String? =
-    if (!caps.inputInject && caps.inputA11y) {
-        "Reduced mode: accessibility gestures only, no helper injection."
-    } else {
-        null
-    }
-
-private fun keyNote(caps: Capabilities): String? =
-    if (!caps.textKeyevent && caps.inputA11y) {
-        "Reduced mode: no helper key injection."
-    } else {
-        null
-    }
-
-private fun imeNote(caps: Capabilities): String? =
-    if (!caps.textIme && (caps.textKeyevent || caps.inputA11y)) {
-        "Reduced mode: the accessibility input method is unavailable."
-    } else {
-        null
-    }
-
-private fun shotNote(caps: Capabilities): String? =
-    if (!caps.screenshotHelper && caps.screenshotA11y) {
-        "Reduced mode: accessibility screenshot only."
-    } else {
-        null
-    }
+private fun reducedNote(name: String, caps: Capabilities): String? =
+    if (!caps.uiStableIds && name in REF_TOOLS) "Reduced mode: node ids are not stable." else null
 
 private val REF_TOOLS =
     setOf(
@@ -136,8 +92,7 @@ private val MCP_TOOLS: List<McpTool> =
         ),
         McpTool(
             name = "ui_snapshot",
-            description =
-                "Compact accessibility outline of the current UI. Prefer this over screenshot.",
+            description = "Compact outline of the current UI. Prefer this over screenshot.",
             scope = Scope.OBSERVE,
             available = Capabilities::uiSnapshot,
             arguments = serializer<SnapshotArgs>(),
@@ -167,7 +122,7 @@ private val MCP_TOOLS: List<McpTool> =
             name = "tap",
             description = "Tap a point or a node selector. Humanized by default.",
             scope = Scope.CONTROL,
-            available = any(Capabilities::inputA11y, Capabilities::inputInject),
+            available = Capabilities::inputInject,
             arguments = serializer<TapRequest>(),
             annotations = changes,
             call = { graph, _, request -> tap(graph, request) },
@@ -177,7 +132,7 @@ private val MCP_TOOLS: List<McpTool> =
             description =
                 "Swipe from/to, or inside a selector in a direction (up, down, left, right).",
             scope = Scope.CONTROL,
-            available = any(Capabilities::inputA11y, Capabilities::inputInject),
+            available = Capabilities::inputInject,
             arguments = serializer<SwipeRequest>(),
             annotations = changes,
             call = { graph, _, request -> swipe(graph, request) },
@@ -185,10 +140,9 @@ private val MCP_TOOLS: List<McpTool> =
         McpTool(
             name = "type_text",
             description =
-                "Type into the focused field, or into selector first. mode auto, keyboard, ime, keyevent, or setText.",
+                "Type into the focused field, or into selector first. mode auto, keyboard, keyevent, or setText.",
             scope = Scope.CONTROL,
-            available =
-                any(Capabilities::textIme, Capabilities::textKeyevent, Capabilities::inputA11y),
+            available = Capabilities::textKeyevent,
             arguments = serializer<TextRequest>(),
             annotations = changes,
             call = { graph, _, request -> typeText(graph, request) },
@@ -197,7 +151,7 @@ private val MCP_TOOLS: List<McpTool> =
             name = "press_key",
             description = "Press BACK, HOME, ENTER, DEL, or any KEYCODE_* name.",
             scope = Scope.CONTROL,
-            available = any(Capabilities::inputA11y, Capabilities::textKeyevent),
+            available = Capabilities::textKeyevent,
             arguments = serializer<KeyRequest>(),
             annotations = changes,
             call = { graph, _, request -> pressKey(graph, request) },
@@ -216,7 +170,7 @@ private val MCP_TOOLS: List<McpTool> =
             name = "keyboard_hide",
             description = "Hide the soft keyboard.",
             scope = Scope.CONTROL,
-            available = Capabilities::inputA11y,
+            available = Capabilities::uiSnapshot,
             arguments = serializer<EmptyArgs>(),
             annotations = changes,
             call = { graph, _, _ -> keyboardHide(graph) },
@@ -226,7 +180,7 @@ private val MCP_TOOLS: List<McpTool> =
             description =
                 "Show the soft keyboard for an editable node. Omit selector to use the focused field.",
             scope = Scope.CONTROL,
-            available = Capabilities::inputA11y,
+            available = Capabilities::uiSnapshot,
             arguments = serializer<ImeShowRequest>(),
             annotations = changes,
             call = { graph, _, request -> keyboardShow(graph, request) },
@@ -296,7 +250,8 @@ private val MCP_TOOLS: List<McpTool> =
         ),
         McpTool(
             name = "browser_targets",
-            description = "List Chrome tabs and debuggable WebViews.",
+            description =
+                "List Chrome tabs and debuggable WebViews. Chrome must be running with USB debugging on. Android 11+ needs PhoneAPI paired with wireless debugging. Android 10 needs the USB DevTools forward.",
             scope = Scope.BROWSER,
             available = Capabilities::browserCdp,
             arguments = serializer<EmptyArgs>(),
@@ -323,7 +278,7 @@ private val MCP_TOOLS: List<McpTool> =
         ),
         McpTool(
             name = "browser_snapshot",
-            description = "Compact accessibility outline of a browser target.",
+            description = "Compact outline of a browser target.",
             scope = Scope.BROWSER,
             available = Capabilities::browserCdp,
             arguments = serializer<TargetArgs>(),
@@ -365,7 +320,7 @@ private val MCP_TOOLS: List<McpTool> =
             description =
                 "Last resort. PNG of the screen. Prefer ui_snapshot. scale is 0.1 to 1, default 0.5.",
             scope = Scope.OBSERVE,
-            available = any(Capabilities::screenshotA11y, Capabilities::screenshotHelper),
+            available = Capabilities::screenshotHelper,
             arguments = serializer<ScaleArgs>(),
             annotations = readOnly,
             call = { graph, _, request -> screenshot(graph, request) },
@@ -380,10 +335,6 @@ private val MCP_TOOLS: List<McpTool> =
             call = { graph, _, request -> logcatTail(graph, request) },
         ),
     )
-
-private fun any(vararg flags: (Capabilities) -> Boolean): (Capabilities) -> Boolean = { caps ->
-    flags.any { it(caps) }
-}
 
 internal data class McpResource(
     val uri: String,

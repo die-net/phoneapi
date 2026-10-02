@@ -12,6 +12,11 @@ public data class ApiError(
 
 @Serializable public data class Rect(val left: Int, val top: Int, val right: Int, val bottom: Int)
 
+@Serializable public data class TreeKey(val label: String, val id: String? = null, val bounds: Rect)
+
+@Serializable
+public data class PinpadKeys(val digits: Map<String, Rect> = emptyMap(), val submit: Rect? = null)
+
 @Serializable public data class Point(val x: Float, val y: Float)
 
 @Serializable
@@ -67,30 +72,23 @@ public data class DeviceInfo(
     val state: DeviceStateSummary,
     val helper: HelperStatus,
     val helperRecoveredAtMs: Long? = null,
-    val accessibilityConnected: Boolean,
+    /** The helper's UiAutomation session is up. */
+    val uiAutomationConnected: Boolean,
     val capabilities: Capabilities,
 )
 
-/**
- * Runtime feature flags. JSON keys stay dotted (`ui.snapshot`) so existing clients keep working. A
- * flag is true only when this build actually implements that path.
- */
+/** Runtime feature flags. A flag is true only when that path works on this device right now. */
 @Serializable
 public data class Capabilities(
     @SerialName("ui.snapshot") val uiSnapshot: Boolean,
-    @SerialName("input.a11y") val inputA11y: Boolean,
     @SerialName("input.inject") val inputInject: Boolean,
-    @SerialName("text.ime") val textIme: Boolean,
     @SerialName("text.keyevent") val textKeyevent: Boolean,
-    @SerialName("screenshot.a11y") val screenshotA11y: Boolean,
     @SerialName("screenshot.helper") val screenshotHelper: Boolean,
     @SerialName("ui.stableIds") val uiStableIds: Boolean,
     @SerialName("apps.manage") val appsManage: Boolean,
     @SerialName("logcat.all") val logcatAll: Boolean,
     @SerialName("browser.cdp") val browserCdp: Boolean,
-    @SerialName("stream.video.projection") val streamVideoProjection: Boolean,
     @SerialName("stream.video.mirror") val streamVideoMirror: Boolean,
-    @SerialName("stream.audio.playbackCapture") val streamAudioPlaybackCapture: Boolean,
     @SerialName("stream.audio.submix") val streamAudioSubmix: Boolean,
     @SerialName("encoder.lowLatency") val encoderLowLatency: Boolean,
     @SerialName("adb.wireless") val adbWireless: Boolean,

@@ -1,3 +1,6 @@
+# The abstract-socket engine constructs Ktor's internal CIO call by reflection.
+-keep class io.ktor.server.cio.CIOApplicationCall { *; }
+
 # The helper is started by app_process via reflection on its main class.
 -keep class net.die.phoneapi.helper.Main { public static void main(java.lang.String[]); }
 -keep class net.die.phoneapi.helper.** { *; }

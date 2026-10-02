@@ -1,6 +1,6 @@
-package net.die.phoneapi.a11y
+package net.die.phoneapi.helper.tree
 
-import net.die.phoneapi.core.ApiException
+import net.die.phoneapi.model.ApiException
 import net.die.phoneapi.model.NodeSelector
 import net.die.phoneapi.model.UiNode
 

@@ -1,11 +1,11 @@
-package net.die.phoneapi.a11y
+package net.die.phoneapi.helper.tree
 
-import android.accessibilityservice.AccessibilityService
 import android.graphics.Rect
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction
+import android.view.accessibility.AccessibilityWindowInfo
 import kotlinx.coroutines.delay
-import net.die.phoneapi.core.ApiException
+import net.die.phoneapi.model.ApiException
 import net.die.phoneapi.model.Rect as ModelRect
 
 /** Works out where a real finger can touch a node. */
@@ -17,16 +17,18 @@ class NodeTargeting(private val screen: () -> Rect) {
      * Must be called off the main thread.
      */
     suspend fun touchTarget(
-        service: AccessibilityService,
         node: AccessibilityNodeInfo,
+        windows: List<AccessibilityWindowInfo>,
         force: Boolean,
     ): ModelRect {
         if (!node.isVisibleToUser) {
             node.performAction(AccessibilityAction.ACTION_SHOW_ON_SCREEN.id)
             delay(SHOW_ON_SCREEN_SETTLE_MS)
-            if (!node.refresh() || !node.isVisibleToUser) throw offscreen()
+            if (!node.refresh() || !node.isVisibleToUser) {
+                NodeCompat.recycleAll(windows)
+                throw offscreen()
+            }
         }
-        val windows = service.windows
         try {
             val layout = ScreenLayout.capture(windows, screen())
             val raw = Rect().also(node::getBoundsInScreen)

@@ -1,5 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <style name="Theme.PhoneApi" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="preferenceTheme">@style/PreferenceThemeOverlay</item>
+    </style>
+
     <!-- Invisible and instant: the wake activity only exists to turn the display on. -->
     <style name="Theme.PhoneApi.Wake" parent="@android:style/Theme.DeviceDefault.DayNight">
         <item name="android:windowBackground">@android:color/transparent</item>

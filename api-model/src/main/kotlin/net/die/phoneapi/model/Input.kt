@@ -7,12 +7,10 @@ import net.die.phoneapi.model.schema.LenientEnumSerializer
 
 @Serializable
 public enum class InputBackend {
-    /** Helper injection when available, otherwise accessibility gestures. */
+    /** Helper injection. */
     @SerialName("auto") AUTO,
     /** InputManager injection from the shell-UID helper, stamped with the real touchscreen. */
     @SerialName("inject") INJECT,
-    /** AccessibilityService.dispatchGesture. */
-    @SerialName("a11y") A11Y,
 }
 
 @Serializable
@@ -23,7 +21,7 @@ public data class TapRequest(
     val selector: NodeSelector? = null,
     @Doc("How many times to tap. Defaults to 1.") val count: Int = 1,
     @Doc("Hold the pointer down for this many milliseconds.") val holdMs: Long? = null,
-    @Doc("auto, inject, or a11y. auto uses helper injection when it is available.")
+    @Doc("auto or inject. Both use helper injection.")
     val backend: InputBackend = InputBackend.AUTO,
     @Doc("Jitter the point and timing. Defaults to true.") val humanize: Boolean = true,
     @Doc("Tap even when the node is covered by the keyboard or another window.")
@@ -63,7 +61,7 @@ public data class SwipeRequest(
     @Doc("How long the swipe takes, in milliseconds.") val durationMs: Long = 300,
     @Doc("Keep velocity at release instead of stopping before the pointer lifts.")
     val fling: Boolean = true,
-    @Doc("auto, inject, or a11y. auto uses helper injection when it is available.")
+    @Doc("auto or inject. Both use helper injection.")
     val backend: InputBackend = InputBackend.AUTO,
     @Doc("Jitter the path and timing. Defaults to true.") val humanize: Boolean = true,
     @Doc("Wake and unlock the device first. Defaults to true.") val autoWake: Boolean = true,
@@ -96,11 +94,6 @@ public enum class TextMode {
     @SerialName("auto") AUTO,
     /** Tap the on-screen keyboard's keys with real touches. */
     @SerialName("keyboard") KEYBOARD,
-    /**
-     * Accessibility InputMethod (Android 13+). The input connection has no composing API, so each
-     * code point is committed on its own.
-     */
-    @SerialName("ime") IME,
     /** Helper KeyEvent injection (looks like a hardware keyboard). */
     @SerialName("keyevent") KEYEVENT,
     /** ACTION_SET_TEXT; no input events at all. */
@@ -112,7 +105,9 @@ public data class TextRequest(
     @Doc("Characters to type.") val text: String,
     @Doc("Focus this node first. Omit to type into the focused field.")
     val selector: NodeSelector? = null,
-    @Doc("auto, keyboard, ime, keyevent, or setText. auto prefers the accessibility input method.")
+    @Doc(
+        "auto, keyboard, keyevent, or setText. auto taps the on-screen keyboard, then uses setText."
+    )
     val mode: TextMode = TextMode.AUTO,
     @Doc("Clear the field before typing.") val clear: Boolean = false,
     @Doc("Press the IME action (Enter, Go, or Search) afterwards.") val submit: Boolean = false,

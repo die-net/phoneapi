@@ -7,16 +7,12 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import net.die.phoneapi.a11y.NodeCompat
-import net.die.phoneapi.a11y.NodeTargeting
-import net.die.phoneapi.a11y.PhoneAccessibilityService
-import net.die.phoneapi.a11y.SnapshotEngine
-import net.die.phoneapi.a11y.require
 import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.core.DeviceStateTracker
 import net.die.phoneapi.core.InputService
 import net.die.phoneapi.model.ActionResult
 import net.die.phoneapi.model.DisplayInfo
+import net.die.phoneapi.model.FindRequest
 import net.die.phoneapi.model.GestureRequest
 import net.die.phoneapi.model.ImeShowRequest
 import net.die.phoneapi.model.KeyRequest
@@ -27,32 +23,21 @@ import net.die.phoneapi.model.SwipeDirection
 import net.die.phoneapi.model.SwipeRequest
 import net.die.phoneapi.model.TapRequest
 import net.die.phoneapi.model.TextRequest
+import net.die.phoneapi.tree.TreeSession
 
 class InputServiceImpl(
     private val prepare: suspend (Boolean, Boolean) -> Boolean,
     private val io: CoroutineDispatcher,
-    private val snapshots: SnapshotEngine,
+    private val tree: TreeSession,
     private val seq: StateFlow<Long>,
     private val touch: TouchInput,
-    private val a11y: StateFlow<PhoneAccessibilityService?>,
     private val keyBackends: KeyBackends,
     private val state: DeviceStateTracker,
-    private val targeting: NodeTargeting,
     private val display: () -> DisplayInfo,
     touchBackends: TouchBackends,
 ) : InputService {
-    private val typer =
-        TextTyper(
-            a11y,
-            io,
-            snapshots,
-            targeting,
-            touch,
-            state,
-            touchBackends,
-            keyBackends,
-        )
-    private val imeShow = ImeShow(a11y, state, snapshots)
+    private val typer = TextTyper(tree, touch, state, touchBackends, keyBackends)
+    private val imeShow = ImeShow(tree, state)
 
     override suspend fun tap(request: TapRequest): ActionResult =
         action(request.autoWake) {
@@ -103,8 +88,15 @@ class InputServiceImpl(
             val name = request.key.trim().uppercase().removePrefix("KEYCODE_")
             val global = GLOBAL_ACTIONS[name]
             if (global != null) {
-                val ok = a11y.require().performGlobalAction(global)
-                ActionResult(ok = ok, backend = "global")
+                val ok = tree.global(global)
+                ActionResult(
+                    ok = ok,
+                    backend = "global",
+                    message =
+                        if (ok) null
+                        else
+                            "The helper could not run $name. Its automation connection has to be up.",
+                )
             } else {
                 val code =
                     KeyEvent.keyCodeFromString("KEYCODE_$name").takeIf {
@@ -126,24 +118,16 @@ class InputServiceImpl(
 
     override suspend fun hideIme(): ActionResult =
         action(autoWake = true) {
-            val service = a11y.require()
             if (!state.ime.visible) {
                 ActionResult(ok = true, message = "The keyboard is already hidden")
             } else {
-                service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
-                if (awaitImeHidden()) {
-                    ActionResult(ok = true, backend = "back")
-                } else {
-                    val controller = service.softKeyboardController
-                    controller.showMode = AccessibilityService.SHOW_MODE_HIDDEN
-                    val hidden = awaitImeHidden()
-                    controller.showMode = AccessibilityService.SHOW_MODE_AUTO
-                    ActionResult(
-                        ok = hidden,
-                        backend = "softKeyboardController",
-                        message = if (hidden) null else "The keyboard is still showing",
-                    )
-                }
+                tree.global(AccessibilityService.GLOBAL_ACTION_BACK)
+                val hidden = awaitImeHidden()
+                ActionResult(
+                    ok = hidden,
+                    backend = "back",
+                    message = if (hidden) null else "The keyboard is still showing",
+                )
             }
         }
 
@@ -157,7 +141,7 @@ class InputServiceImpl(
     private suspend fun action(autoWake: Boolean, block: suspend () -> ActionResult): ActionResult {
         val woke = prepare(autoWake, false)
         val result = withContext(io) { block() }
-        snapshots.invalidate()
+        tree.invalidate()
         return result.copy(woke = woke, seq = seq.value)
     }
 
@@ -169,14 +153,11 @@ class InputServiceImpl(
             message = if (outcome.ok) null else "The system cancelled the gesture",
         )
 
-    private suspend fun nodeTarget(selector: NodeSelector, force: Boolean): Rect {
-        val service = a11y.require()
-        val node = snapshots.resolve(selector)
-        try {
-            return targeting.touchTarget(service, node, force)
-        } finally {
-            NodeCompat.recycle(node)
-        }
+    private fun nodeTarget(selector: NodeSelector, force: Boolean): Rect {
+        val node =
+            tree.find(FindRequest(selector, limit = 1)).matches.firstOrNull()
+                ?: throw ApiException.notFound("No node matches the selector")
+        return tree.touchTarget(node.ref, force)
     }
 
     private fun pointTarget(x: Float?, y: Float?, humanize: Boolean): Rect {
@@ -187,7 +168,7 @@ class InputServiceImpl(
         return Rect(cx - slop, cy - slop, cx + slop, cy + slop)
     }
 
-    private suspend fun swipeEnds(request: SwipeRequest): Pair<Point, Point> {
+    private fun swipeEnds(request: SwipeRequest): Pair<Point, Point> {
         val from = request.from
         val to = request.to
         if (from != null && to != null) return from to to

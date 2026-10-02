@@ -1,4 +1,4 @@
-package net.die.phoneapi.a11y
+package net.die.phoneapi.helper.tree
 
 import net.die.phoneapi.model.DeviceStateSummary
 import net.die.phoneapi.model.Rect
@@ -166,7 +166,7 @@ object CompactFormatter {
                 append(' ').append(quote(text))
                 if (desc != null && desc != text) append(" desc:").append(quote(desc))
             }
-            desc != null -> append(' ').append(quote(desc))
+            desc != null -> append(" desc:").append(quote(desc))
             isInteractive(node) -> {
                 val parts = ArrayList<UiNode>()
                 collectLabels(node, parts)

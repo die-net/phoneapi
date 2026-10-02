@@ -8,9 +8,6 @@ import io.ktor.server.application.install
 import io.ktor.server.engine.EmbeddedServer
 import io.ktor.server.engine.applicationEnvironment
 import io.ktor.server.engine.embeddedServer
-import io.ktor.server.engine.sslConnector
-import io.ktor.server.netty.Netty
-import io.ktor.server.netty.NettyApplicationEngine
 import io.ktor.server.plugins.BadRequestException
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.plugins.statuspages.StatusPages
@@ -37,47 +34,54 @@ import net.die.phoneapi.server.routes.uiRoutes
 import net.die.phoneapi.server.routes.waitRoutes
 
 /**
- * HTTPS + WebSocket API server (Ktor on Netty, since CIO cannot terminate TLS). [tls] is resolved
- * on the first start, which runs off the main thread.
+ * HTTP API on an abstract local socket. HTTPS, when enabled, is a byte splice onto that socket and
+ * is not a second set of routes.
  */
-class ApiServer(private val tls: () -> TlsManager, private val services: ServerServices) {
-    private var server:
-        EmbeddedServer<NettyApplicationEngine, NettyApplicationEngine.Configuration>? =
-        null
+class ApiServer(
+    private val tls: () -> TlsManager,
+    private val services: ServerServices,
+    private val socketName: String,
+) {
+    private var server: EmbeddedServer<AbstractHttpEngine, AbstractHttpEngine.Configuration>? = null
+    private var splice: TlsSplice? = null
 
     @Synchronized
-    fun start(host: String, port: Int) {
-        stop()
-        val tls = tls()
-        val password = tls.password
+    fun start() {
+        if (server != null) return
         val env = applicationEnvironment {}
         server =
             embeddedServer(
-                    Netty,
+                    AbstractHttpEngine,
                     env,
-                    configure = {
-                        // With HTTP/2 enabled, Netty drops TLS clients that send no ALPN (common
-                        // for Python and MCP clients). WebSockets need HTTP/1.1 anyway.
-                        enableHttp2 = false
-                        sslConnector(
-                            keyStore = tls.keyStore,
-                            keyAlias = TlsManager.ALIAS,
-                            keyStorePassword = { password },
-                            privateKeyPassword = { password },
-                        ) {
-                            this.host = host
-                            this.port = port
-                        }
-                    },
+                    configure = { this.socketName = this@ApiServer.socketName },
                     module = { phoneApiModule(services) },
                 )
                 .also { it.start(wait = false) }
+        Log.i(TAG, "Listening on abstract socket $socketName")
+    }
+
+    @Synchronized
+    fun startTls(host: String, port: Int) {
+        start()
+        splice?.stop()
+        splice = TlsSplice(tls(), socketName).also { it.start(host, port) }
+    }
+
+    @Synchronized
+    fun stopTls() {
+        splice?.stop()
+        splice = null
     }
 
     @Synchronized
     fun stop() {
+        stopTls()
         server?.stop(gracePeriodMillis = 200, timeoutMillis = 1_000)
         server = null
+    }
+
+    private companion object {
+        const val TAG = "PhoneApiServer"
     }
 }
 
@@ -119,5 +123,4 @@ fun Application.phoneApiModule(services: ServerServices) {
     installPhoneMcp(services)
 }
 
-private fun Throwable.rootMessage(): String? =
-    generateSequence(this) { e -> e.cause?.takeIf { it !== e } }.last().message ?: message
+private fun Throwable.rootMessage(): String? = generateSequence(this) { it.cause }.last().message

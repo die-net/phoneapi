@@ -17,9 +17,14 @@ pairing="$(realpath "${PAPI_PAIRING:-$(dirname "$0")/../.dev/pairing.json}")"
 host="$(jq -r '.host | select(. != "") // "127.0.0.1"' "$pairing")"
 port="$(jq -r .port "$pairing")"
 token="$(jq -r .token "$pairing")"
-spki="$(jq -r .spkiSha256 "$pairing")"
-if [[ -z "$port" || "$port" == null || -z "$token" || "$token" == null || -z "$spki" || "$spki" == null ]]; then
-  echo "phoneapi mcp: $pairing is missing port, token, or spkiSha256" >&2
+spki="$(jq -r '.spkiSha256 // empty' "$pairing")"
+scheme="$(jq -r '.scheme // "https"' "$pairing")"
+if [[ -z "$port" || "$port" == null || -z "$token" || "$token" == null ]]; then
+  echo "phoneapi mcp: $pairing is missing port or token" >&2
+  exit 1
+fi
+if [[ "$scheme" == https && -z "$spki" ]]; then
+  echo "phoneapi mcp: $pairing is missing spkiSha256" >&2
   exit 1
 fi
 
@@ -35,7 +40,7 @@ if [[ "$host" == *:* && "$host" != \[* ]]; then
 else
   url_host="$host"
 fi
-url="https://${url_host}:${port}/mcp"
+url="${scheme}://${url_host}:${port}/mcp"
 
 tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT
@@ -64,12 +69,13 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     --show-error
     --http1.1
     --connect-timeout 10
-    --insecure
-    --pinnedpubkey "sha256//$spki"
     -H "Authorization: Bearer $token"
     -H "Content-Type: application/json"
     -H "Accept: application/json, text/event-stream"
   )
+  if [[ "$scheme" == https ]]; then
+    curl_args+=(--insecure --pinnedpubkey "sha256//$spki")
+  fi
   if [[ -n "$protocol_version" ]]; then
     curl_args+=(-H "MCP-Protocol-Version: $protocol_version")
   fi

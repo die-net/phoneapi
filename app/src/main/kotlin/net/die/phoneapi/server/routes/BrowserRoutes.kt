@@ -14,6 +14,7 @@ import java.io.IOException
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import net.die.phoneapi.browser.DEVTOOLS_CLOSED
 import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.model.BrowserTapRequest
 import net.die.phoneapi.model.ConsoleRequest
@@ -81,7 +82,7 @@ private suspend fun proxyCdp(
             throw ApiException(
                 502,
                 "cdp_error",
-                e.message ?: "DevTools connection failed",
+                e.message?.takeIf { it.isNotBlank() } ?: DEVTOOLS_CLOSED,
                 cause = e,
             )
         }
@@ -95,7 +96,12 @@ private suspend fun forward(pipe: CdpPipe, text: String) {
     } catch (e: CancellationException) {
         throw e
     } catch (e: IOException) {
-        throw ApiException(502, "cdp_error", e.message ?: "DevTools connection failed", cause = e)
+        throw ApiException(
+            502,
+            "cdp_error",
+            e.message?.takeIf { it.isNotBlank() } ?: DEVTOOLS_CLOSED,
+            cause = e,
+        )
     }
 }
 

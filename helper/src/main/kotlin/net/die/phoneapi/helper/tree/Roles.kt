@@ -1,4 +1,4 @@
-package net.die.phoneapi.a11y
+package net.die.phoneapi.helper.tree
 
 /** The node facts that decide its simplified role. */
 data class RoleHints(

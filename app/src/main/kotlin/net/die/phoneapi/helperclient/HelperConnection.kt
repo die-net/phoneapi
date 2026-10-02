@@ -33,6 +33,9 @@ class HelperConnection(private val bus: EventBus, private val idleStatus: Helper
     /** Runs when a helper binder is refused, so the supervisor can start a current one. */
     @Volatile var onRejected: (() -> Unit)? = null
 
+    /** Runs after a helper binder is accepted. */
+    @Volatile var onReady: ((IHelper) -> Unit)? = null
+
     private val deathRecipient = IBinder.DeathRecipient { onHelperDied() }
 
     private fun onHelperDied() {
@@ -48,8 +51,20 @@ class HelperConnection(private val bus: EventBus, private val idleStatus: Helper
     val isRunning: Boolean
         get() = helper != null
 
-    /** Returns the helper or throws `503 helper_unavailable`. */
-    fun require(): IHelper = helper ?: throw ApiException.helperUnavailable()
+    /** Returns the helper or throws `503 helper_unavailable`, naming how to start it. */
+    fun require(): IHelper = helper ?: throw ApiException.helperUnavailable(whyUnavailable())
+
+    private fun whyUnavailable(): String =
+        when (statusFlow.value) {
+            HelperStatus.STARTING -> "It is starting. Retry in a moment."
+            HelperStatus.NEEDS_PAIRING ->
+                "Pair wireless debugging in PhoneAPI, or start the helper over USB."
+            HelperStatus.NEEDS_USB ->
+                "This Android version has no wireless debugging. Start the helper over USB."
+            HelperStatus.STOPPED,
+            HelperStatus.RUNNING ->
+                "Start it over USB, or pair wireless debugging on Android 11 or later."
+        }
 
     fun getOrNull(): IHelper? = helper
 
@@ -107,10 +122,14 @@ class HelperConnection(private val bus: EventBus, private val idleStatus: Helper
             Log.i(TAG, "Helper registered (pid $pid, protocol ${Registration.PROTOCOL_VERSION})")
         }
         setStatus(HelperStatus.RUNNING)
+        onReady?.invoke(proxy)
         return true
     }
 
+    @Synchronized
     fun setStatus(next: HelperStatus) {
+        // A supervisor pass can decide the helper is idle while registration is in flight.
+        if (helper != null && next != HelperStatus.RUNNING) return
         if (statusFlow.value == next) return
         statusFlow.value = next
         bus.emit(EventTypes.HELPER_STATUS, buildJsonObject { put("status", next.name.lowercase()) })

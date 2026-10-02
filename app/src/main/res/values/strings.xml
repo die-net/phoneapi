@@ -1,57 +1,38 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">PhoneAPI</string>
-    <string name="a11y_summary">Lets computers you pair in PhoneAPI read the screen and send input.</string>
-    <string name="a11y_description">PhoneAPI lets computers you pair over your local network, such as scripts, API clients, and AI agents, read this phone\'s screen and tap, swipe, and type on it. It needs the accessibility service because that is the only way Android lets an app see and operate other apps. Nothing is sent to a cloud service. Only computers you approve in the PhoneAPI app can connect, and you can revoke them there at any time.</string>
-
-    <string name="intro">PhoneAPI lets a computer you pair, such as a script, an API client, or an AI agent using MCP, see this phone\'s screen and control it over your local network. Everything runs on this phone; nothing goes through a cloud service.</string>
+    <string name="status_title">Status</string>
+    <string name="status_abstract">Listener: adb forward tcp:%1$d localabstract:%2$s, then http://127.0.0.1:%1$d</string>
+    <string name="tls_title">HTTPS</string>
+    <string name="tls_summary">Off by default. When on, and while wireless debugging is on, this phone accepts HTTPS on the local network and advertises itself.</string>
+    <string name="tls_needs_wireless">Turn on wireless debugging before HTTPS.</string>
+    <string name="forward_title">ADB forward</string>
+    <string name="copied">Copied</string>
+    <string name="listener_title">PhoneAPI is listening</string>
+    <string name="listener_text">The adb listener is running.</string>
     <string name="status_listening">Server: https://%1$s:%2$d</string>
-    <string name="status_offline">Server: not listening. Connect to Wi-Fi or Ethernet.</string>
     <string name="status_helper">Helper: %1$s</string>
     <string name="helper_state_running">running</string>
     <string name="helper_state_starting">starting</string>
-    <string name="helper_state_off">not running (optional, see below)</string>
-    <string name="status_cert">Certificate SHA-256: %1$s</string>
+    <string name="helper_state_off">not running</string>
 
-    <string name="a11y_title">1. Turn on the accessibility service</string>
-    <string name="a11y_why">Android only lets an app read other apps\' screens and tap on them through its accessibility service. Android will warn that PhoneAPI can see everything on screen and act for you: that is what a paired computer uses it for. Only computers you approve below can connect.</string>
-    <string name="a11y_on">Accessibility service: on</string>
-    <string name="a11y_off">Accessibility service: off. Open the settings, find PhoneAPI (under Installed or Downloaded apps), and turn it on.</string>
-    <string name="a11y_button">Open accessibility settings</string>
-    <string name="a11y_restricted">If Android says the setting is restricted, open App info, tap the ⋮ menu, choose Allow restricted settings, then try again. Android does this for apps installed outside an app store.</string>
-    <string name="app_info_button">Open App info</string>
-
-    <string name="pair_title">2. Pair a computer</string>
     <string name="pair_how">Put the computer on the same Wi-Fi as this phone, tap Pair a computer, and open the address shown in a browser on the computer. The browser will warn that the connection is not private because the phone uses its own certificate; choose Advanced, then continue. Enter a name for the computer and tap Allow here. The page then shows the address and token to give your API client or AI agent.</string>
     <string name="pair_button">Pair a computer</string>
-    <string name="pair_no_network">Connect this phone to Wi-Fi or Ethernet to pair. PhoneAPI only listens on the local network.</string>
+    <string name="pair_no_network">Connect this phone to Wi-Fi or Ethernet to pair a computer from a browser.</string>
     <string name="pair_countdown">Open this address on the computer. Pairing closes in %1$d:%2$02d, or when you leave this screen.</string>
     <string name="pair_show_ip">Show IP address</string>
     <string name="pair_show_name">Show .local name</string>
     <string name="pair_stop">Stop pairing</string>
-    <string name="pair_adb">Using ADB? With the phone connected over USB, this command prints the same details without a browser:</string>
-    <string name="copy_adb">Copy ADB command</string>
     <string name="approve_title">Allow this computer?</string>
     <string name="approve_message">\"%1$s\" at %2$s will be able to see this phone\'s screen and control it until you revoke it.</string>
     <string name="approve_allow">Allow</string>
     <string name="approve_deny">Deny</string>
     <string name="paired_toast">Paired with %1$s</string>
 
-    <string name="helper_title">Optional: start the helper</string>
-    <string name="helper_why">Without the helper, a paired computer can read the screen, tap, swipe, type, and launch apps. The helper adds faster injected input, screen and audio streaming, Chrome control, and force-stopping apps. Android only allows that from developer tools.</string>
-    <string name="helper_usb">From a computer with USB debugging on. You\'ll need to run this again after the phone reboots.</string>
-    <string name="helper_usb_alt">Prefer a computer instead? This USB command also starts the helper. You\'ll need to run it again after a reboot, unless the on-phone path above is already set up.</string>
-    <string name="copy_helper">Copy helper start command</string>
-    <string name="helper_wireless">Tap Pair wireless debugging, turn on Wireless debugging, and tap Pair device with pairing code. A PhoneAPI notification drops down; type the code there. Leaving the pairing dialog cancels it, so don\'t switch apps. After this once, PhoneAPI starts the helper itself after a reboot, once the phone is unlocked.</string>
-    <string name="helper_wireless_on">Wireless debugging is on. PhoneAPI starts the helper over it after a reboot, once the phone is unlocked.</string>
+    <string name="helper_title">Start the helper</string>
     <string name="wireless_pair">Pair wireless debugging</string>
     <string name="wireless_needs_developer">Turn on Developer options first: in Settings, open About phone and tap Build number seven times.</string>
-    <string name="wireless_needs_notifications">Allow PhoneAPI notifications, then tap again. The code goes into a notification.</string>
-    <string name="helper_shizuku">Shizuku is installed on this phone. Start the helper with it. While Shizuku is running, PhoneAPI starts the helper itself after a reboot.</string>
-    <string name="shizuku_start">Start with Shizuku</string>
-
     <string name="tokens_title">Paired computers</string>
-    <string name="tokens_how">Each has its own token. Revoke one to disconnect that computer.</string>
     <string name="tokens_none">None yet.</string>
     <string name="revoke">Revoke</string>
 </resources>

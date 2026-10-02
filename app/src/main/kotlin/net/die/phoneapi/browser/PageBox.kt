@@ -14,8 +14,8 @@ import net.die.phoneapi.model.Rect
 
 /**
  * Maps a snapshot ref onto a screen rectangle. Letter-sized `StaticText` nodes are Chrome splitting
- * one element, so the tap uses the enclosing element's box. Quads are CSS pixels in the document;
- * the visual viewport turns them into pixels inside [content], the WebView's bounds on screen.
+ * one element, so the tap uses the enclosing element's box. Quads are CSS pixels in the visual
+ * viewport, the same space as `getBoundingClientRect`. [content] is the WebView's bounds on screen.
  */
 internal fun elementBackendId(tree: JsonObject, ref: String): Int {
     val node =
@@ -50,7 +50,7 @@ internal fun screenTarget(quads: JsonArray, metrics: JsonObject, content: Rect):
     var best: Rect? = null
     var bestArea = 0
     for (element in quads) {
-        val visible = placed(element as? JsonArray, viewport, content, scaleX, scaleY) ?: continue
+        val visible = placed(element as? JsonArray, content, scaleX, scaleY) ?: continue
         val area = (visible.right - visible.left) * (visible.bottom - visible.top)
         if (area > bestArea) {
             best = visible
@@ -60,33 +60,21 @@ internal fun screenTarget(quads: JsonArray, metrics: JsonObject, content: Rect):
     return best ?: throw ApiException(409, "offscreen", "The node is outside the page on screen")
 }
 
-private fun placed(
-    quad: JsonArray?,
-    viewport: Viewport,
-    content: Rect,
-    scaleX: Double,
-    scaleY: Double,
-): Rect? {
-    val box = quad?.let { box(it, viewport, content, scaleX, scaleY) } ?: return null
+private fun placed(quad: JsonArray?, content: Rect, scaleX: Double, scaleY: Double): Rect? {
+    val box = quad?.let { box(it, content, scaleX, scaleY) } ?: return null
     return intersection(box, content)
 }
 
-private fun box(
-    quad: JsonArray,
-    viewport: Viewport,
-    content: Rect,
-    scaleX: Double,
-    scaleY: Double,
-): Rect? {
+private fun box(quad: JsonArray, content: Rect, scaleX: Double, scaleY: Double): Rect? {
     if (quad.size != QUAD_COORDS) return null
     val coords = quad.map { (it as? JsonPrimitive)?.doubleOrNull ?: return null }
     val xs =
         (0 until QUAD_COORDS step 2).map { i ->
-            content.left + ((coords[i] - viewport.pageX) * scaleX).roundToInt()
+            content.left + (coords[i] * scaleX).roundToInt()
         }
     val ys =
         (1 until QUAD_COORDS step 2).map { i ->
-            content.top + ((coords[i] - viewport.pageY) * scaleY).roundToInt()
+            content.top + (coords[i] * scaleY).roundToInt()
         }
     val left = xs.min()
     val top = ys.min()
@@ -118,8 +106,6 @@ private fun viewport(metrics: JsonObject): Viewport {
         throw ApiException(502, "cdp_error", "Chrome did not return viewport metrics")
     }
     return Viewport(
-        pageX = css?.num("pageX") ?: 0.0,
-        pageY = css?.num("pageY") ?: 0.0,
         cssWidth = cssWidth,
         cssHeight = cssHeight,
         deviceWidth = deviceWidth,
@@ -128,8 +114,6 @@ private fun viewport(metrics: JsonObject): Viewport {
 }
 
 private data class Viewport(
-    val pageX: Double,
-    val pageY: Double,
     val cssWidth: Double,
     val cssHeight: Double,
     val deviceWidth: Double,

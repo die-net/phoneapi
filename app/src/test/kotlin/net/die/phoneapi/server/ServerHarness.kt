@@ -182,19 +182,14 @@ internal fun HttpRequestBuilder.bearer(secret: String) {
 internal fun allCapabilities() =
     Capabilities(
         uiSnapshot = true,
-        inputA11y = true,
         inputInject = true,
-        textIme = true,
         textKeyevent = true,
-        screenshotA11y = true,
         screenshotHelper = true,
         uiStableIds = true,
         appsManage = true,
         logcatAll = true,
         browserCdp = true,
-        streamVideoProjection = false,
         streamVideoMirror = true,
-        streamAudioPlaybackCapture = false,
         streamAudioSubmix = true,
         encoderLowLatency = true,
         adbWireless = true,
@@ -216,7 +211,7 @@ private fun deviceInfo(capabilities: Capabilities) =
                 ime = ImeState(visible = false),
             ),
         helper = HelperStatus.RUNNING,
-        accessibilityConnected = true,
+        uiAutomationConnected = true,
         capabilities = capabilities,
     )
 

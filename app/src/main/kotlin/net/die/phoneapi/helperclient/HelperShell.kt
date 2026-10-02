@@ -46,7 +46,8 @@ class HelperShell(
                 try {
                     proxy.exec(argv.toTypedArray(), timeoutMs, maxOutputBytes)
                 } catch (e: RemoteException) {
-                    throw helperError("`${argv.first()}` did not run: ${e.message.orEmpty()}", e)
+                    val why = e.message?.takeIf { it.isNotBlank() } ?: "the helper stopped"
+                    throw helperError("`${argv.first()}` did not run: $why", e)
                 }
             }
         return delivered.toShellResult()

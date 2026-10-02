@@ -5,8 +5,8 @@
 #
 #   scripts/pair-adb.sh [--name NAME] [--forward] > pairing.json
 #
-# --forward also makes the server listen on loopback and forwards its port, so the JSON points at
-# 127.0.0.1. Use it for emulators, or when the phone's Wi-Fi address isn't reachable.
+# The printed JSON points at http://127.0.0.1 after `adb forward` onto the app's abstract socket.
+# --forward also sets the optional HTTPS listener to all interfaces. The adb client still uses HTTP.
 # Defaults to the debug application id (net.die.phoneapi.dev). For a release install:
 #   PHONEAPI_PKG=net.die.phoneapi scripts/pair-adb.sh
 set -euo pipefail
@@ -41,16 +41,13 @@ if [[ -z "$json" ]]; then
   exit 1
 fi
 port="$(sed -n 's/.*"port":\([0-9]*\).*/\1/p' <<<"$json")"
-
-if [[ $forward == 1 ]]; then
-  adb forward "tcp:$port" "tcp:$port" >/dev/null
-  json="$(sed 's/"host":"[^"]*"/"host":"127.0.0.1"/' <<<"$json")"
+if [[ -z "$port" ]]; then
+  echo "CREATE_TOKEN returned no port: $json" >&2
+  exit 1
 fi
-host="$(sed -n 's/.*"host":"\([^"]*\)".*/\1/p' <<<"$json")"
+
+adb forward "tcp:$port" "localabstract:$PKG" >/dev/null
+json="$(sed -e 's/"host":"[^"]*"/"host":"127.0.0.1"/' -e 's/^{/{"scheme":"http",/' <<<"$json")"
 
 printf '%s\n' "$json"
-if [[ -z "$host" ]]; then
-  echo "The phone has no Wi-Fi or Ethernet address; rerun with --forward to use USB." >&2
-else
-  echo "PhoneAPI at https://$host:$port (MCP: /mcp). The token is in the JSON above." >&2
-fi
+echo "PhoneAPI at http://127.0.0.1:$port (MCP: /mcp). The token is in the JSON above." >&2

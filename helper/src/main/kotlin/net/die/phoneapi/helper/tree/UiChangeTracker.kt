@@ -1,6 +1,5 @@
-package net.die.phoneapi.a11y
+package net.die.phoneapi.helper.tree
 
-import android.accessibilityservice.AccessibilityService
 import android.graphics.Rect
 import android.os.SystemClock
 import android.view.accessibility.AccessibilityEvent
@@ -20,11 +19,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
-import net.die.phoneapi.core.DeviceStateTracker
-import net.die.phoneapi.core.EventBus
 import net.die.phoneapi.model.EventTypes
 import net.die.phoneapi.model.ImeState
 import net.die.phoneapi.model.Rect as ModelRect
@@ -41,9 +39,21 @@ data class WindowChange(
  * foreground-package state. [onEvent] runs on the main thread, so it only does bookkeeping; window
  * queries run on [dispatcher].
  */
+interface UiSink {
+    fun emit(type: String, body: JsonObject)
+
+    fun setIme(state: ImeState)
+
+    fun setForeground(packageName: String?)
+
+    fun foreground(): String?
+
+    fun onTick(seq: Long, windowsVersion: Long, lastChangeMs: Long)
+}
+
 class UiChangeTracker(
-    private val bus: EventBus,
-    private val state: DeviceStateTracker,
+    private val sink: UiSink,
+    private val windows: () -> List<AccessibilityWindowInfo>,
     private val scope: CoroutineScope,
     private val dispatcher: CoroutineDispatcher,
 ) {
@@ -78,11 +88,11 @@ class UiChangeTracker(
     private val windowPackages = ConcurrentHashMap<Int, String>()
     @Volatile private var lastUiChangedMs = 0L
 
-    fun onConnected(service: AccessibilityService) {
-        scheduleWindowsRefresh(service)
+    fun onConnected() {
+        scheduleWindowsRefresh()
     }
 
-    fun onEvent(service: AccessibilityService, event: AccessibilityEvent) {
+    fun onEvent(event: AccessibilityEvent) {
         val type = event.eventType
         val pkg = event.packageName?.toString()
         if (type == AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED) {
@@ -92,14 +102,15 @@ class UiChangeTracker(
         if (pkg != null) lastPackage = pkg
         lastChangeMs = SystemClock.uptimeMillis()
         seqFlow.update { it + 1 }
+        sink.onTick(seqFlow.value, windowsFlow.value, lastChangeMs)
         when (type) {
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
                 emitWindowState(event, pkg)
-                scheduleWindowsRefresh(service)
+                scheduleWindowsRefresh()
             }
             AccessibilityEvent.TYPE_WINDOWS_CHANGED -> {
                 pendingWindowChanges.merge(event.windowId, event.windowChanges, Int::or)
-                scheduleWindowsRefresh(service)
+                scheduleWindowsRefresh()
             }
             else -> Unit
         }
@@ -107,7 +118,7 @@ class UiChangeTracker(
     }
 
     private fun toast(event: AccessibilityEvent, pkg: String?) {
-        bus.emit(
+        sink.emit(
             EventTypes.TOAST,
             buildJsonObject {
                 put("text", event.text.joinToString(" "))
@@ -118,7 +129,7 @@ class UiChangeTracker(
 
     private fun emitWindowState(event: AccessibilityEvent, pkg: String?) {
         val title = event.text.joinToString(" ").takeIf { it.isNotBlank() }
-        bus.emit(
+        sink.emit(
             EventTypes.WINDOW_CHANGED,
             buildJsonObject {
                 put("windowId", event.windowId)
@@ -137,7 +148,7 @@ class UiChangeTracker(
             if (wait > 0) delay(wait)
             uiChangedPending.set(false)
             lastUiChangedMs = SystemClock.uptimeMillis()
-            bus.emit(
+            sink.emit(
                 EventTypes.UI_CHANGED,
                 buildJsonObject {
                     put("seq", seqFlow.value)
@@ -147,24 +158,25 @@ class UiChangeTracker(
         }
     }
 
-    private fun scheduleWindowsRefresh(service: AccessibilityService) {
+    private fun scheduleWindowsRefresh() {
         if (windowsPending.getAndSet(true)) return
         scope.launch(dispatcher) {
             delay(WINDOWS_DEBOUNCE_MS)
             windowsPending.set(false)
-            refreshWindows(service)
+            refreshWindows()
         }
     }
 
-    private fun refreshWindows(service: AccessibilityService) {
-        val windows = service.windows
+    private fun refreshWindows() {
+        val open = windows()
         try {
-            updateIme(windows)
-            state.setForegroundPackage(foregroundPackage(windows))
-            emitWindowChanges(windows)
+            updateIme(open)
+            sink.setForeground(foregroundPackage(open))
+            emitWindowChanges(open)
             windowsFlow.update { it + 1 }
+            sink.onTick(seqFlow.value, windowsFlow.value, lastChangeMs)
         } finally {
-            NodeCompat.recycleAll(windows)
+            NodeCompat.recycleAll(open)
         }
     }
 
@@ -178,7 +190,7 @@ class UiChangeTracker(
                 val touch = touchRegion(ime, bounds).bounds
                 ImeState(visible = true, bounds = touch.toModel(), packageName = packageOf(ime))
             }
-        if (next != state.ime) state.setIme(next)
+        sink.setIme(next)
     }
 
     private fun foregroundPackage(windows: List<AccessibilityWindowInfo>): String? {
@@ -187,7 +199,7 @@ class UiChangeTracker(
             apps.firstOrNull { it.isFocused }
                 ?: apps.firstOrNull { it.isActive }
                 ?: apps.maxByOrNull { it.layer }
-        return window?.let(::packageOf) ?: state.current.foregroundPackage
+        return window?.let(::packageOf) ?: sink.foreground()
     }
 
     private fun emitWindowChanges(windows: List<AccessibilityWindowInfo>) {
@@ -214,7 +226,7 @@ class UiChangeTracker(
             )
         if ("removed" in names) windowPackages.remove(id)
         windowChangeFlow.tryEmit(change)
-        bus.emit(
+        sink.emit(
             EventTypes.WINDOW_CHANGED,
             buildJsonObject {
                 put("windowId", id)

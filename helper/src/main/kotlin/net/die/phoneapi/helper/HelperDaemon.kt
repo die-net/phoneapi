@@ -12,17 +12,23 @@ import net.die.phoneapi.helper.compat.ProviderCalls
 /**
  * Registers [helper] with the app until the installed APK disappears.
  *
- * Both the USB `app_process` entry point and the Shizuku user service use this, so a package update
- * makes the old process exit and the new app can start a fresh one. After a registration is
- * accepted, it is refreshed only when the app's binder dies.
+ * The USB and wireless `app_process` entry points use this, so a package update makes the old
+ * process exit and the new app can start a fresh one. After a registration is accepted, it is
+ * refreshed only when the app's binder dies.
  */
 internal object HelperDaemon {
     private const val TAG = "PhoneApiHelper"
     private const val RETRY_MS = 5_000L
 
+    @Volatile private var daemonLooper: Looper? = null
+
+    /** The looper [serve] is pumping. UiAutomation delivers events here. */
+    fun looper(): Looper = daemonLooper ?: error("The helper looper is not prepared")
+
     fun serve(helper: HelperImpl, packageName: String?, classpath: String) {
         if (Looper.myLooper() == null) Looper.prepare()
         val looper = Looper.myLooper() ?: error("Looper was not prepared")
+        daemonLooper = looper
         val handler = Handler(looper)
         val registration = RegistrationLink(helper, packageName, handler)
         val tick =

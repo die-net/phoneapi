@@ -46,7 +46,8 @@ public data class EvalResult(
 )
 
 /**
- * Collect `Log.entryAdded` events for [timeoutMs]. Entries from before the call are not replayed.
+ * Collect console and browser log events for [timeoutMs]. Entries from before the call are not
+ * replayed.
  */
 @Serializable public data class ConsoleRequest(val timeoutMs: Long = 1_000)
 

@@ -1,10 +1,9 @@
-package net.die.phoneapi.browser
+package net.die.phoneapi.helper.tree
 
 import android.graphics.Rect as AndroidRect
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
-import net.die.phoneapi.a11y.NodeCompat
-import net.die.phoneapi.core.ApiException
+import net.die.phoneapi.model.ApiException
 import net.die.phoneapi.model.Rect
 
 /**
@@ -16,27 +15,24 @@ internal object ContentFrame {
 
     fun find(windows: List<AccessibilityWindowInfo>, packageName: String): Rect {
         val wanted = packageName.takeIf { it.isNotEmpty() }
-        try {
-            var best: AndroidRect? = null
-            for (window in windows) {
-                val root = ownedRoot(window, wanted) ?: continue
-                try {
-                    best = larger(best, search(root))
-                } finally {
-                    NodeCompat.recycle(root)
-                }
+        var best: AndroidRect? = null
+        for (window in windows) {
+            val root = ownedRoot(window, wanted) ?: continue
+            try {
+                best = larger(best, search(root))
+            } finally {
+                NodeCompat.recycle(root)
             }
-            val found =
-                best
-                    ?: throw ApiException(
-                        409,
-                        "content_unavailable",
-                        "The page is not on screen",
-                    )
-            return Rect(found.left, found.top, found.right, found.bottom)
-        } finally {
-            NodeCompat.recycleAll(windows)
         }
+        val found =
+            best
+                ?: throw ApiException(
+                    409,
+                    "content_unavailable",
+                    "The page is not on screen. The browser has to be in the foreground; a " +
+                        "background tab has no box to tap.",
+                )
+        return Rect(found.left, found.top, found.right, found.bottom)
     }
 
     private fun ownedRoot(

@@ -27,5 +27,4 @@ public object EventTypes {
     public const val TOAST: String = "toast"
     public const val LOGCAT: String = "logcat"
     public const val HELPER_STATUS: String = "helper.status"
-    public const val A11Y_STATUS: String = "a11y.status"
 }

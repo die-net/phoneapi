@@ -271,7 +271,7 @@ public val phoneApiEndpoints: List<ApiEndpoint> =
             ApiMethod.GET,
             "/v1/browser/targets/{id}/snapshot",
             Scope.BROWSER,
-            "Compact accessibility outline of a browser target.",
+            "Compact outline of a browser target.",
             response = serializer<BrowserSnapshot>(),
         ),
         endpoint(

@@ -2,12 +2,7 @@ package net.die.phoneapi.wait
 
 import android.os.SystemClock
 import kotlinx.coroutines.CoroutineDispatcher
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
-import net.die.phoneapi.a11y.NodeCompat
-import net.die.phoneapi.a11y.PhoneAccessibilityService
-import net.die.phoneapi.a11y.SnapshotEngine
-import net.die.phoneapi.a11y.require
 import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.core.DeviceStateTracker
 import net.die.phoneapi.model.DeviceStateSummary
@@ -15,6 +10,7 @@ import net.die.phoneapi.model.FindRequest
 import net.die.phoneapi.model.ScreenState
 import net.die.phoneapi.model.UiNode
 import net.die.phoneapi.model.WaitCondition
+import net.die.phoneapi.tree.TreeSession
 
 /** Whether a condition holds right now, and when to look again if nothing else happens. */
 internal data class Check(val satisfied: Boolean, val recheckAtMs: Long? = null)
@@ -28,9 +24,8 @@ internal fun interface ConditionWatcher {
  * is built, so a bad request fails before the engine starts waiting.
  */
 internal class ConditionWatchers(
-    private val snapshots: SnapshotEngine,
+    private val tree: TreeSession,
     private val state: DeviceStateTracker,
-    private val a11y: StateFlow<PhoneAccessibilityService?>,
     private val io: CoroutineDispatcher,
     private val lastChangeMs: () -> Long,
     private val browser: BrowserWatch? = null,
@@ -66,9 +61,9 @@ internal class ConditionWatchers(
     }
 
     /** The best match for [request], or null; a ref that has expired counts as "not there". */
-    private suspend fun find(request: FindRequest): UiNode? =
+    private fun find(request: FindRequest): UiNode? =
         try {
-            snapshots.find(request).matches.firstOrNull()
+            tree.find(request).matches.firstOrNull()
         } catch (e: ApiException) {
             if (e.error != "stale_ref") throw e
             null
@@ -87,17 +82,8 @@ internal class ConditionWatchers(
     }
 
     /** Window titles come straight off the window list, with no tree traversal. */
-    private suspend fun hasWindowTitled(text: String): Boolean {
-        val service = a11y.require()
-        return withContext(io) {
-            val windows = service.windows
-            try {
-                windows.any { it.title?.contains(text, ignoreCase = true) == true }
-            } finally {
-                NodeCompat.recycleAll(windows)
-            }
-        }
-    }
+    private suspend fun hasWindowTitled(text: String): Boolean =
+        withContext(io) { tree.windowTitle(text) }
 
     /** Satisfied once the UI has been quiet for [quietMs]; nothing to react to, so it's timed. */
     private fun idle(quietMs: Long): ConditionWatcher {

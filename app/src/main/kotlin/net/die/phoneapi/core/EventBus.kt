@@ -4,6 +4,7 @@ import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.serialization.json.JsonObject
 import net.die.phoneapi.model.Event
@@ -18,6 +19,9 @@ class EventBus {
         )
 
     val events: SharedFlow<Event> = flow.asSharedFlow()
+
+    /** How many collectors are currently reading [events]. */
+    val subscribers: StateFlow<Int> = flow.subscriptionCount
 
     val lastSeq: Long
         get() = seq.get()

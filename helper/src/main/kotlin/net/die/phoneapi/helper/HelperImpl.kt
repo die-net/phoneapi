@@ -13,6 +13,7 @@ import java.io.File
 import net.die.phoneapi.helper.compat.AudioTap
 import net.die.phoneapi.helper.compat.InputInjector
 import net.die.phoneapi.helper.compat.MirrorDisplay
+import net.die.phoneapi.helper.tree.TreeHost
 
 /** [IHelper] implementation. Every privileged call drops the app's Binder identity first. */
 internal open class HelperImpl : IHelper.Stub() {
@@ -20,6 +21,8 @@ internal open class HelperImpl : IHelper.Stub() {
     private val injector by lazy { InputInjector() }
     private val mirror = MirrorDisplay()
     private val audio = AudioTap()
+    @Volatile private var treeClient: ITreeClient? = null
+    private val tree by lazy { TreeHost { treeClient } }
 
     /**
      * Resolves [packageName]'s uid before any binder call is served. `cmd package` is used because
@@ -103,9 +106,17 @@ internal open class HelperImpl : IHelper.Stub() {
         privileged("audio-stop") { audio.stop() }
     }
 
+    override fun setTreeClient(client: ITreeClient?) {
+        privileged("tree-client") { treeClient = client }
+    }
+
+    override fun tree(op: String, payload: String): String =
+        privileged("tree") { tree.call(op, payload) }
+
     @Suppress("ExitOutsideMain") // The app asked this process to stop.
     override fun shutdown() {
         enforceCaller()
+        runCatching { tree.shutdown() }
         Log.i(TAG, "shutdown")
         System.exit(0)
     }

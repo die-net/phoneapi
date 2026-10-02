@@ -1,6 +1,5 @@
 package net.die.phoneapi
 
-import android.content.ComponentName
 import android.content.Context
 import android.graphics.Rect
 import android.os.Build
@@ -10,21 +9,15 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.withContext
-import net.die.phoneapi.a11y.A11yUiService
-import net.die.phoneapi.a11y.NodeRegistry
-import net.die.phoneapi.a11y.NodeTargeting
-import net.die.phoneapi.a11y.PhoneAccessibilityService
-import net.die.phoneapi.a11y.Screenshotter
-import net.die.phoneapi.a11y.SnapshotEngine
-import net.die.phoneapi.a11y.UiChangeTracker
-import net.die.phoneapi.a11y.require
 import net.die.phoneapi.apps.AppsServiceImpl
 import net.die.phoneapi.browser.BrowserServiceImpl
-import net.die.phoneapi.browser.ContentFrame
+import net.die.phoneapi.browser.CdpForward
+import net.die.phoneapi.browser.DevtoolsPreconditions
+import net.die.phoneapi.browser.DevtoolsSocket
 import net.die.phoneapi.browser.HelperCdpPipes
-import net.die.phoneapi.browser.HelperDevtoolsSocket
+import net.die.phoneapi.browser.USB_DEVTOOLS_SOCKET
+import net.die.phoneapi.browser.UsbDevtools
 import net.die.phoneapi.core.AppsService
 import net.die.phoneapi.core.BrowserService
 import net.die.phoneapi.core.DeviceInfoProvider
@@ -32,6 +25,7 @@ import net.die.phoneapi.core.DeviceStateTracker
 import net.die.phoneapi.core.EventBus
 import net.die.phoneapi.core.InputService
 import net.die.phoneapi.core.PowerService
+import net.die.phoneapi.core.Screenshotter
 import net.die.phoneapi.core.SettingsStore
 import net.die.phoneapi.core.TlsPasswordStore
 import net.die.phoneapi.core.UiService
@@ -43,9 +37,7 @@ import net.die.phoneapi.helperclient.HelperStatusNotifier
 import net.die.phoneapi.helperclient.HelperSupervisor
 import net.die.phoneapi.helperclient.KeystorePrivateKeyStore
 import net.die.phoneapi.helperclient.WirelessPairing
-import net.die.phoneapi.input.A11yTouchBackend
 import net.die.phoneapi.input.Humanizer
-import net.die.phoneapi.input.ImeKeyBackend
 import net.die.phoneapi.input.InjectKeyBackend
 import net.die.phoneapi.input.InjectTouchBackend
 import net.die.phoneapi.input.InputServiceImpl
@@ -70,6 +62,8 @@ import net.die.phoneapi.server.VideoFeed
 import net.die.phoneapi.stream.AudioStream
 import net.die.phoneapi.stream.StreamLease
 import net.die.phoneapi.stream.VideoStream
+import net.die.phoneapi.tree.HelperUiService
+import net.die.phoneapi.tree.TreeSession
 import net.die.phoneapi.wait.WaitServiceImpl
 
 /** Process-wide object graph, created once by [PhoneApiApp]. */
@@ -97,62 +91,58 @@ class AppGraph(
         )
     val shell = HelperShell(helper, ioDispatcher)
     val network = NetworkWatcher(context)
+    private val adbKeys = KeystorePrivateKeyStore(filesDir)
     internal val helperSupervisor =
         HelperSupervisor(
             context = context,
             helper = helper,
-            keys = KeystorePrivateKeyStore(filesDir),
+            keys = adbKeys,
             network = network,
             scope = scope,
             ioDispatcher = ioDispatcher,
-            accessibilityComponent =
-                ComponentName(context, PhoneAccessibilityService::class.java).flattenToString(),
+        )
+    private val cdpForward = CdpForward(context, adbKeys, ioDispatcher)
+    private val usbDevtools =
+        UsbDevtools(
+            openSocket = { helper.require().openAbstractSocket(USB_DEVTOOLS_SOCKET) },
+            io = ioDispatcher,
         )
     internal val wirelessPairing = WirelessPairing(context, helperSupervisor, scope, ioDispatcher)
 
     /** The lock-screen PIN, provisioned over ADB and never returned by the API. */
     val pins = PinStore(filesDir)
 
-    /** The connected accessibility service, or null when it is disabled. */
-    val a11y = MutableStateFlow<PhoneAccessibilityService?>(null)
+    @Volatile private var uiAutomationConnected = false
 
     val deviceInfo =
         DeviceInfoProvider(
             context = context,
             state = state,
             isHelperRunning = { helper.isRunning },
-            isA11yConnected = { a11y.value != null },
+            isUiAutomationConnected = { uiAutomationConnected },
             helperStatus = { helper.status.value },
             helperRecoveredAtMs = { helper.recoveredAtMs },
         )
 
-    val uiTracker = UiChangeTracker(bus, state, scope, ioDispatcher)
-    val nodes = NodeRegistry()
-    val touchBackends =
-        TouchBackends(
-            a11y = A11yTouchBackend(a11y),
-            inject = InjectTouchBackend(helper, ioDispatcher),
+    val tree =
+        TreeSession(
+            helper = helper,
+            bus = bus,
+            state = state,
+            display = { deviceInfo.display() },
+            onSession = { up -> uiAutomationConnected = up },
         )
-    val keyBackends =
-        KeyBackends(ime = ImeKeyBackend(a11y), helper = InjectKeyBackend(helper, ioDispatcher))
+
+    val touchBackends = TouchBackends(inject = InjectTouchBackend(helper, ioDispatcher))
+    val keyBackends = KeyBackends(helper = InjectKeyBackend(helper, ioDispatcher))
     val touch = TouchInput(touchBackends, Humanizer()) { deviceInfo.display() }
-    val targeting = NodeTargeting(::screenRect)
-    val snapshots =
-        SnapshotEngine(
-            a11y = a11y,
-            io = ioDispatcher,
-            seq = uiTracker.seq,
-            device = state,
-            nodes = nodes,
-            screenRect = ::screenRect,
-        )
-    val screenshots = Screenshotter(a11y, ioDispatcher, ::helperScreenshot)
+    val screenshots = Screenshotter(ioDispatcher, ::helperScreenshot)
     val power: PowerService =
         PowerServiceImpl(
             context = context,
             settings = settings,
-            seq = uiTracker.seq,
-            a11y = a11y,
+            seq = tree.seq,
+            tree = tree,
             state = state,
             bus = bus,
             shell = shell,
@@ -162,27 +152,21 @@ class AppGraph(
             io = ioDispatcher,
         )
     val ui: UiService =
-        A11yUiService(
+        HelperUiService(
             prepare = power::prepareForAction,
-            snapshots = snapshots,
-            a11y = a11y,
-            io = ioDispatcher,
-            nodes = nodes,
-            targeting = targeting,
+            tree = tree,
             touch = touch,
-            seq = uiTracker.seq,
+            seq = tree.seq,
         )
     val input: InputService =
         InputServiceImpl(
             prepare = power::prepareForAction,
             io = ioDispatcher,
-            snapshots = snapshots,
-            seq = uiTracker.seq,
+            tree = tree,
+            seq = tree.seq,
             touch = touch,
-            a11y = a11y,
             keyBackends = keyBackends,
             state = state,
-            targeting = targeting,
             display = { deviceInfo.display() },
             touchBackends = touchBackends,
         )
@@ -191,8 +175,8 @@ class AppGraph(
             context = context,
             io = ioDispatcher,
             prepare = power::prepareForAction,
-            invalidateSnapshots = snapshots::invalidate,
-            seq = uiTracker.seq,
+            invalidateSnapshots = tree::invalidate,
+            seq = tree.seq,
             shell = shell,
             state = state,
             bus = bus,
@@ -201,14 +185,12 @@ class AppGraph(
     val waits: WaitService =
         WaitServiceImpl(
             prepare = power::prepareForAction,
-            uiTracker = uiTracker,
+            tree = tree,
             state = state,
             bus = bus,
-            snapshots = snapshots,
-            a11y = a11y,
             io = ioDispatcher,
             browser = browser,
-            helper = helper,
+            openDevtools = ::openDevtools,
         )
     internal val video =
         VideoStream(
@@ -241,7 +223,7 @@ class AppGraph(
             audio = AudioFeed { session -> this.audio.serve(session) },
             viewerHtml = { asset("viewer.html") },
             shell = { argv -> this.shell.exec(argv) },
-            cdp = HelperCdpPipes(helper, ioDispatcher),
+            cdp = HelperCdpPipes(::openDevtools, ioDispatcher),
             viewerText = { viewerLink() },
             logcat = HelperLogcatFeed(helper, bus, ioDispatcher),
             pairing = pairing,
@@ -249,19 +231,28 @@ class AppGraph(
             pins = { tls.pins },
         )
 
-    val server = ApiServer({ tls }, services)
-    val serverController = ServerController(scope, server, network, settings, mdns)
+    val server = ApiServer({ tls }, services, socketName = context.packageName)
+    val serverController =
+        ServerController(scope, server, network, settings, mdns, helperSupervisor.wireless)
 
     private suspend fun asset(name: String): ByteArray =
         withContext(ioDispatcher) { context.assets.open(name).use { it.readBytes() } }
+
+    @Suppress("MissingUseCall") // The caller closes the socket.
+    private suspend fun openDevtools(name: String, readTimeoutMs: Long): DevtoolsSocket =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            cdpForward.open(name, readTimeoutMs)
+        } else {
+            usbDevtools.open(name, readTimeoutMs)
+        }
 
     @Suppress("MissingUseCall")
     private fun browserService(): BrowserService =
         BrowserServiceImpl(
             io = ioDispatcher,
             listSockets = { helper.require().listDevtoolsSockets() },
-            open = { name -> HelperDevtoolsSocket(helper, name, dispatcher = ioDispatcher) },
-            contentBounds = { pkg -> ContentFrame.find(a11y.require().windows, pkg.orEmpty()) },
+            open = { name -> openDevtools(name, DEVTOOLS_READ_MS) },
+            contentBounds = { pkg -> tree.contentBounds(pkg.orEmpty()) },
             touchAt = { rect, humanize, backend ->
                 val outcome = touch.tap(rect, humanize = humanize, backend = backend)
                 ActionResult(
@@ -272,19 +263,36 @@ class AppGraph(
                 )
             },
             prepare = { autoWake -> power.prepareForAction(autoWake) },
-            sequence = { uiTracker.seq.value },
-            invalidateSnapshots = { snapshots.invalidate() },
+            sequence = { tree.seq.value },
+            invalidateSnapshots = { tree.invalidate() },
+            showPackage = { pkg ->
+                shell.exec(
+                    listOf(
+                        "am",
+                        "start",
+                        "-a",
+                        "android.intent.action.MAIN",
+                        "-c",
+                        "android.intent.category.LAUNCHER",
+                        "-p",
+                        pkg,
+                    )
+                )
+            },
+            devtoolsGap = DevtoolsPreconditions(context)::explain,
         )
 
     fun start() {
         state.start()
         network.start()
+        tree.start(scope)
+        helper.onReady = { proxy -> tree.attach(proxy) }
         HelperStatusNotifier(context, helper).start(scope)
         helperSupervisor.start()
     }
 
     private suspend fun helperScreenshot(): ByteArray? {
-        val proxy = helper.getOrNull() ?: return null
+        val proxy = helper.require()
         val pipe = withContext(ioDispatcher) { proxy.screencap() } ?: return null
         return withContext(ioDispatcher) {
             try {
@@ -303,6 +311,10 @@ class AppGraph(
         return "https://$host:$port/viewer?access_token=TOKEN\n" +
             "Replace TOKEN with this device's bearer token. " +
             "The query parameter is accepted only by GET /viewer and by WebSocket upgrades."
+    }
+
+    private companion object {
+        const val DEVTOOLS_READ_MS = 15_000L
     }
 }
 

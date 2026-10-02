@@ -1,4 +1,4 @@
-package net.die.phoneapi.a11y
+package net.die.phoneapi.helper.tree
 
 import android.graphics.Rect
 import android.os.SystemClock
@@ -10,23 +10,23 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import net.die.phoneapi.core.ApiException
-import net.die.phoneapi.core.DeviceStateTracker
-import net.die.phoneapi.core.SnapshotOptions
+import net.die.phoneapi.model.ApiException
+import net.die.phoneapi.model.DeviceStateSummary
 import net.die.phoneapi.model.FindRequest
 import net.die.phoneapi.model.FindResult
 import net.die.phoneapi.model.NodeSelector
 import net.die.phoneapi.model.SnapshotFormat
+import net.die.phoneapi.model.SnapshotOptions
 import net.die.phoneapi.model.UiNode
 import net.die.phoneapi.model.UiSnapshot
 import net.die.phoneapi.model.UiWindow
 
 /** Builds snapshots and runs node queries over the live accessibility tree. */
 class SnapshotEngine(
-    private val a11y: StateFlow<PhoneAccessibilityService?>,
+    private val windows: () -> List<AccessibilityWindowInfo>,
     private val io: CoroutineDispatcher,
     private val seq: StateFlow<Long>,
-    private val device: DeviceStateTracker,
+    private val imePackage: () -> String?,
     private val nodes: NodeRegistry,
     private val screenRect: () -> Rect,
 ) {
@@ -46,8 +46,7 @@ class SnapshotEngine(
         cache = null
     }
 
-    suspend fun snapshot(options: SnapshotOptions): UiSnapshot {
-        val service = a11y.require()
+    suspend fun snapshot(options: SnapshotOptions, summary: DeviceStateSummary): UiSnapshot {
         val key = options.copy(format = SnapshotFormat.COMPACT, autoWake = true)
         val built =
             withContext(io) {
@@ -57,10 +56,9 @@ class SnapshotEngine(
                         it.options == key &&
                             it.seq == seq &&
                             SystemClock.uptimeMillis() - it.atMs < CACHE_MS
-                    } ?: build(service.windows, key, seq).also { cache = it }
+                    } ?: build(windows(), key, seq).also { cache = it }
                 }
             }
-        val summary = device.refresh()
         val compact =
             if (options.format == SnapshotFormat.JSON) null
             else
@@ -75,7 +73,6 @@ class SnapshotEngine(
     }
 
     suspend fun find(request: FindRequest): FindResult {
-        val service = a11y.require()
         val selector = request.selector
         val matcher = SelectorMatcher(selector)
         return withContext(io) {
@@ -84,12 +81,12 @@ class SnapshotEngine(
             if (ref != null) {
                 return@withContext FindResult(
                     seq,
-                    listOfNotNull(findByRef(service.windows, ref, matcher)),
+                    listOfNotNull(findByRef(windows(), ref, matcher)),
                 )
             }
             val wanted = selector.index?.let { it + 1 } ?: request.limit.coerceIn(1, MAX_FIND)
             val matches = mutex.withLock {
-                search(service.windows, matcher, wanted, request.includeInvisible)
+                search(windows(), matcher, wanted, request.includeInvisible)
             }
             val picked = selector.index?.let { i -> listOfNotNull(matches.getOrNull(i)) } ?: matches
             FindResult(seq, picked)
@@ -260,7 +257,7 @@ class SnapshotEngine(
             val root = if (includeTree) w.root else null
             val pkg =
                 root?.packageName?.toString()
-                    ?: device.ime.packageName.takeIf {
+                    ?: imePackage().takeIf {
                         w.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD
                     }
             return UiWindow(
@@ -396,10 +393,6 @@ internal fun windowTypeName(type: Int): String =
         TYPE_WINDOW_CONTROL -> "window_control"
         else -> "unknown"
     }
-
-/** The connected accessibility service, or `503 accessibility_unavailable`. */
-internal fun StateFlow<PhoneAccessibilityService?>.require(): PhoneAccessibilityService =
-    value ?: throw ApiException.a11yUnavailable()
 
 // Values of AccessibilityWindowInfo constants added after minSdk; the ints are stable.
 private const val TYPE_MAGNIFICATION_OVERLAY = 6

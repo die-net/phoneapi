@@ -13,8 +13,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import net.die.phoneapi.a11y.PhoneAccessibilityService
-import net.die.phoneapi.a11y.require
 import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.core.DeviceStateTracker
 import net.die.phoneapi.core.EventBus
@@ -27,9 +25,11 @@ import net.die.phoneapi.input.SwipeSpec
 import net.die.phoneapi.input.TouchInput
 import net.die.phoneapi.model.ActionResult
 import net.die.phoneapi.model.DisplayInfo
+import net.die.phoneapi.model.PinpadKeys
 import net.die.phoneapi.model.Point
 import net.die.phoneapi.model.ScreenState
 import net.die.phoneapi.model.UnlockRequest
+import net.die.phoneapi.tree.TreeSession
 
 /**
  * Screen and keyguard control. Waking prefers the helper's `KEYCODE_WAKEUP` and falls back to
@@ -42,7 +42,7 @@ class PowerServiceImpl(
     private val context: Context,
     settings: SettingsStore,
     private val seq: StateFlow<Long>,
-    private val a11y: StateFlow<PhoneAccessibilityService?>,
+    private val tree: TreeSession,
     private val state: DeviceStateTracker,
     private val bus: EventBus,
     private val shell: HelperShell,
@@ -97,11 +97,14 @@ class PowerServiceImpl(
     }
 
     override suspend fun lock(): ActionResult = mutex.withLock {
-        val service = a11y.require()
         // Otherwise our own lease would light the screen straight back up.
         lease.release()
-        if (!service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_LOCK_SCREEN)) {
-            throw ApiException(409, "lock_failed", "The system refused to lock the screen")
+        if (!tree.global(AccessibilityService.GLOBAL_ACTION_LOCK_SCREEN)) {
+            throw ApiException(
+                409,
+                "lock_failed",
+                "The helper could not lock the screen. Its automation connection has to be up.",
+            )
         }
         val locked =
             awaitDeviceState(state, bus, LOCK_WAIT_MS) {
@@ -197,13 +200,12 @@ class PowerServiceImpl(
     }
 
     private suspend fun enterPin(pin: String): Attempt {
-        val service = a11y.require()
         val points = ArrayList<Point>()
-        var keypad = scanKeypad(service)
+        var keypad = scanKeypad()
         if (!keypad.covers(pin)) {
             // On most devices the keypad sits behind the lock screen until it is swiped away.
             points += revealBouncer()
-            keypad = scanKeypad(service)
+            keypad = scanKeypad()
         }
         if (!keypad.covers(pin)) {
             return Attempt(ok = false, points = points, message = NO_KEYPAD)
@@ -224,8 +226,10 @@ class PowerServiceImpl(
         }
     }
 
-    private suspend fun scanKeypad(service: AccessibilityService): Keypad =
-        withContext(io) { PinPad.scan(service) }
+    private suspend fun scanKeypad(): Keypad = withContext(io) { tree.pinpad().asKeypad() }
+
+    private fun PinpadKeys.asKeypad(): Keypad =
+        Keypad(digits.mapKeys { (digit, _) -> digit.first() }, submit)
 
     /** Brings up the credential prompt, and returns the points touched doing it. */
     private suspend fun revealBouncer(): List<Point> {

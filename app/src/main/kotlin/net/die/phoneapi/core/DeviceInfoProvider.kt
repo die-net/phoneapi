@@ -16,7 +16,7 @@ class DeviceInfoProvider(
     private val context: Context,
     private val state: DeviceStateTracker,
     private val isHelperRunning: () -> Boolean,
-    private val isA11yConnected: () -> Boolean,
+    private val isUiAutomationConnected: () -> Boolean,
     private val helperStatus: () -> HelperStatus,
     private val helperRecoveredAtMs: () -> Long?,
 ) {
@@ -33,7 +33,7 @@ class DeviceInfoProvider(
             state = state.refresh(),
             helper = helperStatus(),
             helperRecoveredAtMs = helperRecoveredAtMs(),
-            accessibilityConnected = isA11yConnected(),
+            uiAutomationConnected = isUiAutomationConnected(),
             capabilities = capabilities(),
         )
     }
@@ -44,25 +44,19 @@ class DeviceInfoProvider(
     fun capabilities(): Capabilities {
         val sdk = Build.VERSION.SDK_INT
         val helper = isHelperRunning()
-        val a11y = isA11yConnected()
         val secureSettings =
             context.checkSelfPermission(Manifest.permission.WRITE_SECURE_SETTINGS) ==
                 PackageManager.PERMISSION_GRANTED
         return Capabilities(
-            uiSnapshot = a11y,
-            inputA11y = a11y,
+            uiSnapshot = helper,
             inputInject = helper,
-            textIme = a11y && sdk >= Build.VERSION_CODES.TIRAMISU,
             textKeyevent = helper,
-            screenshotA11y = a11y && sdk >= Build.VERSION_CODES.R,
             screenshotHelper = helper,
             uiStableIds = sdk >= Build.VERSION_CODES.TIRAMISU,
             appsManage = helper,
             logcatAll = helper,
             browserCdp = helper,
-            streamVideoProjection = false,
             streamVideoMirror = helper,
-            streamAudioPlaybackCapture = false,
             streamAudioSubmix = helper && sdk >= Build.VERSION_CODES.R,
             encoderLowLatency = sdk >= Build.VERSION_CODES.R,
             adbWireless = sdk >= Build.VERSION_CODES.R,

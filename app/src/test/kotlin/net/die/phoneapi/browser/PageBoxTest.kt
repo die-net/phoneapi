@@ -37,9 +37,10 @@ class PageBoxTest {
     }
 
     @Test
-    fun `subtracts the scroll offset`() {
+    fun `ignores document scroll`() {
+        // getContentQuads is already in the visual viewport. pageY is the document scroll.
         val box = screenTarget(quads(), metrics(pageY = 400.0), CONTENT)
-        assertEquals(Rect(435, 424, 647, 491), box)
+        assertEquals(Rect(435, 1474, 647, 1541), box)
     }
 
     private fun quads() =

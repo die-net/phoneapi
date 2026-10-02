@@ -73,7 +73,7 @@ internal class CdpSession(
             throw ApiException(
                 502,
                 "cdp_error",
-                e.message ?: "DevTools connection failed",
+                e.message?.takeIf { it.isNotBlank() } ?: DEVTOOLS_CLOSED,
                 cause = e,
             )
         }

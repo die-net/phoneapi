@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
+import android.util.Log
 import androidx.core.net.toUri
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.StateFlow
@@ -54,7 +55,7 @@ class AppsServiceImpl(
         val woke = prepare(true, false)
         val intent = launchIntent(packageName, request)
         start(intent)
-        val arrived = !request.wait || awaitForeground(packageName)
+        val arrived = foreground(intent, packageName, request.wait)
         invalidateSnapshots()
         return ActionResult(
             ok = arrived,
@@ -75,11 +76,8 @@ class AppsServiceImpl(
         val woke = prepare(true, false)
         val intent = buildIntent(request)
         start(intent)
-        // Null once the target is showing, or when the intent doesn't name a package to wait for.
-        val missing =
-            (request.packageName ?: intent.component?.packageName)?.takeIf {
-                !awaitForeground(it)
-            }
+        val packageName = request.packageName ?: intent.component?.packageName
+        val missing = packageName?.takeIf { !foreground(intent, it, wait = true) }
         invalidateSnapshots()
         return ActionResult(
             ok = missing == null,
@@ -173,6 +171,24 @@ class AppsServiceImpl(
         }
     }
 
+    private suspend fun foreground(intent: Intent, packageName: String, wait: Boolean): Boolean {
+        if (!wait) return true
+        if (awaitForeground(packageName)) return true
+        if (!startFromShell(intent)) return false
+        return awaitForeground(packageName)
+    }
+
+    /** Background activity starts are blocked. The helper's shell is allowed to start the app. */
+    private suspend fun startFromShell(intent: Intent): Boolean {
+        val component = intent.component?.flattenToShortString() ?: return false
+        return try {
+            shell.exec(listOf("am", "start", "-n", component)).ok
+        } catch (e: ApiException) {
+            Log.i(TAG, "Could not start $component from the helper", e)
+            false
+        }
+    }
+
     private suspend fun awaitForeground(packageName: String): Boolean =
         awaitDeviceState(state, bus, FOREGROUND_WAIT_MS) {
             it.foregroundPackage == packageName
@@ -218,9 +234,16 @@ class AppsServiceImpl(
             null
         }
 
-    private fun notForeground(intent: Intent, packageName: String) =
-        "Started ${describe(intent)}, but $packageName did not come to the foreground. Android " +
-            "blocks background activity starts for some apps; check /v1/ui/snapshot."
+    private fun notForeground(intent: Intent, packageName: String): String {
+        val started =
+            "Started ${describe(intent)}, but $packageName did not come to the foreground."
+        return if (shell.isAvailable) {
+            "$started The helper's am start did not bring it forward either."
+        } else {
+            "$started The shell helper is not running, so PhoneAPI could not retry with am " +
+                "start. Android blocks this app from starting activities in the background."
+        }
+    }
 
     private fun describe(intent: Intent): String =
         intent.component?.flattenToShortString() ?: intent.`package` ?: intent.action.orEmpty()
@@ -229,6 +252,7 @@ class AppsServiceImpl(
         if (activity.startsWith(".")) packageName + activity else activity
 
     private companion object {
+        const val TAG = "PhoneApi"
         const val FOREGROUND_WAIT_MS = 5_000L
     }
 }

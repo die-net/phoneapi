@@ -47,6 +47,14 @@ class BrowserServiceTest {
     }
 
     @Test
+    fun `empty sockets name the gap`() {
+        val service = service(byteArrayOf(), sockets = "[]")
+        val error = assertThrows(ApiException::class.java) { runBlocking { service.targets() } }
+        assertEquals("browser_unavailable", error.error)
+        assertTrue(error.message.orEmpty().contains("Start Chrome"))
+    }
+
+    @Test
     fun `rejects a bad url`() {
         val service = service(byteArrayOf(), sockets = CHROME)
         val error =

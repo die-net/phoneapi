@@ -17,13 +17,13 @@ import kotlinx.serialization.json.put
 import net.die.phoneapi.browser.CHROME_SOCKET
 import net.die.phoneapi.browser.CdpEvent
 import net.die.phoneapi.browser.CdpSession
+import net.die.phoneapi.browser.DEVTOOLS_CLOSED
+import net.die.phoneapi.browser.DevtoolsSocket
 import net.die.phoneapi.browser.FrameTreeResult
-import net.die.phoneapi.browser.HelperDevtoolsSocket
 import net.die.phoneapi.browser.decodeCdp
 import net.die.phoneapi.browser.parseBrowserTargetId
 import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.core.BrowserService
-import net.die.phoneapi.helperclient.HelperConnection
 import net.die.phoneapi.model.ElementBy
 import net.die.phoneapi.model.ElementState
 import net.die.phoneapi.model.WaitCondition
@@ -35,7 +35,7 @@ import net.die.phoneapi.model.WaitCondition
 internal class BrowserWatch(
     private val browser: BrowserService,
     private val io: CoroutineDispatcher,
-    private val helper: HelperConnection,
+    private val openDevtools: suspend (String, Long) -> DevtoolsSocket,
 ) {
     private val signals =
         MutableSharedFlow<Unit>(
@@ -45,7 +45,7 @@ internal class BrowserWatch(
     val changes: Flow<Unit> = signals
     private val pages = HashMap<String, PageSession>()
     private val targets = TargetModel()
-    private val sockets = ArrayList<HelperDevtoolsSocket>()
+    private val sockets = ArrayList<DevtoolsSocket>()
     private val sessions = ArrayList<CdpSession>()
     private val jobs = ArrayList<Job>()
     private var defaultId: String? = null
@@ -62,7 +62,7 @@ internal class BrowserWatch(
             throw ApiException(
                 502,
                 "cdp_error",
-                e.message ?: "DevTools connection failed",
+                e.message?.takeIf { it.isNotBlank() } ?: DEVTOOLS_CLOSED,
                 cause = e,
             )
         }
@@ -147,7 +147,10 @@ internal class BrowserWatch(
     private suspend fun resolveDefault(): String {
         val pages = browser.targets().filter { it.type == "page" }
         if (pages.isEmpty()) {
-            throw ApiException.unavailable("browser_unavailable", "Chrome has no open page")
+            throw ApiException.unavailable(
+                "browser_unavailable",
+                "A DevTools socket is open, but it has no page. Open a Chrome tab first.",
+            )
         }
         if (pages.size > 1) {
             throw ApiException.badRequest("Pass target when more than one page is open")
@@ -196,8 +199,8 @@ internal class BrowserWatch(
     }
 
     @Suppress("MissingUseCall") // Closed with the rest of the watch.
-    private fun openSocket(name: String, timeoutMs: Long): HelperDevtoolsSocket {
-        val socket = HelperDevtoolsSocket(helper, name, readTimeoutMs = timeoutMs + SOCKET_SLACK_MS)
+    private suspend fun openSocket(name: String, timeoutMs: Long): DevtoolsSocket {
+        val socket = openDevtools(name, timeoutMs + SOCKET_SLACK_MS)
         sockets += socket
         return socket
     }

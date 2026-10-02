@@ -84,6 +84,8 @@ class HelperStatusNotifier(private val context: Context, private val helper: Hel
 
     private companion object {
         const val CHANNEL = "helper"
-        const val NOTIFICATION_ID = 7
+        // The listener foreground service uses id 7. Sharing it replaces that notification, and
+        // cancel() cannot remove a foreground notification, so the stale text stays up.
+        const val NOTIFICATION_ID = 8
     }
 }

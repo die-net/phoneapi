@@ -206,7 +206,10 @@ internal class VideoStream(
             val started =
                 helper.require().startMirror(surface, width, height, Display.DEFAULT_DISPLAY)
             if (!started) {
-                throw ApiException.unavailable("stream_error", "The helper did not start mirroring")
+                throw ApiException.unavailable(
+                    "stream_error",
+                    "The helper could not start display mirroring. The shell helper has to be running.",
+                )
             }
             activeSpec = spec
             activeWidth = width
@@ -482,7 +485,13 @@ internal class VideoStream(
     }
 
     private fun streamError(error: Throwable): ApiException =
-        ApiException(502, "stream_error", error.message ?: "encoder failed", cause = error)
+        ApiException(
+            502,
+            "stream_error",
+            error.message?.takeIf { it.isNotBlank() }
+                ?: "The shell helper stopped during display mirroring",
+            cause = error,
+        )
 
     /**
      * Frames and a size-change header travel on separate channels so a full frame queue cannot drop

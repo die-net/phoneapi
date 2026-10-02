@@ -12,15 +12,21 @@ method="$1"; path="$2"; body="${3:-}"
 host="$(jq -r '.host | select(. != "") // "127.0.0.1"' "$pairing")"
 port="$(jq -r .port "$pairing")"
 token="$(jq -r .token "$pairing")"
+scheme="$(jq -r '.scheme // "https"' "$pairing")"
 base="$host:$port"
 if [[ "$method" == WS ]]; then
   # Prints each text frame on its own line; stops after $PAPI_WS_SECONDS (default 10).
-  exec uv run -q --with websockets python3 - "wss://$base$path" "$token" "${PAPI_WS_SECONDS:-10}" <<'PY'
+  ws_scheme="ws"
+  if [[ "$scheme" == https ]]; then ws_scheme="wss"; fi
+  exec uv run -q --with websockets python3 - "$ws_scheme://$base$path" "$token" "${PAPI_WS_SECONDS:-10}" "$scheme" <<'PY'
 import asyncio, ssl, sys, websockets
-url, token, secs = sys.argv[1], sys.argv[2], float(sys.argv[3])
+url, token, secs, scheme = sys.argv[1], sys.argv[2], float(sys.argv[3]), sys.argv[4]
 ctx = ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
 async def main():
-    async with websockets.connect(url, ssl=ctx, additional_headers={"Authorization": f"Bearer {token}"}) as ws:
+    kwargs = {"additional_headers": {"Authorization": f"Bearer {token}"}}
+    if scheme == "https":
+        kwargs["ssl"] = ctx
+    async with websockets.connect(url, **kwargs) as ws:
         try:
             async with asyncio.timeout(secs):
                 async for msg in ws:
@@ -30,6 +36,7 @@ async def main():
 asyncio.run(main())
 PY
 fi
-args=(-sk -X "$method" -H "Authorization: Bearer $token" -w '\n%{http_code}\n')
+args=(-s -X "$method" -H "Authorization: Bearer $token" -w '\n%{http_code}\n')
+if [[ "$scheme" == https ]]; then args+=(-k); fi
 if [[ -n "$body" ]]; then args+=(-H 'Content-Type: application/json' -d "$body"); fi
-curl "${args[@]}" "https://$base$path"
+curl "${args[@]}" "$scheme://$base$path"

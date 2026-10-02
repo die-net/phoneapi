@@ -21,7 +21,8 @@ import net.die.phoneapi.model.ScreenState
 
 /**
  * Tracks screen, keyguard, IME and foreground-package state. Screen and keyguard come from system
- * services and broadcasts; IME and foreground package are pushed by the accessibility service.
+ * services and broadcasts. IME and foreground package are pushed by the helper's UiAutomation
+ * session.
  */
 class DeviceStateTracker(private val context: Context, private val bus: EventBus) {
     private val power = context.getSystemService(PowerManager::class.java)

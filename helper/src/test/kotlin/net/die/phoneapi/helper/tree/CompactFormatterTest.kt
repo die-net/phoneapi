@@ -1,4 +1,4 @@
-package net.die.phoneapi.a11y
+package net.die.phoneapi.helper.tree
 
 import net.die.phoneapi.model.DeviceStateSummary
 import net.die.phoneapi.model.ImeState
@@ -102,6 +102,13 @@ class CompactFormatterTest {
             "  [e5] switch \"Wi-Fi\" (540,630) {clickable,unchecked,obscured} actions:expand,Delete",
             line,
         )
+    }
+
+    @Test
+    fun `content description is labeled`() {
+        val button = node("e8", role = "button", desc = "Apps list", states = listOf("clickable"))
+        val line = CompactFormatter.format("#", listOf(window(button))).lines()[2]
+        assertEquals("""  [e8] button desc:"Apps list" (540,630) {clickable}""", line)
     }
 
     @Test

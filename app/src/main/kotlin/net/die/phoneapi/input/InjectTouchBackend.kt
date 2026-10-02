@@ -1,5 +1,6 @@
 package net.die.phoneapi.input
 
+import android.os.RemoteException
 import android.os.SystemClock
 import android.view.InputDevice
 import android.view.MotionEvent
@@ -37,7 +38,12 @@ class InjectTouchBackend(
 
     override suspend fun perform(pointers: List<List<TimedPoint>>): Boolean = gestures.withLock {
         val proxy = helper.require()
-        val device = touchscreen(proxy)
+        val device =
+            try {
+                touchscreen(proxy)
+            } catch (e: RemoteException) {
+                throw ApiException.helperDropped(e)
+            }
         val samples =
             try {
                 touchTimeline(pointers)
@@ -55,6 +61,8 @@ class InjectTouchBackend(
                 }
                 ok
             }
+        } catch (e: RemoteException) {
+            throw ApiException.helperDropped(e)
         } finally {
             events.forEach { it.recycle() }
         }

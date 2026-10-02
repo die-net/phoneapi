@@ -1,18 +1,18 @@
 package net.die.phoneapi.browser
 
 import kotlin.coroutines.CoroutineContext
-import net.die.phoneapi.helperclient.HelperConnection
 import net.die.phoneapi.server.CdpPipe
 import net.die.phoneapi.server.CdpPipes
 
-/** Opens a target's DevTools socket through the helper and relays it as a [CdpPipe]. */
+/** Opens a target's DevTools socket and relays it as a [CdpPipe]. */
 internal class HelperCdpPipes(
-    private val helper: HelperConnection,
+    private val openSocket: suspend (String, Long) -> DevtoolsSocket,
     private val io: CoroutineContext,
 ) : CdpPipes {
+    @Suppress("MissingUseCall") // HelperCdpPipe.close closes the socket.
     override suspend fun open(targetId: String): CdpPipe {
         val (socket, chromeId) = parseBrowserTargetId(targetId)
-        val devtools = HelperDevtoolsSocket(helper, socket, readTimeoutMs = 0)
+        val devtools = openSocket(socket, 0)
         val chrome = ChromeSocket(devtools.input, devtools.output, io)
         return HelperCdpPipe(chrome, devtools, "/devtools/page/$chromeId")
     }
@@ -20,7 +20,7 @@ internal class HelperCdpPipes(
 
 private class HelperCdpPipe(
     private val chrome: ChromeSocket,
-    private val devtools: HelperDevtoolsSocket,
+    private val devtools: DevtoolsSocket,
     private val path: String,
 ) : CdpPipe {
     override fun handshake() = chrome.handshake(path)

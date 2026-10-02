@@ -17,6 +17,7 @@ import net.die.phoneapi.core.ScreenshotScale
 import net.die.phoneapi.core.SnapshotOptions
 import net.die.phoneapi.core.checkLogTag
 import net.die.phoneapi.core.windowId
+import net.die.phoneapi.helperclient.failureMessage
 import net.die.phoneapi.model.ActionMode
 import net.die.phoneapi.model.BrowserTapRequest
 import net.die.phoneapi.model.ConsoleRequest
@@ -271,12 +272,29 @@ internal suspend fun logcatTail(
     }
     val tag = args.tag
     if (tag != null) checkLogTag(tag, "tag")
-    val argv = mutableListOf("logcat", "-d", "-t", args.lines.toString())
-    if (tag != null) argv += "$tag:I"
+    // `-t N` counts raw buffer lines, then the tag filter runs, so a tag plus a small N
+    // returns nothing. Dump the tag and keep the last N matching lines instead.
+    val argv =
+        if (tag == null) {
+            listOf("logcat", "-d", "-t", args.lines.toString())
+        } else {
+            listOf("logcat", "-d", "-s", "$tag:I")
+        }
     val result = services.shell(argv)
-    if (!result.ok) throw ApiException(503, "helper_error", result.stderr.ifBlank { result.stdout })
-    result.stdout
+    if (!result.ok) {
+        val detail = result.failureMessage().ifBlank { "logcat exited ${result.exit}" }
+        throw ApiException(503, "helper_error", detail)
+    }
+    if (tag == null) result.stdout else tailLines(result.stdout, args.lines)
 }
+
+private fun tailLines(stdout: String, lines: Int): String =
+    stdout
+        .lineSequence()
+        .filter { it.isNotBlank() && !it.startsWith("---------") }
+        .toList()
+        .takeLast(lines)
+        .joinToString("\n")
 
 private suspend fun runTool(block: suspend () -> String): CallToolResult =
     try {

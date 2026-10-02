@@ -28,5 +28,7 @@ class PhoneApiApp : Application() {
         @SuppressLint("StaticFieldLeak")
         lateinit var graph: AppGraph
             private set
+
+        fun graphOrNull(): AppGraph? = if (this::graph.isInitialized) graph else null
     }
 }

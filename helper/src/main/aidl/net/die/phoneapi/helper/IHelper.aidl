@@ -4,6 +4,7 @@ import android.os.ParcelFileDescriptor;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.Surface;
+import net.die.phoneapi.helper.ITreeClient;
 import net.die.phoneapi.helper.ShellResult;
 import net.die.phoneapi.helper.TouchscreenInfo;
 
@@ -48,6 +49,11 @@ interface IHelper {
     ParcelFileDescriptor startAudioCapture(int sampleRate, int channels) = 42;
 
     void stopAudioCapture() = 43;
+
+    // UI tree. payload and the return value are JSON. Errors are JSON too, with status != 200.
+    void setTreeClient(ITreeClient client) = 50;
+
+    String tree(String op, String payload) = 51;
 
     oneway void shutdown() = 99;
 }

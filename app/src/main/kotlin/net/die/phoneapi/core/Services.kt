@@ -18,7 +18,6 @@ import net.die.phoneapi.model.KeyRequest
 import net.die.phoneapi.model.LaunchRequest
 import net.die.phoneapi.model.NodeActionRequest
 import net.die.phoneapi.model.Scope
-import net.die.phoneapi.model.SnapshotFormat
 import net.die.phoneapi.model.SwipeRequest
 import net.die.phoneapi.model.TapRequest
 import net.die.phoneapi.model.TextRequest
@@ -30,15 +29,7 @@ import net.die.phoneapi.model.WaitResult
 // Shared by the REST routes and the MCP tools. Implementations throw ApiException for
 // client-visible failures.
 
-data class SnapshotOptions(
-    val format: SnapshotFormat = SnapshotFormat.COMPACT,
-    val windowId: Int? = null,
-    val maxDepth: Int? = null,
-    val includeInvisible: Boolean = false,
-    /** Include every window, not just the ones that are interesting to act on. */
-    val allWindows: Boolean = false,
-    val autoWake: Boolean = true,
-)
+typealias SnapshotOptions = net.die.phoneapi.model.SnapshotOptions
 
 interface UiService {
     suspend fun snapshot(options: SnapshotOptions): UiSnapshot

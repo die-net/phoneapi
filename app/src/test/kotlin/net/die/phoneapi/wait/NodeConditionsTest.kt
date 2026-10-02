@@ -1,6 +1,6 @@
 package net.die.phoneapi.wait
 
-import net.die.phoneapi.a11y.UiStates
+import net.die.phoneapi.helper.tree.UiStates
 import net.die.phoneapi.model.NodeState
 import net.die.phoneapi.model.Rect
 import net.die.phoneapi.model.UiNode

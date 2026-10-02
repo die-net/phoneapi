@@ -19,19 +19,12 @@ interface TouchBackend {
     suspend fun perform(pointers: List<List<TimedPoint>>): Boolean
 }
 
-/**
- * Picks a touch backend per request. `auto` uses [inject] while it is available, and accessibility
- * gestures otherwise.
- */
-class TouchBackends(private val a11y: TouchBackend, private val inject: TouchBackend) {
+/** Picks a touch backend per request. Touches go through helper injection. */
+class TouchBackends(private val inject: TouchBackend) {
     fun select(requested: InputBackend): TouchBackend =
         when (requested) {
-            InputBackend.AUTO -> inject.takeIf { it.isAvailable } ?: requireA11y()
+            InputBackend.AUTO,
             InputBackend.INJECT ->
                 inject.takeIf { it.isAvailable } ?: throw ApiException.helperUnavailable()
-            InputBackend.A11Y -> requireA11y()
         }
-
-    private fun requireA11y(): TouchBackend =
-        a11y.takeIf { it.isAvailable } ?: throw ApiException.a11yUnavailable()
 }
