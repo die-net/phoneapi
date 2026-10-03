@@ -4,6 +4,9 @@ import androidx.core.util.AtomicFile
 import java.io.File
 import java.security.MessageDigest
 import java.security.SecureRandom
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.serializer
 import net.die.phoneapi.core.ApiJson
@@ -35,6 +38,9 @@ class TokenStore(dir: File) : TokenGateway {
     private var tokens: List<Stored> = emptyList()
     private var loaded = false
     private var lastPersistMs = 0L
+    private val _revision = MutableStateFlow(0)
+    /** Bumps when the token set changes so the settings UI can refresh. */
+    val revision: StateFlow<Int> = _revision.asStateFlow()
 
     @Synchronized
     override fun list(): List<TokenInfo> {
@@ -62,6 +68,7 @@ class TokenStore(dir: File) : TokenGateway {
             )
         tokens = tokens + stored
         persist()
+        bumpRevision()
         return CreatedToken(stored.info(), secret)
     }
 
@@ -78,8 +85,10 @@ class TokenStore(dir: File) : TokenGateway {
         ensureLoaded()
         val before = tokens.size
         tokens = tokens.filterNot { it.id == id }
-        if (tokens.size != before) persist()
-        return tokens.size != before
+        if (tokens.size == before) return false
+        persist()
+        bumpRevision()
+        return true
     }
 
     /** Returns the token's info if [secret] is valid, updating its last-used time. */
@@ -108,6 +117,10 @@ class TokenStore(dir: File) : TokenGateway {
         lastPersistMs = System.currentTimeMillis()
         val text = ApiJson.encodeToString(serializer, tokens)
         StoreIo.call { atomic.writeUtf8(text) }
+    }
+
+    private fun bumpRevision() {
+        _revision.value += 1
     }
 
     private fun Stored.info() = TokenInfo(id, name, scopes, createdAtMs, lastUsedAtMs)

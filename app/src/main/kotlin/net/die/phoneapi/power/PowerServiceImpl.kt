@@ -298,9 +298,7 @@ class PowerServiceImpl(
         const val SWIPE_TO = 0.2f
 
         const val NO_PIN =
-            "The lock screen is secure and no PIN is stored. PUT /v1/device/pin with admin " +
-                "scope, or provision one over ADB with `am broadcast -a net.die.phoneapi.SET_PIN " +
-                "--es pin <pin>`. Otherwise unlock the phone by hand."
+            """The lock screen is secure and no PIN is stored. Store one with `phoneapi papi PUT /v1/device/pin '{"pin":"…"}'` (admin scope), or unlock the phone by hand."""
         const val NO_KEYPAD =
             "No PIN keypad was found on the lock screen; a pattern or password lock cannot be " +
                 "entered automatically."

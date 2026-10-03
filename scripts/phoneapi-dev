@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# phoneapi-dev wraps phoneapi with repo/debug defaults and adds setup.
+
+set -Eeuo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO="$(cd "$HERE/.." && pwd)"
+export PHONEAPI_PKG="${PHONEAPI_PKG:-net.die.phoneapi.dev}"
+export PAPI_PAIRING="${PAPI_PAIRING:-$REPO/.dev/pairing.json}"
+
+# shellcheck source=phoneapi disable=SC1091
+source "$HERE/phoneapi"
+
+# Overwrites USAGE from phoneapi; read by usage() defined there.
+# shellcheck disable=SC2034
+USAGE="\
+Usage: $(basename "$0") <command> [<options>]
+    pair      - Mint a token and save the pairing file
+    server    - Expose the on-device PhoneAPI server on localhost
+    mcp       - Run as a stdio MCP client
+    papi      - Call the HTTP/WebSocket API
+    helper    - Start the listener and shell helper over ADB
+    setup     - Build, install, pair, and start the helper
+    help      - Display this text
+"
+
+# shellcheck disable=SC2317
+command:setup() {
+    needs adb
+
+    local PKG="$PHONEAPI_PKG"
+    local build=1
+    local arg
+
+    for arg in "$@"; do
+        case "$arg" in
+            --no-build) build=0 ;;
+            *) die "unknown arg $arg" ;;
+        esac
+    done
+
+    export JAVA_HOME="${JAVA_HOME:-/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home}"
+    export ANDROID_HOME="${ANDROID_HOME:-/opt/homebrew/share/android-commandlinetools}"
+    export PATH="$ANDROID_HOME/platform-tools:$PATH"
+
+    cd "$REPO"
+
+    if [[ $build == 1 ]]; then
+        ./gradlew assembleDebug -q --console=plain
+    fi
+
+    adb wait-for-device
+    until [[ "$(adb shell getprop sys.boot_completed | tr -d '\r')" == 1 ]]; do sleep 1; done
+    adb install -r -g app/build/outputs/apk/debug/app-debug.apk >/dev/null
+    adb shell pm grant "$PKG" android.permission.WRITE_SECURE_SETTINGS
+
+    mkdir -p "$(dirname "$PAPI_PAIRING")"
+    command:pair --name dev-setup
+    command:server
+
+    # Shell helper: input injection, screencap, and privileged app commands. It detaches and returns.
+    command:helper "$PKG" || echo "Helper did not start. Snapshots, input, and browser calls need it." >&2
+    echo "Ready (pairing in $PAPI_PAIRING; use 'scripts/phoneapi-dev papi')"
+}
+
+main "$@"

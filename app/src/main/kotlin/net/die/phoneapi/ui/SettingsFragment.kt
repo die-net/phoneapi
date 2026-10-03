@@ -63,7 +63,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 launch { watchControls() }
-                launch { refreshTokens() }
+                launch { graph.tokens.revision.collect { refreshTokens() } }
             }
         }
     }
@@ -119,22 +119,20 @@ class SettingsFragment : PreferenceFragmentCompat() {
         pair.isSelectable = !controls.paired
     }
 
-    private fun refreshTokens() {
-        viewLifecycleOwner.lifecycleScope.launch {
-            val infos = withContext(graph.ioDispatcher) { graph.tokens.list() }
-            val category = findPreference<PreferenceCategory>(KEY_TOKENS) ?: return@launch
-            category.removeAll()
-            if (infos.isEmpty()) {
-                category.addPreference(
-                    Preference(preferenceManager.context).apply {
-                        title = getString(R.string.tokens_none)
-                        isSelectable = false
-                    }
-                )
-                return@launch
-            }
-            infos.forEach { info -> category.addPreference(tokenPreference(info)) }
+    private suspend fun refreshTokens() {
+        val infos = withContext(graph.ioDispatcher) { graph.tokens.list() }
+        val category = findPreference<PreferenceCategory>(KEY_TOKENS) ?: return
+        category.removeAll()
+        if (infos.isEmpty()) {
+            category.addPreference(
+                Preference(preferenceManager.context).apply {
+                    title = getString(R.string.tokens_none)
+                    isSelectable = false
+                }
+            )
+            return
         }
+        infos.forEach { info -> category.addPreference(tokenPreference(info)) }
     }
 
     private fun tokenPreference(info: TokenInfo) =
@@ -145,7 +143,6 @@ class SettingsFragment : PreferenceFragmentCompat() {
             setOnPreferenceClickListener {
                 viewLifecycleOwner.lifecycleScope.launch {
                     withContext(graph.ioDispatcher) { graph.tokens.revoke(info.id) }
-                    refreshTokens()
                 }
                 true
             }

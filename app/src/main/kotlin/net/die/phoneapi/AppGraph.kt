@@ -297,7 +297,9 @@ class AppGraph(
         return "http://127.0.0.1:$port/viewer?access_token=TOKEN\n" +
             "Replace TOKEN with this device's bearer token. " +
             "The query parameter is accepted only by GET /viewer and by WebSocket upgrades. " +
-            "Forward the abstract socket first: adb forward tcp:$port localabstract:${context.packageName}."
+            "Expose the server on the computer first with `phoneapi server` " +
+            "(or `phoneapi pair` to mint a token). " +
+            "Expected local port $port for package ${context.packageName}."
     }
 
     private companion object {

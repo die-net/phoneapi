@@ -14,16 +14,13 @@ import net.die.phoneapi.model.Scope
  * Host-side provisioning over ADB. Protected by `android.permission.DUMP`, which only shell and
  * root hold, so other apps cannot mint tokens.
  *
- * ```
- * adb shell am broadcast -a net.die.phoneapi.CREATE_TOKEN -n <pkg>/net.die.phoneapi.ShellCommandReceiver --es name laptop --es scopes observe,control
- * adb shell am broadcast -a net.die.phoneapi.SET_PIN -n <pkg>/net.die.phoneapi.ShellCommandReceiver --es pin 1234
- * adb shell am broadcast -a net.die.phoneapi.PAIR_ADB -n <pkg>/net.die.phoneapi.ShellCommandReceiver --es code 123456 --ei port 37123
- * ```
+ * Prefer the host client: `phoneapi pair` for [ACTION_CREATE_TOKEN]. Set or clear the PIN with
+ * `PUT|DELETE /v1/device/pin` (admin scope). Pair wireless debugging from the app UI
+ * ([ACTION_PAIR_ADB] is what that flow sends).
  *
  * The result data is the pairing JSON for `CREATE_TOKEN`. Omitting `scopes` grants every scope.
  * `SET_PIN` with no `pin` clears it. A bad extra returns result code 1 and a short message; success
- * is result code 0. The same PIN store is writable over `PUT|DELETE /v1/device/pin` (admin scope);
- * neither path returns the PIN.
+ * is result code 0. Neither PIN path returns the PIN.
  */
 class ShellCommandReceiver : BroadcastReceiver() {
     @Suppress("TooGenericExceptionCaught") // A bad extra must not crash the app process.
@@ -116,10 +113,9 @@ class ShellCommandReceiver : BroadcastReceiver() {
 
         private val ACTIONS = setOf(ACTION_CREATE_TOKEN, ACTION_SET_PIN, ACTION_PAIR_ADB)
 
-        /** The host command that mints a token over ADB and prints the pairing JSON. */
+        /** The host command that mints a token and prints the pairing JSON. */
         fun createTokenCommand(packageName: String): String =
-            "adb shell am broadcast -a $ACTION_CREATE_TOKEN " +
-                "-n $packageName/${ShellCommandReceiver::class.java.name} --es name laptop"
+            "PHONEAPI_PKG=$packageName phoneapi pair --name laptop"
     }
 }
 

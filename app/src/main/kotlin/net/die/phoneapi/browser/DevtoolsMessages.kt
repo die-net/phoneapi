@@ -19,8 +19,8 @@ internal const val DEVTOOLS_CLOSED =
 
 internal fun usbTunnelMessage(socketName: String): String =
     "Android 10 reaches DevTools over USB. On the computer run " +
-        "`adb forward tcp:$USB_DEVTOOLS_PORT localabstract:$socketName` and " +
-        "`adb reverse localabstract:$USB_DEVTOOLS_SOCKET tcp:$USB_DEVTOOLS_PORT`."
+        "`phoneapi helper` so it can forward $socketName and reverse " +
+        "$USB_DEVTOOLS_SOCKET (port $USB_DEVTOOLS_PORT)."
 
 /** Why a browser call found nothing to attach to. */
 internal enum class BrowserGap {

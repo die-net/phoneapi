@@ -1,0 +1,292 @@
+#!/usr/bin/env bash
+# phoneapi is the client for interacting with the PhoneAPI android app.
+# Relocatable: copy to ~/bin or /usr/local/bin. Defaults to the release package and
+# stores pairing state under ${XDG_CONFIG_HOME:-$HOME/.config}/phoneapi.
+
+set -Eeuo pipefail
+
+USAGE="\
+Usage: $(basename "$0") <command> [<options>]
+    pair      - Mint a token and save the pairing file
+    server    - Expose the on-device PhoneAPI server on localhost
+    mcp       - Run as a stdio MCP client
+    papi      - Call the HTTP/WebSocket API
+    helper    - Start the listener and shell helper over ADB
+    help      - Display this text
+"
+
+PHONEAPI_PKG="${PHONEAPI_PKG:-net.die.phoneapi}"
+PHONEAPI_STATE="${PHONEAPI_STATE:-${XDG_CONFIG_HOME:-$HOME/.config}/phoneapi}"
+PAPI_PAIRING="${PAPI_PAIRING:-$PHONEAPI_STATE/pairing.json}"
+
+# Make sure we can have more than a few open files.  The Mac's default is 256.
+ulimit -Sn 4096
+
+main() {
+    local command
+
+    [[ $# -ge 1 ]] \
+        || usage "Missing sub-command"
+
+    [[ $1 =~ ^[-_[:alnum:]]+$ ]] \
+        || usage "'$1' is improper sub-command format"
+
+    command=$1
+    shift
+
+    type "command:$command" &>/dev/null \
+        || usage "'$command' is an invalid sub-command"
+
+    (
+        set +u
+        "command:$command" "$@"
+    )
+}
+
+# shellcheck disable=SC2317
+command:pair() {
+    needs adb
+
+    local PKG="$PHONEAPI_PKG"
+    local RECEIVER="$PKG/net.die.phoneapi.ShellCommandReceiver"
+    local name out json port
+    name="$(hostname -s 2>/dev/null || hostname)"
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --name)
+                name="${2:?--name needs a value}"
+                shift 2
+                ;;
+            *) die "unknown arg $1" ;;
+        esac
+    done
+    # adb shell joins arguments into one remote command line, so keep the name shell-safe.
+    name="${name//[^A-Za-z0-9._-]/-}"
+
+    out="$(adb shell am broadcast -n "$RECEIVER" -a net.die.phoneapi.CREATE_TOKEN --es name "$name" | tr -d '\r')"
+    json="$(sed -n 's/.*result=0, data="\(.*\)"$/\1/p' <<<"$out")"
+    if [[ -z $json ]]; then
+        die "CREATE_TOKEN failed. Is PhoneAPI installed as $PKG?"
+    fi
+    port="$(sed -n 's/.*"port":\([0-9]*\).*/\1/p' <<<"$json")"
+    if [[ -z $port ]]; then
+        die "CREATE_TOKEN returned no port"
+    fi
+
+    json="$(sed -e 's/"host":"[^"]*"/"host":"127.0.0.1"/' -e 's/^{/{"scheme":"http",/' <<<"$json")"
+
+    mkdir -p "$(dirname "$PAPI_PAIRING")"
+    printf '%s\n' "$json" >"$PAPI_PAIRING"
+    echo "Paired as $name (port $port). Saved to $PAPI_PAIRING. Run '$(basename "$0") server' to expose it." >&2
+}
+
+# shellcheck disable=SC2317
+command:server() {
+    needs adb
+    needs jq
+
+    local PKG="$PHONEAPI_PKG"
+    load_pairing
+    forward_api "$PAIRING_PORT" "$PKG"
+    echo "PhoneAPI at http://127.0.0.1:$PAIRING_PORT (package $PKG)." >&2
+}
+
+# shellcheck disable=SC2317
+command:mcp() {
+    needs jq
+    needs curl
+
+    local host port token scheme url_host url tmp protocol_version request_id
+    local -a curl_args
+    local http_code ver
+
+    load_pairing
+    host="$PAIRING_HOST"
+    port="$PAIRING_PORT"
+    token="$PAIRING_TOKEN"
+    scheme="$PAIRING_SCHEME"
+
+    case "$host" in
+        localhost | 127.0.0.1 | ::1) ;;
+        *)
+            echo "phoneapi mcp: $host is not a loopback address. /mcp rejects other Host values unless allowedHosts is set. Use 'phoneapi pair'." >&2
+            ;;
+    esac
+
+    if [[ $host == *:* && $host != \[* ]]; then
+        url_host="[$host]"
+    else
+        url_host="$host"
+    fi
+    url="${scheme}://${url_host}:${port}/mcp"
+
+    tmp="$(mktemp)"
+    trap 'rm -f "$tmp"' EXIT
+    protocol_version=""
+    request_id=""
+
+    echo "phoneapi mcp: $url" >&2
+
+    reply_error() {
+        [[ -z $request_id ]] && return 0
+        jq -cn --argjson id "$request_id" --arg message "$1" \
+            '{jsonrpc:"2.0",id:$id,error:{code:-32000,message:$message}}'
+    }
+
+    while IFS= read -r line || [[ -n $line ]]; do
+        [[ $line =~ [^[:space:]] ]] || continue
+        if ! request_id="$(jq -c 'select(type == "object" and has("id") and .id != null) | .id' <<<"$line")"; then
+            echo "phoneapi mcp: ignoring a line that is not JSON" >&2
+            request_id=""
+            continue
+        fi
+
+        : >"$tmp"
+        curl_args=(
+            --silent
+            --show-error
+            --http1.1
+            --connect-timeout 10
+            -H "Authorization: Bearer $token"
+            -H "Content-Type: application/json"
+            -H "Accept: application/json, text/event-stream"
+        )
+        if [[ -n $protocol_version ]]; then
+            curl_args+=(-H "MCP-Protocol-Version: $protocol_version")
+        fi
+        curl_args+=(--output "$tmp" --write-out '%{http_code}' --data-binary @- "$url")
+
+        http_code="000"
+        if ! http_code="$(curl "${curl_args[@]}" <<<"$line")"; then
+            reply_error "PhoneAPI request failed (HTTP ${http_code:-000})"
+            continue
+        fi
+        if [[ $http_code == "202" || ! -s $tmp ]]; then
+            if [[ $http_code != "202" ]]; then
+                reply_error "PhoneAPI returned HTTP $http_code with an empty body"
+            fi
+            continue
+        fi
+        if ! jq -c . "$tmp"; then
+            reply_error "PhoneAPI returned HTTP $http_code with a non-JSON body"
+            continue
+        fi
+        ver="$(jq -r 'select(.result.protocolVersion != null) | .result.protocolVersion' "$tmp")"
+        if [[ -n $ver && $ver != null ]]; then
+            protocol_version="$ver"
+        fi
+    done
+}
+
+# shellcheck disable=SC2317
+command:papi() {
+    needs jq
+    needs curl
+
+    local method path body host port token scheme base ws_scheme
+    local -a args
+
+    [[ $# -ge 2 ]] || usage "papi needs METHOD and PATH"
+
+    method="$1"
+    path="$2"
+    body="${3:-}"
+
+    load_pairing
+    host="$PAIRING_HOST"
+    port="$PAIRING_PORT"
+    token="$PAIRING_TOKEN"
+    scheme="$PAIRING_SCHEME"
+    base="$host:$port"
+
+    if [[ $method == WS ]]; then
+        needs uv
+        # Prints each text frame on its own line; stops after $PAPI_WS_SECONDS (default 10).
+        ws_scheme="ws"
+        if [[ $scheme == https ]]; then ws_scheme="wss"; fi
+        exec uv run -q --with websockets python3 - "$ws_scheme://$base$path" "$token" "${PAPI_WS_SECONDS:-10}" <<'PY'
+import asyncio, sys, websockets
+url, token, secs = sys.argv[1], sys.argv[2], float(sys.argv[3])
+async def main():
+    async with websockets.connect(
+        url, additional_headers={"Authorization": f"Bearer {token}"}
+    ) as ws:
+        try:
+            async with asyncio.timeout(secs):
+                async for msg in ws:
+                    print(msg, flush=True)
+        except TimeoutError:
+            pass
+asyncio.run(main())
+PY
+    fi
+    args=(-s -X "$method" -H "Authorization: Bearer $token" -w '\n%{http_code}\n')
+    if [[ -n $body ]]; then args+=(-H 'Content-Type: application/json' -d "$body"); fi
+    curl "${args[@]}" "$scheme://$base$path"
+}
+
+# shellcheck disable=SC2317
+command:helper() {
+    needs adb
+
+    local PKG="${1:-$PHONEAPI_PKG}"
+    local sdk
+    adb shell am start-foreground-service -n "$PKG/net.die.phoneapi.server.ListenerService" >/dev/null
+    adb shell "CLASSPATH=\$(pm path $PKG | tr -d '\r' | sed -e s/^package:// | tr '\n' ':') app_process / net.die.phoneapi.helper.Main --pkg $PKG"
+    # Android 10 has no wireless-debugging port. The helper connects to this reverse socket;
+    # the forward is what actually opens Chrome. Names match USB_DEVTOOLS_SOCKET / PORT.
+    sdk="$(adb shell getprop ro.build.version.sdk | tr -d '\r')"
+    if [[ $sdk -lt 30 ]]; then
+        adb forward tcp:9222 localabstract:chrome_devtools_remote >/dev/null
+        adb reverse localabstract:phoneapi_cdp tcp:9222 >/dev/null
+    fi
+    echo "Helper start command returned. Check logcat for PhoneApiHelper."
+}
+
+# shellcheck disable=SC2317
+command:help() {
+    usage
+}
+
+# Sets PAIRING_FILE, PAIRING_HOST, PAIRING_PORT, PAIRING_TOKEN, PAIRING_SCHEME.
+load_pairing() {
+    PAIRING_FILE="$(realpath "$PAPI_PAIRING")"
+    PAIRING_HOST="$(jq -r '.host | select(. != "") // "127.0.0.1"' "$PAIRING_FILE")"
+    PAIRING_PORT="$(jq -r .port "$PAIRING_FILE")"
+    PAIRING_TOKEN="$(jq -r .token "$PAIRING_FILE")"
+    PAIRING_SCHEME="$(jq -r '.scheme // "http"' "$PAIRING_FILE")"
+    if [[ -z $PAIRING_PORT || $PAIRING_PORT == null || -z $PAIRING_TOKEN || $PAIRING_TOKEN == null ]]; then
+        die "phoneapi: $PAIRING_FILE is missing port or token"
+    fi
+}
+
+# Forwards the app's abstract socket to a loopback TCP port on the host.
+forward_api() {
+    local port=$1 pkg=$2
+    adb forward "tcp:$port" "localabstract:$pkg" >/dev/null
+}
+
+needs() {
+    command -v "$1" >/dev/null || die "$1 isn't available in \$PATH; please install it."
+}
+
+usage() {
+    if [[ -n ${1-} ]]; then
+        echo "Error: $1."
+        echo
+    fi
+
+    echo -n "$USAGE"
+
+    exit 1
+}
+
+die() {
+    # Output my args as individual lines to stderr and exit non-zero
+    printf "%s\n" "$@" 1>&2
+    exit 1
+}
+
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+    main "$@"
+fi

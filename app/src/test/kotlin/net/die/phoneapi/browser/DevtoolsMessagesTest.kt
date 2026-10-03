@@ -9,8 +9,10 @@ class DevtoolsMessagesTest {
     @Test
     fun `android 10 names both tunnels`() {
         val message = usbTunnelMessage(CHROME_SOCKET)
-        assertTrue(message.contains("adb forward tcp:9222 localabstract:$CHROME_SOCKET"))
-        assertTrue(message.contains("adb reverse localabstract:phoneapi_cdp tcp:9222"))
+        assertTrue(message.contains("phoneapi helper"))
+        assertTrue(message.contains(CHROME_SOCKET))
+        assertTrue(message.contains("phoneapi_cdp"))
+        assertTrue(message.contains("9222"))
     }
 
     @Test
