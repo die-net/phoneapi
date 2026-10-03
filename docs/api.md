@@ -180,7 +180,7 @@ Auth: Bearer header or `access_token` on the upgrade URL.
 
 `POST /mcp` is a stateless Streamable HTTP MCP endpoint (same Bearer token; **not** `access_token`). Host header must be `localhost`, `127.0.0.1`, or `::1` unless `allowedHosts` is changed.
 
-For stdio hosts (Cursor, etc.), run `phoneapi mcp`, which forwards one JSON-RPC line at a time to `/mcp`.
+For stdio hosts (Cursor, etc.), run `phoneapi mcp` (with the helper up). It installs the same localhost `adb forward` as `phoneapi server` and relays one JSON-RPC line at a time to `/mcp`. For Streamable HTTP clients, run `phoneapi server` and `POST` to `http://127.0.0.1:<port>/mcp` with the bearer token.
 
 ### Tools
 

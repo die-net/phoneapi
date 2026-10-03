@@ -12,9 +12,9 @@ Android 10 and newer (minSdk 29). Wireless Debugging and helper restart without 
 
 ## Requirements
 
-- A device or emulator with USB debugging
-- `adb`, `jq`, and `curl` on the host
-- [`uv`](https://docs.astral.sh/uv/) only if you use `phoneapi papi WS …`
+- A phone or emulator with USB debugging (and Wireless Debugging on Android 11+ if you want to drop the cable later)
+- On the computer, `adb`, `jq`, and `curl` on your `PATH`. `phoneapi` (pair, server, helper, and the `mcp` bridge) shells out to these. Most machines already have `curl`; `adb` and `jq` usually need a separate install — for example `brew install android-platform-tools jq` on macOS, or [platform-tools](https://developer.android.com/tools/releases/platform-tools) from Google plus your OS package for `jq`
+- An [MCP](https://modelcontextprotocol.io) client (for example Cursor or Claude Code) if you want an agent to drive the phone
 
 ## Install
 
@@ -56,16 +56,6 @@ The saved JSON looks like this (`scheme` `http`, host `127.0.0.1`):
 
 Every request needs `Authorization: Bearer <token>`. Scopes, the `access_token` query exception, token admin, and error shapes are documented in [docs/api.md](docs/api.md).
 
-`phoneapi papi` reads the pairing file (or `$PAPI_PAIRING`):
-
-```sh
-phoneapi papi GET /v1/device
-phoneapi papi POST /v1/input/tap '{"x":540,"y":1200,"humanize":false}'
-phoneapi papi WS /v1/events
-```
-
-`WS` prints text frames for `PAPI_WS_SECONDS` (default 10). HTTP calls print the body and then the status code.
-
 ## Helper
 
 The helper is a separate `app_process` that registers a binder with the app. `/v1/device` reports it as `running`, `starting`, `needs_pairing`, `needs_usb`, or `stopped`. `capabilities` shrinks to what works in the current state.
@@ -94,45 +84,9 @@ Snapshots, injected input, screenshots, logcat, browser routes, and streams need
 
 ## Usage
 
-Read the screen and tap a control:
+Start the helper (`phoneapi helper`), then connect an MCP client in either of these ways. The stdio bridge still needs `adb`, `jq`, and `curl` on the host (see [Requirements](#requirements)).
 
-```sh
-phoneapi papi GET '/v1/ui/snapshot?format=compact'
-phoneapi papi POST /v1/ui/find '{"selector":{"text":"Settings"}}'
-phoneapi papi POST /v1/input/tap '{"selector":{"text":"Settings"}}'
-```
-
-Wait until a window is in front, then launch or stop an app:
-
-```sh
-phoneapi papi POST /v1/wait \
-  '{"all":[{"type":"window","package":"com.android.settings"}],"timeoutMs":10000}'
-phoneapi papi POST /v1/apps/com.android.settings/launch
-phoneapi papi POST /v1/apps/com.android.settings/stop
-```
-
-Drive Chrome (helper up, Chrome publishing `@chrome_devtools_remote`, Wireless Debugging on Android 11+, or the Android 10 USB tunnel). Target ids look like `chrome_devtools_remote~<page id>`:
-
-```sh
-phoneapi papi GET /v1/browser/targets
-phoneapi papi POST /v1/browser/tabs '{"url":"https://example.com/"}'
-phoneapi papi POST /v1/browser/targets/TARGET/navigate '{"url":"https://example.org/"}'
-phoneapi papi GET /v1/browser/targets/TARGET/snapshot
-phoneapi papi POST /v1/browser/targets/TARGET/tap '{"selector":"a"}'
-phoneapi papi POST /v1/browser/targets/TARGET/evaluate '{"expression":"document.title"}'
-```
-
-Open the viewer at `http://127.0.0.1:<port>/viewer` with the stream scope (after `phoneapi server`). It plays `WS /v1/stream/video` and `WS /v1/stream/audio` with WebCodecs.
-
-### MCP
-
-Point an MCP client at `http://127.0.0.1:<port>/mcp` with the same bearer token, or use the stdio bridge:
-
-```sh
-phoneapi mcp
-```
-
-Cursor example:
+- Stdio bridge — run `phoneapi mcp`. The same `mcpServers` entry works in Cursor and in Claude Code (Claude Code: project `.mcp.json`, or user scope in `~/.claude.json`):
 
 ```json
 {
@@ -145,7 +99,17 @@ Cursor example:
 }
 ```
 
-Tool list, resources, scopes, and the OpenAPI document are in [docs/api.md](docs/api.md).
+- Streamable HTTP — run `phoneapi server`, then point the client at `http://127.0.0.1:<port>/mcp` with the same bearer token from the pairing file.
+
+Then ask the agent something concrete, for example:
+
+> On the phone, use Chrome to open https://github.com/die-net/phoneapi/ and go to the Releases page.
+
+Tool list, resources, and scopes are in [docs/api.md](docs/api.md).
+
+### HTTP and WebSocket API
+
+You can also call the REST and WebSocket API directly (`curl`, your own client, or `phoneapi papi` while developing). Run `phoneapi server` first so localhost reaches the on-device socket. Auth, routes, and OpenAPI are in [docs/api.md](docs/api.md). The viewer at `http://127.0.0.1:<port>/viewer` plays video and audio streams with WebCodecs (stream scope).
 
 ## AI Disclosure
 

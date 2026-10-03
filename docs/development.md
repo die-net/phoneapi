@@ -55,11 +55,50 @@ The APK is `app/build/outputs/apk/debug/app-debug.apk`.
 scripts/phoneapi-dev pair --name laptop   # mint a token into .dev/pairing.json
 scripts/phoneapi-dev server               # adb-forward the API to localhost
 scripts/phoneapi-dev helper               # start listener + shell helper
-scripts/phoneapi-dev papi GET /v1/device
 scripts/phoneapi-dev mcp                  # stdio MCP bridge
 ```
 
 Open the app for screen reading and taps, wireless debugging, and the computers that have access.
+
+## Calling the API with phoneapi-dev papi
+
+`phoneapi-dev papi` (or `phoneapi papi` for a release install) reads the pairing file (or `$PAPI_PAIRING`) and issues HTTP or WebSocket calls. HTTP prints the body and then the status code. `WS` prints text frames for `PAPI_WS_SECONDS` (default 10); that path needs [`uv`](https://docs.astral.sh/uv/).
+
+```sh
+scripts/phoneapi-dev papi GET /v1/device
+scripts/phoneapi-dev papi POST /v1/input/tap '{"x":540,"y":1200,"humanize":false}'
+scripts/phoneapi-dev papi WS /v1/events
+```
+
+Read the screen and tap a control:
+
+```sh
+scripts/phoneapi-dev papi GET '/v1/ui/snapshot?format=compact'
+scripts/phoneapi-dev papi POST /v1/ui/find '{"selector":{"text":"Settings"}}'
+scripts/phoneapi-dev papi POST /v1/input/tap '{"selector":{"text":"Settings"}}'
+```
+
+Wait until a window is in front, then launch or stop an app:
+
+```sh
+scripts/phoneapi-dev papi POST /v1/wait \
+  '{"all":[{"type":"window","package":"com.android.settings"}],"timeoutMs":10000}'
+scripts/phoneapi-dev papi POST /v1/apps/com.android.settings/launch
+scripts/phoneapi-dev papi POST /v1/apps/com.android.settings/stop
+```
+
+Drive Chrome (helper up, Chrome publishing `@chrome_devtools_remote`, Wireless Debugging on Android 11+, or the Android 10 USB tunnel). Target ids look like `chrome_devtools_remote~<page id>`:
+
+```sh
+scripts/phoneapi-dev papi GET /v1/browser/targets
+scripts/phoneapi-dev papi POST /v1/browser/tabs '{"url":"https://example.com/"}'
+scripts/phoneapi-dev papi POST /v1/browser/targets/TARGET/navigate '{"url":"https://example.org/"}'
+scripts/phoneapi-dev papi GET /v1/browser/targets/TARGET/snapshot
+scripts/phoneapi-dev papi POST /v1/browser/targets/TARGET/tap '{"selector":"a"}'
+scripts/phoneapi-dev papi POST /v1/browser/targets/TARGET/evaluate '{"expression":"document.title"}'
+```
+
+Full route reference: [api.md](api.md).
 
 ## Checks and tests
 

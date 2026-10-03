@@ -93,14 +93,17 @@ command:server() {
 
 # shellcheck disable=SC2317
 command:mcp() {
+    needs adb
     needs jq
     needs curl
 
     local host port token scheme url_host url tmp protocol_version request_id
     local -a curl_args
     local http_code ver
+    local PKG="$PHONEAPI_PKG"
 
     load_pairing
+    forward_api "$PAIRING_PORT" "$PKG"
     host="$PAIRING_HOST"
     port="$PAIRING_PORT"
     token="$PAIRING_TOKEN"

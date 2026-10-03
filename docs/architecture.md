@@ -91,7 +91,7 @@ The app owns the CDP session policy (compact AX snapshots, humanized taps throug
 | `phoneapi server` | `adb forward` API socket to localhost |
 | `phoneapi helper` | Start listener + helper (and Android 10 CDP tunnel) |
 | `phoneapi papi` | REST / WebSocket calls |
-| `phoneapi mcp` | Stdio MCP ↔ `POST /mcp` |
+| `phoneapi mcp` | Stdio MCP ↔ `POST /mcp` (also installs the localhost forward) |
 | `phoneapi-dev setup` | Debug build/install/grant/pair/server/helper for developers |
 
 Production defaults to package `net.die.phoneapi` and `~/.config/phoneapi/`. Dev defaults to `net.die.phoneapi.dev` and `.dev/pairing.json`.
