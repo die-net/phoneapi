@@ -14,7 +14,9 @@
     <string name="helper_needs_wireless">Off. Turn on wireless debugging first.</string>
     <string name="wireless_switch">Wireless debugging</string>
     <string name="wireless_summary">Lets the phone start screen reading without a USB cable, and lets the computer reach Chrome.</string>
-    <string name="wireless_needs_permission">PhoneAPI can show this, but cannot change it until a computer grants permission.</string>
+    <string name="wireless_state_on">On</string>
+    <string name="wireless_state_off">Off</string>
+    <string name="wireless_needs_permission">%1$s. PhoneAPI needs a one-time adb grant to change this. Tap to open Developer options.</string>
     <string name="wireless_pair">Pair wireless debugging</string>
     <string name="pair_not">Do this once, so the phone can turn on screen reading without a USB cable.</string>
     <string name="pair_yes">Paired. The phone can turn on screen reading without a USB cable.</string>

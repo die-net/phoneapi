@@ -20,7 +20,7 @@ Android 10 and newer (minSdk 29). Wireless Debugging and helper restart without 
 
 1. Download a release APK from the project's GitHub Releases page (`phoneapi-v*.apk`).
 2. Copy [`scripts/phoneapi`](scripts/phoneapi) somewhere on your `PATH` (for example `~/bin/phoneapi`). It does not need the rest of the repo.
-3. Install the APK and allow the privileged grant the app needs for Wireless Debugging:
+3. Install the APK. Optionally grant `WRITE_SECURE_SETTINGS` so the app can turn Wireless Debugging on itself (handy after reboot; without it you enable that toggle in Developer options):
 
 ```sh
 adb install -r -g phoneapi-vX.Y.Z.apk
@@ -84,7 +84,7 @@ Launch it once from the computer:
 phoneapi helper
 ```
 
-The process detaches, so the command returns while the helper keeps running. That USB start does not survive a reboot; run it again after reboot, or start the listener and helper over Wireless Debugging. On Android 11+, after pairing Wireless Debugging once, the app restarts the helper itself after a crash or a package update while its process is running. Turning the helper switch off shuts that process down and leaves it stopped until the switch is turned on again. A successful launch leaves Wireless Debugging on, because that connection is also how the browser API reaches Chrome. Granting `WRITE_SECURE_SETTINGS` is what allows the app to turn Wireless Debugging on.
+The process detaches, so the command returns while the helper keeps running. That USB start does not survive a reboot; run it again after reboot, or start the listener and helper over Wireless Debugging. On Android 11+, after pairing Wireless Debugging once, the app restarts the helper itself after a crash or a package update while its process is running. Turning the helper switch off shuts that process down and leaves it stopped until the switch is turned on again. A successful launch leaves Wireless Debugging on, because that connection is also how the browser API reaches Chrome. The optional `WRITE_SECURE_SETTINGS` grant lets the app flip that switch; without it, turn Wireless Debugging on in Developer options when it drops (for example after reboot).
 
 On Android 10, browser calls use a USB tunnel instead. `phoneapi helper` sets that up.
 

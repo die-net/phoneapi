@@ -33,6 +33,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
         setPreferencesFromResource(R.xml.preferences, rootKey)
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
             findPreference<Preference>(KEY_WIRELESS)?.isVisible = false
+            findPreference<Preference>(KEY_WIRELESS_SETTINGS)?.isVisible = false
             findPreference<Preference>(KEY_PAIR)?.isVisible = false
         }
         findPreference<SwitchPreferenceCompat>(KEY_HELPER)?.setOnPreferenceChangeListener { _, value
@@ -51,6 +52,10 @@ class SettingsFragment : PreferenceFragmentCompat() {
                 Log.w(TAG, "Could not change wireless debugging", e)
                 false
             }
+        }
+        findPreference<Preference>(KEY_WIRELESS_SETTINGS)?.setOnPreferenceClickListener {
+            openWirelessDebuggingSettings()
+            true
         }
         findPreference<Preference>(KEY_PAIR)?.setOnPreferenceClickListener {
             pairWireless()
@@ -103,14 +108,27 @@ class SettingsFragment : PreferenceFragmentCompat() {
     }
 
     private fun showWireless(controls: Controls) {
-        val wireless = findPreference<SwitchPreferenceCompat>(KEY_WIRELESS) ?: return
+        val toggle = findPreference<SwitchPreferenceCompat>(KEY_WIRELESS)
+        val openSettings = findPreference<Preference>(KEY_WIRELESS_SETTINGS)
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            toggle?.isVisible = false
+            openSettings?.isVisible = false
+            return
+        }
         val canWrite = graph.helperSupervisor.canControlWireless()
-        wireless.isChecked = controls.wirelessOn
-        wireless.isEnabled = canWrite
-        wireless.summary =
-            getString(
-                if (canWrite) R.string.wireless_summary else R.string.wireless_needs_permission
-            )
+        toggle?.isVisible = canWrite
+        openSettings?.isVisible = !canWrite
+        if (canWrite) {
+            toggle?.isChecked = controls.wirelessOn
+            toggle?.summary = getString(R.string.wireless_summary)
+        } else {
+            val state =
+                getString(
+                    if (controls.wirelessOn) R.string.wireless_state_on
+                    else R.string.wireless_state_off
+                )
+            openSettings?.summary = getString(R.string.wireless_needs_permission, state)
+        }
     }
 
     private fun showPair(controls: Controls) {
@@ -161,6 +179,10 @@ class SettingsFragment : PreferenceFragmentCompat() {
             return
         }
         graph.wirelessPairing.start()
+        openWirelessDebuggingSettings()
+    }
+
+    private fun openWirelessDebuggingSettings() {
         val highlight = Bundle().apply { putString(FRAGMENT_ARG_KEY, WIRELESS_DEBUGGING_KEY) }
         val intent =
             Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)
@@ -183,6 +205,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
     private companion object {
         const val KEY_HELPER = "helper"
         const val KEY_WIRELESS = "wireless"
+        const val KEY_WIRELESS_SETTINGS = "wireless_settings"
         const val KEY_PAIR = "pair"
         const val KEY_TOKENS = "tokens"
         const val TAG = "PhoneApi"
