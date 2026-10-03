@@ -121,6 +121,8 @@ dependencies {
     implementation(libs.bouncycastle.prov)
     implementation(libs.kadb)
     implementation(libs.kadb.mdns)
+    // AdbStream.source and AdbStream.sink are Okio types.
+    implementation(libs.okio)
 
     testImplementation(libs.junit.jupiter)
     testRuntimeOnly(libs.junit.jupiter.engine)

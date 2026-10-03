@@ -12,6 +12,7 @@ kotlinx-io = "0.9.1"
 dependency-analysis = "3.19.2"
 bouncycastle = "1.86"
 kadb = "2.1.4"
+okio = "3.17.0"
 junit = "6.1.3"
 androidx-activity = "1.13.0"
 androidx-appcompat = "1.7.1"
@@ -59,6 +60,7 @@ mcp-core = { module = "io.modelcontextprotocol:kotlin-sdk-core", version.ref = "
 bouncycastle-pkix = { module = "org.bouncycastle:bcpkix-jdk18on", version.ref = "bouncycastle" }
 bouncycastle-prov = { module = "org.bouncycastle:bcprov-jdk18on", version.ref = "bouncycastle" }
 kadb = { module = "com.flyfishxu:kadb", version.ref = "kadb" }
+okio = { module = "com.squareup.okio:okio", version.ref = "okio" }
 kadb-mdns = { module = "com.flyfishxu:kadb-mdns", version.ref = "kadb" }
 androidx-activity = { module = "androidx.activity:activity", version.ref = "androidx-activity" }
 androidx-appcompat = { module = "androidx.appcompat:appcompat", version.ref = "androidx-appcompat" }
