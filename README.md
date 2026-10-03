@@ -6,55 +6,46 @@ The shell helper reads the UI through UiAutomation, injects input, captures the 
 
 Android 10 and newer (minSdk 29). Wireless Debugging and helper restart without a USB cable need Android 11.
 
+- HTTP, WebSocket, and MCP surface: [docs/api.md](docs/api.md) (includes OpenAPI)
+- How the pieces fit together: [docs/architecture.md](docs/architecture.md)
+- Building from source: [docs/development.md](docs/development.md)
+
 ## Requirements
 
-- JDK 21
-- Android SDK with compileSdk 37 (AndroidX Core 1.19 needs it). `ANDROID_HOME` must point at the SDK.
 - A device or emulator with USB debugging
-- `adb`, `jq`, and `curl` on the host. `scripts/phoneapi-dev papi` uses [`uv`](https://docs.astral.sh/uv/) for WebSocket calls.
-
-## Build
-
-```sh
-export JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home
-export ANDROID_HOME=/opt/homebrew/share/android-commandlinetools
-./gradlew assembleDebug
-```
-
-The debug APK is `app/build/outputs/apk/debug/app-debug.apk`, installed as `net.die.phoneapi.dev` so it can sit next to a release build.
-
-The same checks CI runs:
-
-```sh
-./gradlew spotlessCheck detektMain lint testDebugUnitTest :api-model:test assembleDebug --continue
-```
-
-## Client
-
-`scripts/phoneapi` is the relocatable production client. It targets the release package (`net.die.phoneapi`) and stores pairing state in `~/.config/phoneapi/pairing.json` (or `$XDG_CONFIG_HOME/phoneapi`). Copy it to `~/bin` or `/usr/local/bin` and it still works; it does not need the repo.
-
-`scripts/phoneapi-dev` sources that client with debug defaults: package `net.die.phoneapi.dev`, pairing file `.dev/pairing.json`, and a `setup` subcommand for the repo. Override either client with `PHONEAPI_PKG` or `PAPI_PAIRING`.
+- `adb`, `jq`, and `curl` on the host
+- [`uv`](https://docs.astral.sh/uv/) only if you use `phoneapi papi WS …`
 
 ## Install
 
-`scripts/phoneapi-dev setup` builds the debug APK, installs it, grants `WRITE_SECURE_SETTINGS`, mints a token into `.dev/pairing.json`, and starts the helper over USB.
+1. Download a release APK from the project's GitHub Releases page (`phoneapi-v*.apk`).
+2. Copy [`scripts/phoneapi`](scripts/phoneapi) somewhere on your `PATH` (for example `~/bin/phoneapi`). It does not need the rest of the repo.
+3. Install the APK and allow the privileged grant the app needs for Wireless Debugging:
 
 ```sh
-scripts/phoneapi-dev setup            # USB device
-scripts/phoneapi-dev setup --no-build # skip the Gradle build
+adb install -r -g phoneapi-vX.Y.Z.apk
+adb shell pm grant net.die.phoneapi android.permission.WRITE_SECURE_SETTINGS
 ```
 
-`scripts/phoneapi-dev pair` mints a token and writes the pairing file (scheme `http`, host `127.0.0.1`) to `.dev/pairing.json`, which is gitignored. It does not print the token. Expose the server with `scripts/phoneapi-dev server` (reads that file; does not mint a new token).
+4. Pair, expose the server, and start the helper:
+
+```sh
+phoneapi pair --name laptop
+phoneapi server
+phoneapi helper
+```
+
+`phoneapi` targets the release package (`net.die.phoneapi`) and stores pairing state in `~/.config/phoneapi/pairing.json` (or `$XDG_CONFIG_HOME/phoneapi`). Override with `PHONEAPI_PKG` or `PAPI_PAIRING` if needed. `pair` writes the pairing file and does not print the token. `server` forwards the on-device API to localhost; run it again if the tunnel drops.
 
 Open PhoneAPI for screen reading and taps, wireless debugging, and the computers that have access. That switch starts the helper and shuts it down. On Android 11 and newer the same screen can turn Wireless Debugging on and pair it. You can remove a computer's access there at any time.
 
 ## Pairing
 
-A paired computer holds its own bearer token. Mint one with `scripts/phoneapi-dev pair` (or `phoneapi pair` against a release install). The shell user is already trusted, so no approval on the phone is needed. The pairing file is written quietly; then expose the server:
+A paired computer holds its own bearer token. Mint one with `phoneapi pair`. The shell user is already trusted, so no approval on the phone is needed:
 
 ```sh
-scripts/phoneapi-dev pair --name laptop
-scripts/phoneapi-dev server
+phoneapi pair --name laptop
+phoneapi server
 ```
 
 The saved JSON looks like this (`scheme` `http`, host `127.0.0.1`):
@@ -63,18 +54,14 @@ The saved JSON looks like this (`scheme` `http`, host `127.0.0.1`):
 {"scheme":"http","host":"127.0.0.1","port":41234,"token":"pa_…","name":"laptop"}
 ```
 
-## Authentication
+Every request needs `Authorization: Bearer <token>`. Scopes, the `access_token` query exception, token admin, and error shapes are documented in [docs/api.md](docs/api.md).
 
-Every request needs `Authorization: Bearer <token>`. A missing or unknown token gets an empty 404. The `access_token` query parameter is accepted only on `GET /viewer` and on WebSocket upgrades, which is how the viewer page opens its video and audio sockets. Every other route ignores it and still requires the header.
-
-Tokens carry scopes: `observe`, `control`, `browser`, `stream`, and `admin`. `CREATE_TOKEN` grants all of them. Create a narrower token with `POST /v1/tokens`.
-
-`scripts/phoneapi-dev papi` reads `.dev/pairing.json`, or the file named by `PAPI_PAIRING`:
+`phoneapi papi` reads the pairing file (or `$PAPI_PAIRING`):
 
 ```sh
-scripts/phoneapi-dev papi GET /v1/device
-scripts/phoneapi-dev papi POST /v1/input/tap '{"x":540,"y":1200,"humanize":false}'
-scripts/phoneapi-dev papi WS /v1/events
+phoneapi papi GET /v1/device
+phoneapi papi POST /v1/input/tap '{"x":540,"y":1200,"humanize":false}'
+phoneapi papi WS /v1/events
 ```
 
 `WS` prints text frames for `PAPI_WS_SECONDS` (default 10). HTTP calls print the body and then the status code.
@@ -82,8 +69,6 @@ scripts/phoneapi-dev papi WS /v1/events
 ## Helper
 
 The helper is a separate `app_process` that registers a binder with the app. `/v1/device` reports it as `running`, `starting`, `needs_pairing`, `needs_usb`, or `stopped`. `capabilities` shrinks to what works in the current state.
-
-`GET /v1/device` is the capability check. `helper` is the status below, `uiAutomationConnected` means the helper's UiAutomation session is up, and `capabilities` says what the current device can do. Snapshots, injected input, key events, screenshots, app stop and clear, logcat, and Chrome DevTools need the helper. `ui.stableIds` needs Android 13. `encoder.lowLatency`, `adb.wireless`, and `stream.audio.submix` need Android 11. `settings.secure` is `WRITE_SECURE_SETTINGS`. Video is the helper display mirror (`stream.video.mirror`). Touches inject through the helper. Text `mode` is `auto`, `keyboard`, `keyevent`, or `setText`.
 
 | Status | Meaning |
 | --- | --- |
@@ -96,121 +81,71 @@ The helper is a separate `app_process` that registers a binder with the app. `/v
 Launch it once from the computer:
 
 ```sh
-scripts/phoneapi-dev helper
+phoneapi helper
 ```
 
-The process detaches, so the command returns while the helper keeps running. That USB start does not survive a reboot; run it again after reboot, or start the listener and helper over Wireless Debugging. On Android 11+, after pairing Wireless Debugging once, the app restarts the helper itself after a crash or a package update while its process is running. Turning the helper switch off shuts that process down and leaves it stopped until the switch is turned on again. A successful launch leaves Wireless Debugging on, because that connection is also how the browser API reaches Chrome. Granting `WRITE_SECURE_SETTINGS`, which `scripts/phoneapi-dev setup` does, is what allows the app to turn Wireless Debugging on.
+The process detaches, so the command returns while the helper keeps running. That USB start does not survive a reboot; run it again after reboot, or start the listener and helper over Wireless Debugging. On Android 11+, after pairing Wireless Debugging once, the app restarts the helper itself after a crash or a package update while its process is running. Turning the helper switch off shuts that process down and leaves it stopped until the switch is turned on again. A successful launch leaves Wireless Debugging on, because that connection is also how the browser API reaches Chrome. Granting `WRITE_SECURE_SETTINGS` is what allows the app to turn Wireless Debugging on.
 
-On Android 10, browser calls use a USB tunnel instead. `scripts/phoneapi-dev helper` sets that up.
+On Android 10, browser calls use a USB tunnel instead. `phoneapi helper` sets that up.
 
 To pair Wireless Debugging from the phone (Android 11+), tap "Pair wireless debugging" in the app. It opens Developer options and watches mDNS for this phone's pairing service. When the system "Pair device with pairing code" dialog opens, a heads-up notification asks for the code inline. The dialog has to stay in front: Android closes the pairing port when it is dismissed, including when the user switches apps. On Android 10 that row is hidden.
 
-These calls need the helper: UI snapshots and finds, injected input, key events, typing, `POST /v1/apps/{pkg}/stop` and `/clear`, screenshots, logcat, every `/v1/browser` route, and the mirror and audio-submix stream paths. App launch and wake still run without it. Wake falls back to a system activity when the helper is down. A launch from a background process needs the helper, because Android blocks the app itself from starting activities then.
+Snapshots, injected input, screenshots, logcat, browser routes, and streams need the helper. App launch and wake still run without it (with limited fallbacks). See [docs/api.md](docs/api.md) for which routes require the helper or the browser scope.
 
 ## Usage
 
 Read the screen and tap a control:
 
 ```sh
-scripts/phoneapi-dev papi GET '/v1/ui/snapshot?format=compact'
-scripts/phoneapi-dev papi POST /v1/ui/find '{"selector":{"text":"Settings"}}'
-scripts/phoneapi-dev papi POST /v1/input/tap '{"selector":{"text":"Settings"}}'
+phoneapi papi GET '/v1/ui/snapshot?format=compact'
+phoneapi papi POST /v1/ui/find '{"selector":{"text":"Settings"}}'
+phoneapi papi POST /v1/input/tap '{"selector":{"text":"Settings"}}'
 ```
 
 Wait until a window is in front, then launch or stop an app:
 
 ```sh
-scripts/phoneapi-dev papi POST /v1/wait \
+phoneapi papi POST /v1/wait \
   '{"all":[{"type":"window","package":"com.android.settings"}],"timeoutMs":10000}'
-scripts/phoneapi-dev papi POST /v1/apps/com.android.settings/launch
-scripts/phoneapi-dev papi POST /v1/apps/com.android.settings/stop
+phoneapi papi POST /v1/apps/com.android.settings/launch
+phoneapi papi POST /v1/apps/com.android.settings/stop
 ```
 
-A `browser.*` condition also needs the browser scope, on REST and on the MCP `wait_for` tool. An observe-only token is `403 forbidden` for that wait. Node, window, and the other non-browser conditions stay on the observe scope.
-
-Drive Chrome. The helper must be running, and Chrome must be running with USB debugging on so it publishes `@chrome_devtools_remote`. On Android 11 and newer PhoneAPI also has to be paired with Wireless Debugging. On Android 10 the USB tunnel from the helper section has to be up. A target id looks like `chrome_devtools_remote~<page id>`.
+Drive Chrome (helper up, Chrome publishing `@chrome_devtools_remote`, Wireless Debugging on Android 11+, or the Android 10 USB tunnel). Target ids look like `chrome_devtools_remote~<page id>`:
 
 ```sh
-scripts/phoneapi-dev papi GET /v1/browser/targets
-scripts/phoneapi-dev papi POST /v1/browser/tabs '{"url":"https://example.com/"}'
-scripts/phoneapi-dev papi POST /v1/browser/targets/TARGET/navigate '{"url":"https://example.org/"}'
-scripts/phoneapi-dev papi GET /v1/browser/targets/TARGET/snapshot
-scripts/phoneapi-dev papi POST /v1/browser/targets/TARGET/tap '{"selector":"a"}'
-scripts/phoneapi-dev papi POST /v1/browser/targets/TARGET/evaluate '{"expression":"document.title"}'
+phoneapi papi GET /v1/browser/targets
+phoneapi papi POST /v1/browser/tabs '{"url":"https://example.com/"}'
+phoneapi papi POST /v1/browser/targets/TARGET/navigate '{"url":"https://example.org/"}'
+phoneapi papi GET /v1/browser/targets/TARGET/snapshot
+phoneapi papi POST /v1/browser/targets/TARGET/tap '{"selector":"a"}'
+phoneapi papi POST /v1/browser/targets/TARGET/evaluate '{"expression":"document.title"}'
 ```
 
-On a debuggable emulator image, Chrome only publishes that socket after it is started with remote debugging, for example a `/data/local/tmp/chrome-command-line` file containing `chrome --disable-fre --no-first-run --remote-debugging-port=9222`, followed by a force-stop and launch. Some emulator images also refuse the shell user; `adb root` makes the helper uid 0, which Chrome accepts. `scripts/phoneapi-dev helper` does not change that.
+Open the viewer at `http://127.0.0.1:<port>/viewer` with the stream scope (after `phoneapi server`). It plays `WS /v1/stream/video` and `WS /v1/stream/audio` with WebCodecs.
 
-Open the viewer at `http://127.0.0.1:<port>/viewer` with the stream scope (after `scripts/phoneapi-dev server`). It plays `WS /v1/stream/video` and `WS /v1/stream/audio` with WebCodecs.
+### MCP
 
-Point an MCP client at `http://127.0.0.1:<port>/mcp` with the same bearer token. `access_token` is not accepted on `/mcp`. The server is stateless Streamable HTTP. It accepts a `Host` of `localhost`, `127.0.0.1`, or `::1`. The pairing file always uses host `127.0.0.1`.
-
-`scripts/phoneapi-dev mcp` is a stdio bridge for MCP clients. It reads the same pairing file as `scripts/phoneapi-dev papi` (`.dev/pairing.json`, or the file named by `PAPI_PAIRING`) and forwards one JSON-RPC message per line. A notification comes back as HTTP 202 and produces no stdout line. Logs go to stderr.
+Point an MCP client at `http://127.0.0.1:<port>/mcp` with the same bearer token, or use the stdio bridge:
 
 ```sh
-scripts/phoneapi-dev mcp
+phoneapi mcp
 ```
 
-Cursor starts that process itself. Give it an absolute path to the script:
+Cursor example:
 
 ```json
 {
   "mcpServers": {
     "phone": {
-      "command": "/absolute/path/to/phoneapi/scripts/phoneapi-dev",
+      "command": "/absolute/path/to/phoneapi",
       "args": ["mcp"]
     }
   }
 }
 ```
 
-`tools/list` includes `device_info`, `ui_snapshot`, input and app tools, `browser_*`, `screenshot`, and `logcat_tail`. A tool is omitted when the token lacks its scope or the capability is false, so a stopped helper hides the browser, logcat, screenshot, and UI tools. `device_info` stays listed and reports helper status and capabilities. Each tool's input schema is generated from the Kotlin type that tool decodes, so fields such as `tap.count` cannot drift out of the schema. When node ids are not stable (below Android 13), a tool's description says so. Resources: `phoneapi://device/capabilities` and `phoneapi://viewer`.
-
-`GET /v1/openapi.json` (observe scope) is an OpenAPI 3.1 document generated from the same types. Bearer auth is the `bearer` security scheme, and each operation has `x-scope`. WebSocket routes are marked with `x-websocket`.
-
-Closed request fields are enums. A value outside the set is a `400` `bad_request` on REST and a tool error on MCP. Matching is case-insensitive for node state, swipe direction, log level, and node action.
-
-| Field | Values |
-| --- | --- |
-| Wait node `state` | `present`, `absent`, `visible`, `enabled`, `disabled`, `checked`, `unchecked`, `focused`, `selected` |
-| Browser element `by` | `css`, `xpath`, `text` |
-| Browser element `state` | `present`, `absent`, `visible` |
-| Browser log `level` | `verbose`, `info`, `warning`, `error` |
-| Swipe `direction` | `up`, `down`, `left`, `right` |
-| Node `action` | `click`, `longClick`, `focus`, `clearFocus`, `select`, `setText`, `scrollForward`, `scrollBackward`, `expand`, `collapse`, `dismiss`, `showOnScreen`, `imeEnter`, and the other standard names (`scrollUp`, `copy`, `paste`, …). An action name the node lists is accepted, including an app-defined label. `imeEnter` needs Android 11. |
-
-## API
-
-| Method | Path | Scope |
-| --- | --- | --- |
-| `GET` | `/v1/device` | observe |
-| `GET` | `/v1/openapi.json` | observe |
-| `POST` | `/v1/device/wake`, `/unlock`, `/lock` | control |
-| `PUT`, `DELETE` | `/v1/device/pin` | admin |
-| `GET` | `/v1/ui/snapshot` | observe |
-| `POST` | `/v1/ui/find` | observe |
-| `POST` | `/v1/ui/nodes/{ref}/action` | control |
-| `GET` | `/v1/screenshot` | observe |
-| `POST` | `/v1/input/tap`, `/swipe`, `/gesture`, `/key`, `/text` | control |
-| `POST` | `/v1/ime/hide`, `/show` | control |
-| `GET` | `/v1/apps` | observe |
-| `POST` | `/v1/apps/{pkg}/launch` | control |
-| `POST` | `/v1/apps/{pkg}/stop`, `/clear` | control, helper |
-| `POST` | `/v1/intents` | control |
-| `POST` | `/v1/wait` | observe; `browser.*` also needs browser |
-| `GET` | `/v1/browser/targets` | browser, helper |
-| `POST` | `/v1/browser/tabs` | browser, helper |
-| `POST` | `/v1/browser/targets/{id}/navigate`, `/tap`, `/evaluate`, `/console` | browser, helper |
-| `GET` | `/v1/browser/targets/{id}/snapshot` | browser, helper |
-| `WS` | `/v1/browser/targets/{id}/cdp` | browser, helper |
-| `WS` | `/v1/events` | observe |
-| `GET` | `/viewer` | stream |
-| `WS` | `/v1/stream/video`, `/v1/stream/audio` | stream |
-| `GET`, `POST` | `/v1/tokens` | admin |
-| `DELETE` | `/v1/tokens/{id}` | admin |
-| `POST` | `/mcp` | the tool's scope |
-
-Errors are JSON (`error`, `message`, and sometimes `state`) with an HTTP status. A missing helper is `503` `helper_unavailable`, and the message says whether it is starting, needs pairing, needs USB, or stopped.
+Tool list, resources, scopes, and the OpenAPI document are in [docs/api.md](docs/api.md).
 
 ## License
 
