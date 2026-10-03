@@ -30,10 +30,6 @@ class MainActivity : AppCompatActivity() {
             supportFragmentManager.beginTransaction().replace(content, SettingsFragment()).commit()
         }
         requestNotificationPermission()
-    }
-
-    override fun onStart() {
-        super.onStart()
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 graph.serverController.acquire(HOLDER)

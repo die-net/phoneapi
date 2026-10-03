@@ -2,7 +2,7 @@
 <resources>
     <string name="app_name">PhoneAPI</string>
     <string name="status_title">Status</string>
-    <string name="status_abstract">Listener: adb forward tcp:%1$d localabstract:%2$s, then http://127.0.0.1:%1$d</string>
+    <string name="status_abstract">Listener: adb forward tcp:%1$d, localabstract:%2$s, then http://127.0.0.1:%1$d</string>
     <string name="tls_title">HTTPS</string>
     <string name="tls_summary">Off by default. When on, and while wireless debugging is on, this phone accepts HTTPS on the local network and advertises itself.</string>
     <string name="tls_needs_wireless">Turn on wireless debugging before HTTPS.</string>

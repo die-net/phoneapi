@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.util.Log
+import android.view.View
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.Lifecycle
@@ -33,8 +34,6 @@ import net.die.phoneapi.server.ServerController
 class SettingsFragment : PreferenceFragmentCompat() {
     private val graph
         get() = PhoneApiApp.graph
-
-    private var pairing: PairingPanel? = null
 
     override fun onCreatePreferences(savedInstanceState: Bundle?, rootKey: String?) {
         setPreferencesFromResource(R.xml.preferences, rootKey)
@@ -76,28 +75,22 @@ class SettingsFragment : PreferenceFragmentCompat() {
         }
     }
 
-    override fun onStart() {
-        super.onStart()
+    override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+        super.onViewCreated(view, savedInstanceState)
         val activity = requireActivity() as AppCompatActivity
-        val panel =
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                PairingPanel(activity, graph) { refreshTokens() }
-            } else {
-                null
-            }
-        pairing = panel
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                val panel =
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        PairingPanel(activity, graph) { refreshTokens() }
+                    } else {
+                        null
+                    }
                 if (panel != null) launch { panel.run() }
                 launch { watchStatus() }
                 launch { refreshTokens() }
             }
         }
-    }
-
-    override fun onStop() {
-        pairing = null
-        super.onStop()
     }
 
     private suspend fun watchStatus() {
