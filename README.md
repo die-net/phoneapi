@@ -147,6 +147,11 @@ Cursor example:
 
 Tool list, resources, scopes, and the OpenAPI document are in [docs/api.md](docs/api.md).
 
+## AI Disclosure
+
+Though the design, architecture, some of the code, reviews, and testing were
+done by a human, most of the code was written by Opus 5.5 and Grok 4.7.
+
 ## License
 
 Copyright 2026 Aaron Hopkins and contributors. All rights reserved.
