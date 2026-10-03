@@ -13,7 +13,7 @@
 </head>
 <body>
 <canvas id="screen" width="2" height="2"></canvas>
-<p id="status">Connecting</p>
+<p id="status">Opening viewer</p>
 <script>
 const status = document.getElementById("status");
 const canvas = document.getElementById("screen");
@@ -21,10 +21,53 @@ const ctx = canvas.getContext("2d");
 const params = new URLSearchParams(location.search);
 const token = params.get("access_token") || "";
 const auth = "access_token=" + encodeURIComponent(token);
+let liveVideo = false;
+let shotTimer = 0;
+let shotInFlight = false;
 
 function socket(path) {
   const scheme = location.protocol === "https:" ? "wss://" : "ws://";
   return new WebSocket(scheme + location.host + path + "?" + auth);
+}
+
+function setStatus(text) {
+  if (!liveVideo) status.textContent = text;
+}
+
+async function pullScreenshot() {
+  if (liveVideo || !token || shotInFlight) return;
+  shotInFlight = true;
+  try {
+    const response = await fetch("/v1/screenshot", {
+      headers: { Authorization: "Bearer " + token },
+    });
+    if (!response.ok) {
+      setStatus("Screenshot HTTP " + response.status);
+      return;
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    await new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => {
+        canvas.width = image.width;
+        canvas.height = image.height;
+        ctx.drawImage(image, 0, 0);
+        URL.revokeObjectURL(url);
+        setStatus(canvas.width + "×" + canvas.height + " (still)");
+        resolve();
+      };
+      image.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error("image decode"));
+      };
+      image.src = url;
+    });
+  } catch (error) {
+    setStatus("Screenshot failed: " + error);
+  } finally {
+    shotInFlight = false;
+  }
 }
 
 function startCodes(bytes) {
@@ -89,10 +132,13 @@ function decoderConfig(nals) {
 
 let epoch = 0;
 function makeDecoder() {
+  if (typeof VideoDecoder !== "function") return null;
   const mine = ++epoch;
   return new VideoDecoder({
     output(frame) {
       if (mine !== epoch) { frame.close(); return; }
+      liveVideo = true;
+      if (shotTimer) { clearInterval(shotTimer); shotTimer = 0; }
       if (canvas.width !== frame.displayWidth) canvas.width = frame.displayWidth;
       if (canvas.height !== frame.displayHeight) canvas.height = frame.displayHeight;
       ctx.drawImage(frame, 0, 0);
@@ -108,6 +154,7 @@ let streamWidth = 0;
 let streamHeight = 0;
 
 function configureVideo(payload) {
+  if (!video) return;
   const config = decoderConfig(startCodes(payload));
   if (!config || configured) return;
   if (video.state === "closed") return;
@@ -121,7 +168,7 @@ function onHeader(info) {
   streamHeight = info.height;
   status.textContent = info.width + "×" + info.height;
   if (!changed) return;
-  if (video.state !== "closed") video.close();
+  if (video && video.state !== "closed") video.close();
   video = makeDecoder();
   configured = false;
 }
@@ -132,7 +179,7 @@ function onVideo(data) {
   const payload = bytes.subarray(9);
   if (type === 1) { configureVideo(payload); return; }
   if (!configured) configureVideo(payload);
-  if (!configured || video.state !== "configured") return;
+  if (!video || !configured || video.state !== "configured") return;
   const nals = startCodes(payload);
   if (!nals.length) return;
   let ts = 0n;
@@ -144,16 +191,27 @@ function onVideo(data) {
   }));
 }
 
-const vs = socket("/v1/stream/video");
-vs.binaryType = "arraybuffer";
-vs.onmessage = (event) => {
-  if (typeof event.data === "string") {
-    onHeader(JSON.parse(event.data));
-    return;
-  }
-  onVideo(event.data);
-};
-vs.onerror = () => { status.textContent = "Video socket failed"; };
+if (video) {
+  const vs = socket("/v1/stream/video");
+  vs.binaryType = "arraybuffer";
+  vs.onopen = () => setStatus("Video socket open");
+  vs.onmessage = (event) => {
+    if (typeof event.data === "string") {
+      onHeader(JSON.parse(event.data));
+      return;
+    }
+    onVideo(event.data);
+  };
+  vs.onerror = () => setStatus("Video socket failed");
+  vs.onclose = (event) => {
+    setStatus("Video socket closed " + event.code + (event.reason ? " " + event.reason : ""));
+  };
+}
+
+if (!token) setStatus("Missing access token");
+else if (!video) setStatus("No VideoDecoder; using stills");
+shotTimer = setInterval(pullScreenshot, 2000);
+pullScreenshot();
 
 let audioDecoder = null;
 let audioCtx = null;
@@ -197,15 +255,17 @@ function onAudio(data) {
   audioDecoder.decode(new EncodedAudioChunk({ type: "key", timestamp: Number(ts), data: payload }));
 }
 
-const as = socket("/v1/stream/audio");
-as.binaryType = "arraybuffer";
-as.onmessage = (event) => {
-  if (typeof event.data === "string") {
-    window.__audioCodec = JSON.parse(event.data).codec;
-    return;
-  }
-  onAudio(event.data);
-};
+if (typeof AudioDecoder === "function") {
+  const as = socket("/v1/stream/audio");
+  as.binaryType = "arraybuffer";
+  as.onmessage = (event) => {
+    if (typeof event.data === "string") {
+      window.__audioCodec = JSON.parse(event.data).codec;
+      return;
+    }
+    onAudio(event.data);
+  };
+}
 
 document.body.addEventListener("click", () => {
   if (!audioCtx) audioCtx = new AudioContext();
