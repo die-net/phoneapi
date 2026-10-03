@@ -13,7 +13,6 @@ import kotlinx.coroutines.runBlocking
 import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.model.ActionResult
 import net.die.phoneapi.model.BrowserTapRequest
-import net.die.phoneapi.model.InputBackend
 import net.die.phoneapi.model.Rect
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
@@ -101,7 +100,7 @@ class BrowserServiceTest {
                 frames,
                 sockets = CHROME,
                 content = { Rect(0, 283, 1080, 2339) },
-                touch = { rect, _, _ ->
+                touch = { rect, _ ->
                     touched = rect
                     ActionResult(ok = true, backend = "inject")
                 },
@@ -135,7 +134,7 @@ class BrowserServiceTest {
                 frames,
                 sockets = CHROME,
                 content = { Rect(0, 283, 1080, 2339) },
-                touch = { rect, _, _ ->
+                touch = { rect, _ ->
                     touched = rect
                     ActionResult(ok = true, backend = "inject")
                 },
@@ -163,7 +162,7 @@ class BrowserServiceTest {
                 frames,
                 sockets = CHROME,
                 content = { Rect(0, 283, 1080, 2339) },
-                touch = { _, _, _ -> ActionResult(ok = true, backend = "inject") },
+                touch = { _, _ -> ActionResult(ok = true, backend = "inject") },
                 prepare = { true },
                 sequence = { 7L },
                 invalidate = { invalidated++ },
@@ -222,7 +221,7 @@ class BrowserServiceTest {
                 byteArrayOf(),
                 sockets = CHROME,
                 content = { Rect(0, 283, 1080, 2339) },
-                touch = { _, _, _ -> ActionResult(ok = true, backend = "inject") },
+                touch = { _, _ -> ActionResult(ok = true, backend = "inject") },
                 open = {
                     opens++
                     ScriptedSocket(if (opens == 1) snapshot else tap)
@@ -271,7 +270,7 @@ class BrowserServiceTest {
                 byteArrayOf(),
                 sockets = CHROME,
                 content = { Rect(0, 283, 1080, 2339) },
-                touch = { rect, _, _ ->
+                touch = { rect, _ ->
                     touched = rect
                     ActionResult(ok = true, backend = "inject")
                 },
@@ -345,7 +344,7 @@ class BrowserServiceTest {
                 byteArrayOf(),
                 sockets = CHROME,
                 content = { Rect(0, 283, 1080, 2339) },
-                touch = { _, _, _ -> ActionResult(ok = true, backend = "inject") },
+                touch = { _, _ -> ActionResult(ok = true, backend = "inject") },
                 open = { ScriptedSocket(scripts.removeFirst()) },
             )
         runBlocking {
@@ -392,7 +391,7 @@ class BrowserServiceTest {
                 byteArrayOf(),
                 sockets = CHROME,
                 content = { Rect(0, 283, 1080, 2339) },
-                touch = { _, _, _ -> ActionResult(ok = true, backend = "inject") },
+                touch = { _, _ -> ActionResult(ok = true, backend = "inject") },
                 open = { ScriptedSocket(scripts.removeFirst()) },
                 axTreeCap = 2,
             )
@@ -414,7 +413,7 @@ class BrowserServiceTest {
         response: ByteArray,
         sockets: String,
         content: suspend (String?) -> Rect = { Rect(0, 0, 1, 1) },
-        touch: suspend (Rect, Boolean, InputBackend) -> ActionResult = { _, _, _ ->
+        touch: suspend (Rect, Boolean) -> ActionResult = { _, _ ->
             ActionResult(ok = true)
         },
         open: (String) -> DevtoolsSocket = { ScriptedSocket(response) },

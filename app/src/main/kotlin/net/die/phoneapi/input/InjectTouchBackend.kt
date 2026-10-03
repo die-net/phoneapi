@@ -23,11 +23,8 @@ import net.die.phoneapi.model.TimedPoint
 class InjectTouchBackend(
     private val helper: HelperConnection,
     private val io: CoroutineContext,
-) : TouchBackend {
-    override val name = "inject"
-
-    override val isAvailable: Boolean
-        get() = helper.isRunning
+) {
+    val name = "inject"
 
     private val gestures = Mutex()
     private val screenLock = Mutex()
@@ -36,7 +33,7 @@ class InjectTouchBackend(
     @Volatile private var screenProxy: IHelper? = null
     @Volatile private var screen: TouchscreenInfo? = null
 
-    override suspend fun perform(pointers: List<List<TimedPoint>>): Boolean = gestures.withLock {
+    suspend fun perform(pointers: List<List<TimedPoint>>): Boolean = gestures.withLock {
         val proxy = helper.require()
         val device =
             try {

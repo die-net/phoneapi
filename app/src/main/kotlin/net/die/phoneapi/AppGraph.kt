@@ -40,8 +40,6 @@ import net.die.phoneapi.input.Humanizer
 import net.die.phoneapi.input.InjectKeyBackend
 import net.die.phoneapi.input.InjectTouchBackend
 import net.die.phoneapi.input.InputServiceImpl
-import net.die.phoneapi.input.KeyBackends
-import net.die.phoneapi.input.TouchBackends
 import net.die.phoneapi.input.TouchInput
 import net.die.phoneapi.model.ActionResult
 import net.die.phoneapi.model.HelperStatus
@@ -128,9 +126,11 @@ class AppGraph(
             onSession = { up -> uiAutomationConnected = up },
         )
 
-    val touchBackends = TouchBackends(inject = InjectTouchBackend(helper, ioDispatcher))
-    val keyBackends = KeyBackends(helper = InjectKeyBackend(helper, ioDispatcher))
-    val touch = TouchInput(touchBackends, Humanizer()) { deviceInfo.display() }
+    val keys = InjectKeyBackend(helper, ioDispatcher)
+    val touch =
+        TouchInput(InjectTouchBackend(helper, ioDispatcher), Humanizer()) {
+            deviceInfo.display()
+        }
     val screenshots = Screenshotter(ioDispatcher, ::helperScreenshot)
     val power: PowerService =
         PowerServiceImpl(
@@ -160,10 +160,9 @@ class AppGraph(
             tree = tree,
             seq = tree.seq,
             touch = touch,
-            keyBackends = keyBackends,
+            keys = keys,
             state = state,
             display = { deviceInfo.display() },
-            touchBackends = touchBackends,
         )
     val apps: AppsService =
         AppsServiceImpl(
@@ -241,8 +240,8 @@ class AppGraph(
             listSockets = { helper.require().listDevtoolsSockets() },
             open = { name -> openDevtools(name, DEVTOOLS_READ_MS) },
             contentBounds = { pkg -> tree.contentBounds(pkg.orEmpty()) },
-            touchAt = { rect, humanize, backend ->
-                val outcome = touch.tap(rect, humanize = humanize, backend = backend)
+            touchAt = { rect, humanize ->
+                val outcome = touch.tap(rect, humanize = humanize)
                 ActionResult(
                     ok = outcome.ok,
                     backend = outcome.backend,

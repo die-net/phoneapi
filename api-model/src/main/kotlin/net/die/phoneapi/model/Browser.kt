@@ -30,7 +30,6 @@ public data class BrowserTapRequest(
     val ref: String? = null,
     val selector: String? = null,
     val humanize: Boolean = true,
-    val backend: InputBackend = InputBackend.AUTO,
     val autoWake: Boolean = true,
 )
 

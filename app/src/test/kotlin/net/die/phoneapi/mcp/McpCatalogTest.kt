@@ -93,7 +93,7 @@ class McpCatalogTest {
             ApiJson.decodeFromJsonElement(tool.arguments, sample)
         }
         val tap = mcpToolTemplates().first { it.name == "tap" }.schema.properties!!
-        assertTrue(tap.keys.containsAll(listOf("count", "holdMs", "backend", "force", "autoWake")))
+        assertTrue(tap.keys.containsAll(listOf("count", "holdMs", "force", "autoWake")))
         assertTrue(
             "autoWake" in mcpToolTemplates().first { it.name == "ui_act" }.schema.properties!!.keys
         )

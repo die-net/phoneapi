@@ -31,12 +31,11 @@ class InputServiceImpl(
     private val tree: TreeSession,
     private val seq: StateFlow<Long>,
     private val touch: TouchInput,
-    private val keyBackends: KeyBackends,
+    private val keys: InjectKeyBackend,
     private val state: DeviceStateTracker,
     private val display: () -> DisplayInfo,
-    touchBackends: TouchBackends,
 ) : InputService {
-    private val typer = TextTyper(tree, touch, state, touchBackends, keyBackends)
+    private val typer = TextTyper(tree, touch, state, keys)
     private val imeShow = ImeShow(tree, state)
 
     override suspend fun tap(request: TapRequest): ActionResult =
@@ -48,14 +47,7 @@ class InputServiceImpl(
             val target =
                 request.selector?.let { nodeTarget(it, request.force) }
                     ?: pointTarget(request.x, request.y, request.humanize)
-            val outcome =
-                touch.tap(
-                    target,
-                    request.count,
-                    request.holdMs,
-                    request.humanize,
-                    request.backend,
-                )
+            val outcome = touch.tap(target, request.count, request.holdMs, request.humanize)
             result(outcome)
         }
 
@@ -66,7 +58,7 @@ class InputServiceImpl(
             }
             val (from, to) = swipeEnds(request)
             val spec = SwipeSpec(request.durationMs, request.fling, request.humanize)
-            result(touch.swipe(from, to, spec, request.backend))
+            result(touch.swipe(from, to, spec))
         }
 
     override suspend fun gesture(request: GestureRequest): ActionResult =
@@ -80,7 +72,7 @@ class InputServiceImpl(
             }
             if (pointers.any { path -> path.any { it.tMs < 0 } })
                 throw ApiException.badRequest("tMs must be >= 0")
-            result(touch.gesture(pointers, request.backend))
+            result(touch.gesture(pointers))
         }
 
     override suspend fun key(request: KeyRequest): ActionResult =
@@ -106,7 +98,7 @@ class InputServiceImpl(
                             it != KeyEvent.KEYCODE_UNKNOWN
                         }
                         ?: throw ApiException.badRequest("Unknown key '${request.key}'")
-                val backend = keyBackends.press(code, request.metaState, request.longPress)
+                val backend = keys.press(code, request.metaState, request.longPress)
                 ActionResult(ok = true, backend = backend)
             }
         }

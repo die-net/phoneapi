@@ -10,7 +10,6 @@ import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.core.DeviceStateTracker
 import net.die.phoneapi.model.ActionResult
 import net.die.phoneapi.model.FindRequest
-import net.die.phoneapi.model.InputBackend
 import net.die.phoneapi.model.NodeSelector
 import net.die.phoneapi.model.Point
 import net.die.phoneapi.model.TextMode
@@ -25,8 +24,7 @@ class TextTyper(
     private val tree: TreeSession,
     private val touch: TouchInput,
     private val state: DeviceStateTracker,
-    private val touchBackends: TouchBackends,
-    private val keyBackends: KeyBackends,
+    private val keyInjector: InjectKeyBackend,
     private val random: Random = Random.Default,
 ) {
 
@@ -108,7 +106,7 @@ class TextTyper(
         }
         return ActionResult(
             ok = true,
-            backend = touchBackends.select(DEFAULT_BACKEND).name,
+            backend = "inject",
             message = message,
         )
     }
@@ -154,7 +152,7 @@ class TextTyper(
     }
 
     private suspend fun tapKey(key: ImeKey, points: MutableList<Point>) {
-        val outcome = touch.tap(key.bounds, backend = DEFAULT_BACKEND)
+        val outcome = touch.tap(key.bounds)
         points += outcome.points
         if (!outcome.ok) throw gestureCancelled()
     }
@@ -162,23 +160,22 @@ class TextTyper(
     private fun keys(): List<ImeKey> = tree.keyboard().map { it.asKey() }
 
     private suspend fun typeKeyEvents(request: TextRequest): ActionResult {
-        val helper =
-            keyBackends.helper.takeIf { it.isAvailable } ?: throw ApiException.helperUnavailable()
+        if (!keyInjector.isAvailable) throw ApiException.helperUnavailable()
         val map = KeyCharacterMap.load(KeyCharacterMap.VIRTUAL_KEYBOARD)
         val events =
             request.text.map { c ->
                 map.getEvents(charArrayOf(c)) ?: throw unsupportedChars(setOf(c))
             }
         if (request.clear) {
-            keyBackends.press(KeyEvent.KEYCODE_A, KeyEvent.META_CTRL_ON, longPress = false)
-            keyBackends.press(KeyEvent.KEYCODE_DEL, 0, longPress = false)
+            keyInjector.press(KeyEvent.KEYCODE_A, KeyEvent.META_CTRL_ON, longPress = false)
+            keyInjector.press(KeyEvent.KEYCODE_DEL, 0, longPress = false)
         }
         events.forEachIndexed { i, keyEvents ->
             if (i > 0) delay(cadence(request))
-            keyEvents.forEach { helper.send(it) }
+            keyEvents.forEach { keyInjector.send(it) }
         }
-        if (request.submit) keyBackends.press(KeyEvent.KEYCODE_ENTER, 0, longPress = false)
-        return ActionResult(ok = true, backend = helper.name)
+        if (request.submit) keyInjector.press(KeyEvent.KEYCODE_ENTER, 0, longPress = false)
+        return ActionResult(ok = true, backend = keyInjector.name)
     }
 
     private fun cadence(request: TextRequest): Long =
@@ -210,7 +207,6 @@ class TextTyper(
     private fun TreeKey.asKey() = ImeKey(label, id, bounds)
 
     private companion object {
-        val DEFAULT_BACKEND = InputBackend.AUTO
         const val MAX_TEXT = 10_000
         const val MAX_DELAY_MS = 5_000L
         const val MAX_KEY_ATTEMPTS = 5

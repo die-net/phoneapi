@@ -41,7 +41,6 @@ import net.die.phoneapi.model.ConsoleRequest
 import net.die.phoneapi.model.ConsoleResult
 import net.die.phoneapi.model.EvalRequest
 import net.die.phoneapi.model.EvalResult
-import net.die.phoneapi.model.InputBackend
 import net.die.phoneapi.model.Rect
 
 /**
@@ -55,7 +54,7 @@ internal class BrowserServiceImpl(
     private val open: suspend (String) -> DevtoolsSocket,
     private val websocketKey: () -> String = ::websocketKey,
     private val contentBounds: suspend (String?) -> Rect = { Rect(0, 0, 0, 0) },
-    private val touchAt: suspend (Rect, Boolean, InputBackend) -> ActionResult = { _, _, _ ->
+    private val touchAt: suspend (Rect, Boolean) -> ActionResult = { _, _ ->
         ActionResult(ok = false)
     },
     private val targetTimeoutMs: Long = TARGET_LIST_MS,
@@ -169,7 +168,7 @@ internal class BrowserServiceImpl(
                             cdp.call("Page.getLayoutMetrics"),
                             contentOnScreen(pkg),
                         )
-                    touchAt(target, request.humanize, request.backend)
+                    touchAt(target, request.humanize)
                 }
             return result.copy(woke = woke, seq = sequence())
         } finally {

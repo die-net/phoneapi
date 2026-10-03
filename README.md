@@ -92,7 +92,7 @@ scripts/papi WS /v1/events
 
 The helper is a separate `app_process` that registers a binder with the app. `/v1/device` reports it as `running`, `starting`, `needs_pairing`, `needs_usb`, or `stopped`. `capabilities` shrinks to what works in the current state.
 
-`GET /v1/device` is the capability check. `helper` is the status below, `uiAutomationConnected` means the helper's UiAutomation session is up, and `capabilities` says what the current device can do. Snapshots, injected input, key events, screenshots, app stop and clear, logcat, and Chrome DevTools need the helper. `ui.stableIds` needs Android 13. `encoder.lowLatency`, `adb.wireless`, and `stream.audio.submix` need Android 11. `settings.secure` is `WRITE_SECURE_SETTINGS`. Video is the helper display mirror (`stream.video.mirror`). Touch `backend` is `auto` or `inject`; both inject through the helper. Text `mode` is `auto`, `keyboard`, `keyevent`, or `setText`.
+`GET /v1/device` is the capability check. `helper` is the status below, `uiAutomationConnected` means the helper's UiAutomation session is up, and `capabilities` says what the current device can do. Snapshots, injected input, key events, screenshots, app stop and clear, logcat, and Chrome DevTools need the helper. `ui.stableIds` needs Android 13. `encoder.lowLatency`, `adb.wireless`, and `stream.audio.submix` need Android 11. `settings.secure` is `WRITE_SECURE_SETTINGS`. Video is the helper display mirror (`stream.video.mirror`). Touches inject through the helper. Text `mode` is `auto`, `keyboard`, `keyevent`, or `setText`.
 
 | Status | Meaning |
 | --- | --- |
