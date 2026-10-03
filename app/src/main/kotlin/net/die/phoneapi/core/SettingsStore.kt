@@ -14,26 +14,10 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.serializer
 
 @Serializable
-enum class BindMode {
-    /** Bind only to the Wi-Fi/Ethernet interface address; never loopback. */
-    LAN,
-    /** Bind to all interfaces, including loopback (needed for `adb forward`). */
-    ALL,
-}
-
-@Serializable
 data class Settings(
+    /** Preferred local TCP port for `adb forward` onto the abstract socket. */
     val port: Int,
-    val bindMode: BindMode = BindMode.LAN,
-    val mdnsEnabled: Boolean = true,
-    val mdnsName: String = "Android device",
     val keepAwakeMs: Long = 60_000,
-    /** Random id advertised over mDNS so clients can recognise this device after IP changes. */
-    val instanceId: String,
-    /** The pairing screen shows the IP address instead of the `.local` name. */
-    val pairingShowsIp: Boolean = false,
-    /** When on, an HTTPS listener splices onto the abstract socket and mDNS is advertised. */
-    val tlsEnabled: Boolean = false,
 )
 
 /**
@@ -77,16 +61,13 @@ class SettingsStore(private val dir: File) {
     }
 
     private fun load(): Settings = StoreIo.call {
-        // Before this file can be rewritten, move a legacy plaintext password into the keystore.
-        TlsPasswordStore(dir).migrate()
-        atomic.readUtf8()?.let { ApiJson.decodeFromString(serializer<Settings>(), it) }
+        atomic.readUtf8()?.let { text ->
+            runCatching { ApiJson.decodeFromString(serializer<Settings>(), text) }.getOrNull()
+        }
             ?: run {
                 val random = SecureRandom()
                 val created =
-                    Settings(
-                        port = EPHEMERAL_MIN + random.nextInt(EPHEMERAL_MAX - EPHEMERAL_MIN),
-                        instanceId = randomToken(random, 6),
-                    )
+                    Settings(port = EPHEMERAL_MIN + random.nextInt(EPHEMERAL_MAX - EPHEMERAL_MIN))
                 dir.mkdirs()
                 atomic.writeUtf8(ApiJson.encodeToString(serializer<Settings>(), created))
                 created
@@ -94,6 +75,7 @@ class SettingsStore(private val dir: File) {
     }
 
     private companion object {
+        const val SETTINGS_FILE_NAME = "settings.json"
         // Stay clear of well-known and commonly scanned ports.
         const val EPHEMERAL_MIN = 20_000
         const val EPHEMERAL_MAX = 60_000

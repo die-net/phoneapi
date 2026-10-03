@@ -8,7 +8,6 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
-    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <uses-permission
         android:name="android.permission.NEARBY_WIFI_DEVICES"
@@ -75,16 +74,8 @@
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Holds the PhoneAPI listener for an adb session or, when HTTPS is on, across reboots." />
+                android:value="Holds the PhoneAPI abstract-socket listener for an adb session." />
         </service>
-
-        <receiver
-            android:name=".server.BootReceiver"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.BOOT_COMPLETED" />
-            </intent-filter>
-        </receiver>
 
         <receiver
             android:name=".helperclient.HelperStartReceiver"
@@ -97,7 +88,6 @@
             android:permission="android.permission.DUMP">
             <intent-filter>
                 <action android:name="net.die.phoneapi.CREATE_TOKEN" />
-                <action android:name="net.die.phoneapi.SET_BIND" />
                 <action android:name="net.die.phoneapi.SET_PIN" />
                 <action android:name="net.die.phoneapi.PAIR_ADB" />
             </intent-filter>

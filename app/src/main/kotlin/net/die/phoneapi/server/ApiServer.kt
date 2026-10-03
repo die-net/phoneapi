@@ -25,25 +25,18 @@ import net.die.phoneapi.server.routes.browserRoutes
 import net.die.phoneapi.server.routes.deviceRoutes
 import net.die.phoneapi.server.routes.eventRoutes
 import net.die.phoneapi.server.routes.inputRoutes
-import net.die.phoneapi.server.routes.isPairingCall
 import net.die.phoneapi.server.routes.openApiRoutes
-import net.die.phoneapi.server.routes.pairRoutes
 import net.die.phoneapi.server.routes.streamRoutes
 import net.die.phoneapi.server.routes.tokenRoutes
 import net.die.phoneapi.server.routes.uiRoutes
 import net.die.phoneapi.server.routes.waitRoutes
 
-/**
- * HTTP API on an abstract local socket. HTTPS, when enabled, is a byte splice onto that socket and
- * is not a second set of routes.
- */
+/** HTTP API on an abstract local socket, reached from the host with `adb forward`. */
 class ApiServer(
-    private val tls: () -> TlsManager,
     private val services: ServerServices,
     private val socketName: String,
 ) {
     private var server: EmbeddedServer<AbstractHttpEngine, AbstractHttpEngine.Configuration>? = null
-    private var splice: TlsSplice? = null
 
     @Synchronized
     fun start() {
@@ -61,21 +54,7 @@ class ApiServer(
     }
 
     @Synchronized
-    fun startTls(host: String, port: Int) {
-        start()
-        splice?.stop()
-        splice = TlsSplice(tls(), socketName).also { it.start(host, port) }
-    }
-
-    @Synchronized
-    fun stopTls() {
-        splice?.stop()
-        splice = null
-    }
-
-    @Synchronized
     fun stop() {
-        stopTls()
         server?.stop(gracePeriodMillis = 200, timeoutMillis = 1_000)
         server = null
     }
@@ -103,12 +82,8 @@ fun Application.phoneApiModule(services: ServerServices) {
             call.respond(HttpStatusCode.InternalServerError, ApiError("internal", e.message))
         }
     }
-    install(BearerAuth) {
-        tokens = services.tokens
-        isPublic = { call -> call.isPairingCall(services.pairing) }
-    }
+    install(BearerAuth) { tokens = services.tokens }
     routing {
-        pairRoutes(services)
         deviceRoutes(services)
         openApiRoutes()
         tokenRoutes(services)

@@ -1,10 +1,10 @@
 # PhoneAPI
 
-PhoneAPI is an Android app that lets a paired client drive the device and its Chrome tabs. The HTTP and WebSocket API, plus an on-device [MCP](https://modelcontextprotocol.io) server, listen on an abstract local socket named after the package while the listener is running. HTTPS on the local network is optional, and only on Android 11 or newer while Wireless Debugging is on.
+PhoneAPI is an Android app that lets a paired client drive the device and its Chrome tabs. The HTTP and WebSocket API, plus an on-device [MCP](https://modelcontextprotocol.io) server, listen on an abstract local socket named after the package while the listener is running. A computer reaches that socket with `adb forward` (USB or Wireless Debugging).
 
 The shell helper reads the UI through UiAutomation, injects input, captures the screen, and runs privileged app commands. It is started over USB, or on Android 11 or newer over Wireless Debugging. Chrome DevTools uses the same split. On Android 11 and newer adbd opens Chrome's socket, because the helper is not allowed to. On Android 10 the helper connects to an adb reverse socket, and the computer forwards that to Chrome. Video and audio are encoded on the device and played in a browser.
 
-Android 10 and newer (minSdk 29). Wireless Debugging, HTTPS, and helper restart without a USB cable need Android 11.
+Android 10 and newer (minSdk 29). Wireless Debugging and helper restart without a USB cable need Android 11.
 
 ## Requirements
 
@@ -34,14 +34,11 @@ The same checks CI runs:
 `scripts/dev-setup.sh` builds the debug APK, installs it, grants `WRITE_SECURE_SETTINGS`, mints a token into `.dev/pairing.json` with `scripts/pair-adb.sh`, and starts the helper over USB.
 
 ```sh
-scripts/dev-setup.sh                 # USB device; keeps the current bind mode
-scripts/dev-setup.sh --bind-all      # also set the HTTPS listener to every interface
-scripts/dev-setup.sh --no-build      # skip the Gradle build
+scripts/dev-setup.sh            # USB device
+scripts/dev-setup.sh --no-build # skip the Gradle build
 ```
 
-`scripts/pair-adb.sh` always forwards the abstract socket and writes `scheme` `http` with host `127.0.0.1`, so the dev client uses `http://127.0.0.1`. `--bind-all` also sets the optional HTTPS listener to every interface, which is what an emulator needs once HTTPS is on. Without it, HTTPS (Android 11+, Wireless Debugging on) binds only to the Wi-Fi or Ethernet address. `--no-build` skips Gradle when the APK is already built.
-
-The bearer token, host, port, and certificate pins are in `.dev/pairing.json`, which is gitignored.
+`scripts/pair-adb.sh` forwards the abstract socket and writes `scheme` `http` with host `127.0.0.1`, so the client uses `http://127.0.0.1`. The bearer token, host, and port are in `.dev/pairing.json`, which is gitignored.
 
 To do the same steps by hand:
 
@@ -52,21 +49,11 @@ scripts/pair-adb.sh
 scripts/helper-start.sh
 ```
 
-Open PhoneAPI for status, the USB forward command, the helper start command, and the list of paired computers. On Android 11 and newer the same screen can turn on HTTPS, pair Wireless Debugging, and pair a computer on the local network. Only computers you approve can connect, and you can revoke one there at any time.
+Open PhoneAPI for status, the USB forward command, the helper start command, and the list of tokens. On Android 11 and newer the same screen can pair Wireless Debugging. You can revoke a token there at any time.
 
 ## Pairing
 
-A paired computer holds its own bearer token. There are two ways to get one.
-
-**From a browser, no ADB.** This path needs Android 11 or newer, because it is HTTPS and HTTPS runs only while Wireless Debugging is on. In the app, tap "Pair a computer". The phone shows an address such as `https://Android_1A2B3C4D.local:41234/pair` (or the IP address; there is a toggle) and keeps pairing open for five minutes, or until you leave the screen. Open the address on a computer on the same network, accept the self-signed certificate warning, enter a name, and tap Allow on the phone. The page then shows the base URL, the token, an MCP config snippet, a pinned `curl` example, and a `pairing.json` download.
-
-Android chooses the `.local` name, not the app, and only reports it on Android 16 with a recent connectivity module; otherwise the phone shows the IP address. The name can change, for example after a reboot, so treat it as a convenience for typing the pairing address.
-
-The pairing routes (`GET /pair`, `POST /v1/pair`, `GET /v1/pair/{id}`) are the only ones that run without a token, and only while the window is open. Otherwise they get the same empty 404 as any unauthenticated request. One request can wait for approval at a time. An approved token is handed out once, and is revoked if nobody collects it within a minute.
-
-This assumes a trusted local network for the few minutes pairing is open: the window is off by default, short, and needs an explicit Allow on the phone. There is no code to compare, because a browser cannot check the certificate it was shown. After pairing, clients pin the certificate, so later connections are protected the way SSH's first-use trust is.
-
-**Over ADB.** If you installed the APK with ADB, the shell user is already trusted, so no approval is needed. Either run the broadcast directly, which prints `Broadcast completed: result=0, data="<pairing JSON>"`:
+A paired computer holds its own bearer token. Mint one over ADB. The shell user is already trusted, so no approval on the phone is needed. Either run the broadcast directly, which prints `Broadcast completed: result=0, data="<pairing JSON>"`:
 
 ```sh
 adb shell am broadcast -a net.die.phoneapi.CREATE_TOKEN \
@@ -77,24 +64,21 @@ or use `scripts/pair-adb.sh`, which needs only `adb`. It forwards the abstract s
 
 ```sh
 scripts/pair-adb.sh --name laptop > pairing.json
-scripts/pair-adb.sh --forward > pairing.json   # HTTPS on every interface, for an emulator
 ```
 
-The broadcast and the browser page both return this shape. `host` is the Wi-Fi or Ethernet address (empty when there is none), or whatever host the browser used:
+The broadcast returns this shape. `scripts/pair-adb.sh` then inserts `"scheme":"http"` (the host is already `127.0.0.1`):
 
 ```json
-{"host":"192.168.1.23","port":41234,"certSha256":"09:44:…","spkiSha256":"q5Z…=","token":"pa_…","name":"laptop"}
+{"scheme":"http","host":"127.0.0.1","port":41234,"token":"pa_…","name":"laptop"}
 ```
-
-`scripts/pair-adb.sh` then rewrites `host` to `127.0.0.1` and inserts `"scheme":"http"`, because it has forwarded the abstract socket. Clients that see no `scheme` use HTTPS. `--forward` is the extra step that sets bind mode `ALL`.
 
 ## Authentication
 
-Every request needs `Authorization: Bearer <token>`. A missing or unknown token gets an empty 404. The `access_token` query parameter is accepted only on `GET /viewer` and on WebSocket upgrades, which is how the viewer page opens its video and audio sockets. Every other route ignores it and still requires the header. The certificate is self-signed; pin `certSha256` (certificate hash) or `spkiSha256` (public-key hash, the form `curl --pinnedpubkey sha256//…` takes) from the pairing JSON.
+Every request needs `Authorization: Bearer <token>`. A missing or unknown token gets an empty 404. The `access_token` query parameter is accepted only on `GET /viewer` and on WebSocket upgrades, which is how the viewer page opens its video and audio sockets. Every other route ignores it and still requires the header.
 
-Tokens carry scopes: `observe`, `control`, `browser`, `stream`, and `admin`. Pairing and `CREATE_TOKEN` grant all of them. Create a narrower token with `POST /v1/tokens`.
+Tokens carry scopes: `observe`, `control`, `browser`, `stream`, and `admin`. `CREATE_TOKEN` grants all of them. Create a narrower token with `POST /v1/tokens`.
 
-`scripts/papi` reads `.dev/pairing.json`, or the file named by `PAPI_PAIRING`, and skips certificate verification, which is appropriate for development:
+`scripts/papi` reads `.dev/pairing.json`, or the file named by `PAPI_PAIRING`:
 
 ```sh
 scripts/papi GET /v1/device
@@ -124,7 +108,7 @@ Launch it once from the computer:
 scripts/helper-start.sh
 ```
 
-The process detaches, so the command returns while the helper keeps running. That USB start does not survive a reboot; run it again, or leave HTTPS on so the listener starts at boot. On Android 11+, after pairing Wireless Debugging once, the app restarts the helper itself after a crash or a package update while its process is running. A successful launch leaves Wireless Debugging on, because that connection is also how the browser API reaches Chrome. Granting `WRITE_SECURE_SETTINGS`, which `dev-setup.sh` does, is what allows the app to turn Wireless Debugging on. HTTPS listens only while Wireless Debugging is on.
+The process detaches, so the command returns while the helper keeps running. That USB start does not survive a reboot; run it again after reboot, or start the listener and helper over Wireless Debugging. On Android 11+, after pairing Wireless Debugging once, the app restarts the helper itself after a crash or a package update while its process is running. A successful launch leaves Wireless Debugging on, because that connection is also how the browser API reaches Chrome. Granting `WRITE_SECURE_SETTINGS`, which `dev-setup.sh` does, is what allows the app to turn Wireless Debugging on.
 
 On Android 10, browser calls use a USB tunnel instead. `scripts/helper-start.sh` installs it. By hand:
 
@@ -133,7 +117,7 @@ adb forward tcp:9222 localabstract:chrome_devtools_remote
 adb reverse localabstract:phoneapi_cdp tcp:9222
 ```
 
-To pair from the phone (Android 11+), tap "Pair wireless debugging" in the app. It opens Developer options and watches mDNS for this phone's pairing service. When the system "Pair device with pairing code" dialog opens, a heads-up notification asks for the code inline. The dialog has to stay in front: Android closes the pairing port when it is dismissed, including when the user switches apps. On Android 10 the HTTPS switch, Wireless Debugging pairing, and on-phone computer pairing are hidden, and the listener does not start at boot. The USB command stays available.
+To pair Wireless Debugging from the phone (Android 11+), tap "Pair wireless debugging" in the app. It opens Developer options and watches mDNS for this phone's pairing service. When the system "Pair device with pairing code" dialog opens, a heads-up notification asks for the code inline. The dialog has to stay in front: Android closes the pairing port when it is dismissed, including when the user switches apps. On Android 10 that row is hidden. The USB command stays available.
 
 These calls need the helper: UI snapshots and finds, injected input, key events, typing, `POST /v1/apps/{pkg}/stop` and `/clear`, screenshots, logcat, every `/v1/browser` route, and the mirror and audio-submix stream paths. App launch and wake still run without it. Wake falls back to a system activity when the helper is down. A launch from a background process needs the helper, because Android blocks the app itself from starting activities then.
 
@@ -171,11 +155,11 @@ scripts/papi POST /v1/browser/targets/TARGET/evaluate '{"expression":"document.t
 
 On a debuggable emulator image, Chrome only publishes that socket after it is started with remote debugging, for example a `/data/local/tmp/chrome-command-line` file containing `chrome --disable-fre --no-first-run --remote-debugging-port=9222`, followed by a force-stop and launch. Some emulator images also refuse the shell user; `adb root` makes the helper uid 0, which Chrome accepts. `scripts/helper-start.sh` does not change that.
 
-Open the viewer at `https://<host>:<port>/viewer` with the stream scope. It plays `WS /v1/stream/video` and `WS /v1/stream/audio` with WebCodecs. The certificate warning is the self-signed dev certificate.
+Open the viewer at `http://127.0.0.1:<port>/viewer` with the stream scope (after `adb forward`). It plays `WS /v1/stream/video` and `WS /v1/stream/audio` with WebCodecs.
 
-Point an MCP client at `https://<host>:<port>/mcp` with the same bearer token. `access_token` is not accepted on `/mcp`. The server is stateless Streamable HTTP. It accepts a `Host` of `localhost`, `127.0.0.1`, or `::1`, so a Wi-Fi address in the pairing file is rejected before a tool runs. `scripts/pair-adb.sh` always writes `127.0.0.1`. Browser pairing does not, so use the stdio bridge below or forward the port yourself.
+Point an MCP client at `http://127.0.0.1:<port>/mcp` with the same bearer token. `access_token` is not accepted on `/mcp`. The server is stateless Streamable HTTP. It accepts a `Host` of `localhost`, `127.0.0.1`, or `::1`. `scripts/pair-adb.sh` always writes `127.0.0.1`.
 
-Many MCP clients verify certificates and reject this self-signed one (`CN=Android device`, with no name for the address). `scripts/mcp` is a stdio bridge for those clients. It reads the same pairing file as `scripts/papi` (`.dev/pairing.json`, or the file named by `PAPI_PAIRING`), pins `spkiSha256` with `curl --pinnedpubkey`, and forwards one JSON-RPC message per line. A notification comes back as HTTP 202 and produces no stdout line. Logs go to stderr.
+`scripts/mcp` is a stdio bridge for MCP clients. It reads the same pairing file as `scripts/papi` (`.dev/pairing.json`, or the file named by `PAPI_PAIRING`) and forwards one JSON-RPC message per line. A notification comes back as HTTP 202 and produces no stdout line. Logs go to stderr.
 
 ```sh
 scripts/mcp
@@ -235,9 +219,6 @@ Closed request fields are enums. A value outside the set is a `400` `bad_request
 | `WS` | `/v1/events` | observe |
 | `GET` | `/viewer` | stream |
 | `WS` | `/v1/stream/video`, `/v1/stream/audio` | stream |
-| `GET` | `/pair` | none, only while pairing is open |
-| `POST` | `/v1/pair` | none, only while pairing is open |
-| `GET` | `/v1/pair/{id}` | none, the request id |
 | `GET`, `POST` | `/v1/tokens` | admin |
 | `DELETE` | `/v1/tokens/{id}` | admin |
 | `POST` | `/mcp` | the tool's scope |

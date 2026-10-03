@@ -3,31 +3,14 @@
     <string name="app_name">PhoneAPI</string>
     <string name="status_title">Status</string>
     <string name="status_abstract">Listener: adb forward tcp:%1$d, localabstract:%2$s, then http://127.0.0.1:%1$d</string>
-    <string name="tls_title">HTTPS</string>
-    <string name="tls_summary">Off by default. When on, and while wireless debugging is on, this phone accepts HTTPS on the local network and advertises itself.</string>
-    <string name="tls_needs_wireless">Turn on wireless debugging before HTTPS.</string>
     <string name="forward_title">ADB forward</string>
     <string name="copied">Copied</string>
     <string name="listener_title">PhoneAPI is listening</string>
     <string name="listener_text">The adb listener is running.</string>
-    <string name="status_listening">Server: https://%1$s:%2$d</string>
     <string name="status_helper">Helper: %1$s</string>
     <string name="helper_state_running">running</string>
     <string name="helper_state_starting">starting</string>
     <string name="helper_state_off">not running</string>
-
-    <string name="pair_how">Put the computer on the same Wi-Fi as this phone, tap Pair a computer, and open the address shown in a browser on the computer. The browser will warn that the connection is not private because the phone uses its own certificate; choose Advanced, then continue. Enter a name for the computer and tap Allow here. The page then shows the address and token to give your API client or AI agent.</string>
-    <string name="pair_button">Pair a computer</string>
-    <string name="pair_no_network">Connect this phone to Wi-Fi or Ethernet to pair a computer from a browser.</string>
-    <string name="pair_countdown">Open this address on the computer. Pairing closes in %1$d:%2$02d, or when you leave this screen.</string>
-    <string name="pair_show_ip">Show IP address</string>
-    <string name="pair_show_name">Show .local name</string>
-    <string name="pair_stop">Stop pairing</string>
-    <string name="approve_title">Allow this computer?</string>
-    <string name="approve_message">\"%1$s\" at %2$s will be able to see this phone\'s screen and control it until you revoke it.</string>
-    <string name="approve_allow">Allow</string>
-    <string name="approve_deny">Deny</string>
-    <string name="paired_toast">Paired with %1$s</string>
 
     <string name="helper_title">Start the helper</string>
     <string name="wireless_pair">Pair wireless debugging</string>

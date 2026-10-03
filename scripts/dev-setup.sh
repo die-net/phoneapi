@@ -2,20 +2,15 @@
 # Installs the debug APK on the connected device/emulator and mints a token over ADB with
 # scripts/pair-adb.sh. Writes .dev/pairing.json.
 #
-#   scripts/dev-setup.sh [--no-build] [--bind-all]
-#
-# --bind-all sets the optional HTTPS listener to every interface. pair-adb.sh always
-# forwards the abstract socket to 127.0.0.1.
+#   scripts/dev-setup.sh [--no-build]
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 PKG="${PHONEAPI_PKG:-net.die.phoneapi.dev}"
 build=1
-bind_all=0
 for arg in "$@"; do
   case "$arg" in
     --no-build) build=0 ;;
-    --bind-all) bind_all=1 ;;
     *) echo "unknown arg $arg" >&2; exit 2 ;;
   esac
 done
@@ -33,9 +28,7 @@ adb install -r -g app/build/outputs/apk/debug/app-debug.apk >/dev/null
 adb shell pm grant "$PKG" android.permission.WRITE_SECURE_SETTINGS
 
 mkdir -p .dev
-pair_args=(--name dev-setup)
-if [[ $bind_all == 1 ]]; then pair_args+=(--forward); fi
-PHONEAPI_PKG="$PKG" scripts/pair-adb.sh "${pair_args[@]}" > .dev/pairing.json
+PHONEAPI_PKG="$PKG" scripts/pair-adb.sh --name dev-setup > .dev/pairing.json
 
 # Shell helper: input injection, screencap, and privileged app commands. It detaches and returns.
 scripts/helper-start.sh "$PKG" || echo "Helper did not start. Snapshots, input, and browser calls need it." >&2

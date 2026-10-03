@@ -4,10 +4,6 @@
         android:key="status"
         android:selectable="false"
         android:title="@string/status_title" />
-    <SwitchPreferenceCompat
-        android:key="tls"
-        android:summary="@string/tls_summary"
-        android:title="@string/tls_title" />
     <Preference
         android:key="forward"
         android:title="@string/forward_title" />
@@ -17,9 +13,6 @@
     <Preference
         android:key="wireless"
         android:title="@string/wireless_pair" />
-    <Preference
-        android:key="pair"
-        android:title="@string/pair_button" />
     <PreferenceCategory
         android:key="tokens"
         android:title="@string/tokens_title" />

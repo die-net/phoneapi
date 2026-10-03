@@ -1,6 +1,5 @@
 package net.die.phoneapi
 
-import net.die.phoneapi.core.BindMode
 import net.die.phoneapi.model.Scope
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
@@ -28,20 +27,6 @@ class ShellCommandParsingTest {
         assertTrue(unknown is Parse.Error)
         assertTrue((unknown as Parse.Error).message.contains("bogus"))
         assertTrue(parseScopeList("observe,nope") is Parse.Error)
-    }
-
-    @Test
-    fun `parses bind mode`() {
-        assertEquals(BindMode.ALL, taken(parseBindMode(" all ")))
-        assertEquals(BindMode.LAN, taken(parseBindMode("Lan")))
-        assertEquals(BindMode.ALL, taken(parseBindMode("ALL")))
-        assertTrue(parseBindMode(null) is Parse.Error)
-        assertTrue(parseBindMode("") is Parse.Error)
-        assertTrue(parseBindMode("   ") is Parse.Error)
-        val unknown = parseBindMode("wifi")
-        assertTrue(unknown is Parse.Error)
-        assertEquals("unknown bind mode", (unknown as Parse.Error).message)
-        assertEquals("mode is required", (parseBindMode(null) as Parse.Error).message)
     }
 
     @Test

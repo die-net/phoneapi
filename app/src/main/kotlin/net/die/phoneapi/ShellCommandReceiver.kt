@@ -7,7 +7,6 @@ import android.content.Intent
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.launch
 import net.die.phoneapi.core.ApiJson
-import net.die.phoneapi.core.BindMode
 import net.die.phoneapi.model.PairingInfo
 import net.die.phoneapi.model.Scope
 
@@ -17,16 +16,14 @@ import net.die.phoneapi.model.Scope
  *
  * ```
  * adb shell am broadcast -a net.die.phoneapi.CREATE_TOKEN -n <pkg>/net.die.phoneapi.ShellCommandReceiver --es name laptop --es scopes observe,control
- * adb shell am broadcast -a net.die.phoneapi.SET_BIND -n <pkg>/net.die.phoneapi.ShellCommandReceiver --es mode ALL
  * adb shell am broadcast -a net.die.phoneapi.SET_PIN -n <pkg>/net.die.phoneapi.ShellCommandReceiver --es pin 1234
  * adb shell am broadcast -a net.die.phoneapi.PAIR_ADB -n <pkg>/net.die.phoneapi.ShellCommandReceiver --es code 123456 --ei port 37123
  * ```
  *
- * The result data is the pairing JSON for `CREATE_TOKEN`; its `host` is the Wi-Fi or Ethernet
- * address, empty when there is none (use `adb forward` and 127.0.0.1 then). Omitting `scopes`
- * grants every scope. `SET_BIND` takes `LAN` or `ALL`. `SET_PIN` with no `pin` clears it. A bad
- * extra returns result code 1 and a short message; success is result code 0. The same PIN store is
- * writable over `PUT|DELETE /v1/device/pin` (admin scope); neither path returns the PIN.
+ * The result data is the pairing JSON for `CREATE_TOKEN`. Omitting `scopes` grants every scope.
+ * `SET_PIN` with no `pin` clears it. A bad extra returns result code 1 and a short message; success
+ * is result code 0. The same PIN store is writable over `PUT|DELETE /v1/device/pin` (admin scope);
+ * neither path returns the PIN.
  */
 class ShellCommandReceiver : BroadcastReceiver() {
     @Suppress("TooGenericExceptionCaught") // A bad extra must not crash the app process.
@@ -62,7 +59,6 @@ class ShellCommandReceiver : BroadcastReceiver() {
     private suspend fun handle(graph: AppGraph, intent: Intent, pending: PendingResult) {
         when (intent.action) {
             ACTION_CREATE_TOKEN -> createToken(graph, intent, pending)
-            ACTION_SET_BIND -> setBind(graph, intent, pending)
             ACTION_SET_PIN -> setPin(graph, intent, pending)
             ACTION_PAIR_ADB -> pairAdb(graph, intent, pending)
         }
@@ -74,30 +70,15 @@ class ShellCommandReceiver : BroadcastReceiver() {
             is Parse.Error -> fail(pending, scopes.message)
             is Parse.Ok -> {
                 val created = graph.tokens.create(name, scopes.value)
-                val pins = graph.tls.pins
-                val lan = graph.network.lanAddress.value
                 val pairing =
                     PairingInfo(
-                        host = lan?.hostAddress.orEmpty(),
+                        host = "127.0.0.1",
                         port = graph.settings.current.port,
-                        certSha256 = pins.certSha256,
-                        spkiSha256 = pins.spkiSha256,
                         token = created.token,
                         name = name,
                     )
                 pending.resultCode = 0
                 pending.resultData = ApiJson.encodeToString(PairingInfo.serializer(), pairing)
-            }
-        }
-    }
-
-    private fun setBind(graph: AppGraph, intent: Intent, pending: PendingResult) {
-        when (val mode = parseBindMode(intent.getStringExtra("mode"))) {
-            is Parse.Error -> fail(pending, mode.message)
-            is Parse.Ok -> {
-                graph.settings.update { it.copy(bindMode = mode.value) }
-                pending.resultCode = 0
-                pending.resultData = mode.value.name
             }
         }
     }
@@ -130,12 +111,10 @@ class ShellCommandReceiver : BroadcastReceiver() {
 
     companion object {
         const val ACTION_CREATE_TOKEN = "net.die.phoneapi.CREATE_TOKEN"
-        const val ACTION_SET_BIND = "net.die.phoneapi.SET_BIND"
         const val ACTION_SET_PIN = "net.die.phoneapi.SET_PIN"
         const val ACTION_PAIR_ADB = "net.die.phoneapi.PAIR_ADB"
 
-        private val ACTIONS =
-            setOf(ACTION_CREATE_TOKEN, ACTION_SET_BIND, ACTION_SET_PIN, ACTION_PAIR_ADB)
+        private val ACTIONS = setOf(ACTION_CREATE_TOKEN, ACTION_SET_PIN, ACTION_PAIR_ADB)
 
         /** The host command that mints a token over ADB and prints the pairing JSON. */
         fun createTokenCommand(packageName: String): String =
@@ -160,16 +139,6 @@ internal fun parseScopeList(raw: String?): Parse<Set<Scope>> {
             ?: return Parse.Error("unknown scope $name")
     }
     return Parse.Ok(scopes.toSet())
-}
-
-/** `LAN` or `ALL`, ignoring case and surrounding whitespace. */
-internal fun parseBindMode(raw: String?): Parse<BindMode> {
-    val token = raw?.trim().orEmpty()
-    if (token.isEmpty()) return Parse.Error("mode is required")
-    val mode =
-        BindMode.entries.firstOrNull { it.name.equals(token, ignoreCase = true) }
-            ?: return Parse.Error("unknown bind mode")
-    return Parse.Ok(mode)
 }
 
 internal fun parsePairingCode(raw: String?): Parse<String> {

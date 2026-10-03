@@ -27,7 +27,6 @@ import net.die.phoneapi.core.InputService
 import net.die.phoneapi.core.PowerService
 import net.die.phoneapi.core.Screenshotter
 import net.die.phoneapi.core.SettingsStore
-import net.die.phoneapi.core.TlsPasswordStore
 import net.die.phoneapi.core.UiService
 import net.die.phoneapi.core.WaitService
 import net.die.phoneapi.helperclient.HelperConnection
@@ -51,12 +50,9 @@ import net.die.phoneapi.power.PowerServiceImpl
 import net.die.phoneapi.server.ApiServer
 import net.die.phoneapi.server.AudioFeed
 import net.die.phoneapi.server.DeviceFacts
-import net.die.phoneapi.server.MdnsAdvertiser
 import net.die.phoneapi.server.NetworkWatcher
-import net.die.phoneapi.server.PairingManager
 import net.die.phoneapi.server.ServerController
 import net.die.phoneapi.server.ServerServices
-import net.die.phoneapi.server.TlsManager
 import net.die.phoneapi.server.TokenStore
 import net.die.phoneapi.server.VideoFeed
 import net.die.phoneapi.stream.AudioStream
@@ -77,7 +73,6 @@ class AppGraph(
     val bus = EventBus()
     val settings = SettingsStore(filesDir)
     val tokens = TokenStore(filesDir)
-    val tls by lazy { TlsManager(filesDir, TlsPasswordStore(filesDir).chars()) }
     val state = DeviceStateTracker(context, bus)
     val helper =
         HelperConnection(
@@ -202,9 +197,6 @@ class AppGraph(
         )
     internal val audio = AudioStream(StreamLease(context, settings), helper, ioDispatcher)
 
-    val pairing = PairingManager(tokens, scope)
-    val mdns = MdnsAdvertiser(context)
-
     val services =
         ServerServices(
             ui = ui,
@@ -226,14 +218,10 @@ class AppGraph(
             cdp = HelperCdpPipes(::openDevtools, ioDispatcher),
             viewerText = { viewerLink() },
             logcat = HelperLogcatFeed(helper, bus, ioDispatcher),
-            pairing = pairing,
-            pairHtml = { asset("pair.html") },
-            pins = { tls.pins },
         )
 
-    val server = ApiServer({ tls }, services, socketName = context.packageName)
-    val serverController =
-        ServerController(scope, server, network, settings, mdns, helperSupervisor.wireless)
+    val server = ApiServer(services, socketName = context.packageName)
+    val serverController = ServerController(scope, server)
 
     private suspend fun asset(name: String): ByteArray =
         withContext(ioDispatcher) { context.assets.open(name).use { it.readBytes() } }
@@ -307,10 +295,10 @@ class AppGraph(
 
     private fun viewerLink(): String {
         val port = settings.current.port
-        val host = network.lanAddress.value?.hostAddress ?: "127.0.0.1"
-        return "https://$host:$port/viewer?access_token=TOKEN\n" +
+        return "http://127.0.0.1:$port/viewer?access_token=TOKEN\n" +
             "Replace TOKEN with this device's bearer token. " +
-            "The query parameter is accepted only by GET /viewer and by WebSocket upgrades."
+            "The query parameter is accepted only by GET /viewer and by WebSocket upgrades. " +
+            "Forward the abstract socket first: adb forward tcp:$port localabstract:${context.packageName}."
     }
 
     private companion object {

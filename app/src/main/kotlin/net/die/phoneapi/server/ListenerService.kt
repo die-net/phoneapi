@@ -15,7 +15,7 @@ import net.die.phoneapi.PhoneApiApp
 import net.die.phoneapi.R
 import net.die.phoneapi.ui.MainActivity
 
-/** Holds the abstract-socket listener for an adb session, or across reboots while HTTPS is on. */
+/** Holds the abstract-socket listener for an adb session. */
 class ListenerService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 

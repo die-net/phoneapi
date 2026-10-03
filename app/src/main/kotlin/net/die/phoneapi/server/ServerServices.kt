@@ -44,9 +44,6 @@ data class ServerServices(
     val cdp: CdpPipes,
     val viewerText: () -> String,
     val logcat: LogcatFeed,
-    val pairing: PairingManager,
-    val pairHtml: suspend () -> ByteArray,
-    val pins: () -> CertPins,
 )
 
 /** Per-connection logcat. Not part of [ServerServices.events]; only clients that ask receive it. */

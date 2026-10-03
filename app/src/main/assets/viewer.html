@@ -23,7 +23,8 @@ const token = params.get("access_token") || "";
 const auth = "access_token=" + encodeURIComponent(token);
 
 function socket(path) {
-  return new WebSocket("wss://" + location.host + path + "?" + auth);
+  const scheme = location.protocol === "https:" ? "wss://" : "ws://";
+  return new WebSocket(scheme + location.host + path + "?" + auth);
 }
 
 function startCodes(bytes) {

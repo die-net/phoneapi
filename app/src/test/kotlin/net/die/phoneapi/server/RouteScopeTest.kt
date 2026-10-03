@@ -80,8 +80,8 @@ class RouteScopeTest {
     }
 }
 
-/** MCP checks scopes per tool; pairing runs without a token while its window is open. */
-private val UNSCOPED = setOf("/mcp", "/pair", "/v1/pair", "/v1/pair/{id}")
+/** MCP checks scopes per tool; it is not wrapped in [scoped]. */
+private val UNSCOPED = setOf("/mcp")
 
 private data class RegisteredRoute(val method: ApiMethod, val path: String, val scope: Scope)
 

@@ -8,7 +8,8 @@
     <!-- Newer attributes are intentionally declared and simply ignored on older releases. -->
     <issue id="UnusedAttribute" severity="ignore" />
     <!-- BouncyCastle ships a trust-all manager for its own tooling; we never use it.
-         Kadb trusts adbd's self-signed certificate and authenticates with the paired key. -->
+         Kadb pulls BouncyCastle transitively and trusts adbd's self-signed certificate
+         while authenticating with the paired key. -->
     <issue id="TrustAllX509TrustManager">
         <ignore regexp="bcpkix-jdk18on" />
         <ignore regexp="/kadb/" />

@@ -117,8 +117,6 @@ dependencies {
     implementation(libs.mcp.server)
     implementation(libs.mcp.core)
 
-    implementation(libs.bouncycastle.pkix)
-    implementation(libs.bouncycastle.prov)
     implementation(libs.kadb)
     implementation(libs.kadb.mdns)
     // AdbStream.source and AdbStream.sink are Okio types.

@@ -3,35 +3,27 @@
 # stdin, POSTs it to /mcp, and writes each JSON response as one line on stdout. A notification
 # is answered with HTTP 202 and produces no stdout line. Logs go to stderr.
 #
-# Pins spkiSha256 from the pairing file. --insecure skips the authority and hostname checks:
-# the certificate is CN=Android device and has no name for the address you connect to.
-#
 #   scripts/mcp
 #   PAPI_PAIRING=pairing.json scripts/mcp
 #
 # /mcp accepts Host localhost, 127.0.0.1, and ::1 unless allowedHosts is changed. Point the
-# pairing file at a forwarded loopback address (scripts/pair-adb.sh --forward).
+# pairing file at a forwarded loopback address (scripts/pair-adb.sh).
 set -euo pipefail
 
 pairing="$(realpath "${PAPI_PAIRING:-$(dirname "$0")/../.dev/pairing.json}")"
 host="$(jq -r '.host | select(. != "") // "127.0.0.1"' "$pairing")"
 port="$(jq -r .port "$pairing")"
 token="$(jq -r .token "$pairing")"
-spki="$(jq -r '.spkiSha256 // empty' "$pairing")"
-scheme="$(jq -r '.scheme // "https"' "$pairing")"
+scheme="$(jq -r '.scheme // "http"' "$pairing")"
 if [[ -z "$port" || "$port" == null || -z "$token" || "$token" == null ]]; then
   echo "phoneapi mcp: $pairing is missing port or token" >&2
-  exit 1
-fi
-if [[ "$scheme" == https && -z "$spki" ]]; then
-  echo "phoneapi mcp: $pairing is missing spkiSha256" >&2
   exit 1
 fi
 
 case "$host" in
   localhost | 127.0.0.1 | ::1) ;;
   *)
-    echo "phoneapi mcp: $host is not a loopback address. /mcp rejects other Host values unless allowedHosts is set. Use scripts/pair-adb.sh --forward." >&2
+    echo "phoneapi mcp: $host is not a loopback address. /mcp rejects other Host values unless allowedHosts is set. Use scripts/pair-adb.sh." >&2
     ;;
 esac
 
@@ -73,9 +65,6 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     -H "Content-Type: application/json"
     -H "Accept: application/json, text/event-stream"
   )
-  if [[ "$scheme" == https ]]; then
-    curl_args+=(--insecure --pinnedpubkey "sha256//$spki")
-  fi
   if [[ -n "$protocol_version" ]]; then
     curl_args+=(-H "MCP-Protocol-Version: $protocol_version")
   fi
