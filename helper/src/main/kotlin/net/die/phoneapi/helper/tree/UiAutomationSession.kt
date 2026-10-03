@@ -3,18 +3,17 @@ package net.die.phoneapi.helper.tree
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.app.UiAutomation
 import android.os.Handler
-import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import net.die.phoneapi.helper.HelperDaemon
+import net.die.phoneapi.helper.compat.ShellUiAutomation
 
 /**
- * Shell-side [UiAutomation]. The connection class is hidden, so it is constructed by reflection.
- * The session stays down until the first tree call and drops after a few idle minutes, unless
- * [busy] says a wait or an event subscriber still needs it.
+ * Shell-side [UiAutomation]. The session stays down until the first tree call and drops after a few
+ * idle minutes, unless [busy] says a wait or an event subscriber still needs it.
  */
 internal class UiAutomationSession(
     private val onEvent: (AccessibilityEvent) -> Unit,
@@ -53,7 +52,7 @@ internal class UiAutomationSession(
             generation++
         }
         runCatching { current.setOnAccessibilityEventListener(null) }
-        runCatching { invokeDisconnect(current) }
+        runCatching { ShellUiAutomation.disconnect(current) }
         onConnection(false)
     }
 
@@ -72,7 +71,7 @@ internal class UiAutomationSession(
         val created = open()
         synchronized(lock) {
             automation?.let {
-                runCatching { invokeDisconnect(created) }
+                runCatching { ShellUiAutomation.disconnect(created) }
                 return it
             }
             automation = created
@@ -83,15 +82,11 @@ internal class UiAutomationSession(
     }
 
     private fun open(): UiAutomation {
-        val looper = HelperDaemon.looper()
-        val connection =
-            Class.forName("android.app.UiAutomationConnection")
-                .getDeclaredConstructor()
-                .newInstance()
-        val type = Class.forName("android.app.IUiAutomationConnection")
-        val ctor = UiAutomation::class.java.getConstructor(Looper::class.java, type)
-        val ui = ctor.newInstance(looper, connection) as UiAutomation
-        invokeConnect(ui, UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES)
+        val ui =
+            ShellUiAutomation.connect(
+                HelperDaemon.looper(),
+                UiAutomation.FLAG_DONT_SUPPRESS_ACCESSIBILITY_SERVICES,
+            )
         val info = ui.serviceInfo ?: AccessibilityServiceInfo()
         info.flags = info.flags or AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
         ui.setServiceInfo(info)
@@ -101,17 +96,6 @@ internal class UiAutomationSession(
         }
         Log.i(TAG, "UiAutomation connected")
         return ui
-    }
-
-    private fun invokeConnect(ui: UiAutomation, flags: Int) {
-        UiAutomation::class
-            .java
-            .getMethod("connect", Int::class.javaPrimitiveType)
-            .invoke(ui, flags)
-    }
-
-    private fun invokeDisconnect(ui: UiAutomation) {
-        UiAutomation::class.java.getMethod("disconnect").invoke(ui)
     }
 
     private fun armIdle() {
