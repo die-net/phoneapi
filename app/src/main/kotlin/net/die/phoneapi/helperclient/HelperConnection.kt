@@ -51,6 +51,16 @@ class HelperConnection(private val bus: EventBus, private val idleStatus: Helper
     val isRunning: Boolean
         get() = helper != null
 
+    /** Asks the helper process to exit. The death callback clears [status]. */
+    fun shutdown() {
+        val proxy = helper ?: return
+        try {
+            proxy.shutdown()
+        } catch (e: RemoteException) {
+            Log.w(TAG, "Could not stop the helper", e)
+        }
+    }
+
     /** Returns the helper or throws `503 helper_unavailable`, naming how to start it. */
     fun require(): IHelper = helper ?: throw ApiException.helperUnavailable(whyUnavailable())
 

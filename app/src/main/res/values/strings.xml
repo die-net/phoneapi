@@ -1,21 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">PhoneAPI</string>
-    <string name="status_title">Status</string>
-    <string name="status_abstract">Listener: adb forward tcp:%1$d, localabstract:%2$s, then http://127.0.0.1:%1$d</string>
-    <string name="forward_title">ADB forward</string>
-    <string name="copied">Copied</string>
     <string name="listener_title">PhoneAPI is listening</string>
     <string name="listener_text">The adb listener is running.</string>
-    <string name="status_helper">Helper: %1$s</string>
-    <string name="helper_state_running">running</string>
-    <string name="helper_state_starting">starting</string>
-    <string name="helper_state_off">not running</string>
 
-    <string name="helper_title">Start the helper</string>
+    <string name="intro">PhoneAPI lets a computer connected with USB debugging see this screen, send taps, and control Chrome.</string>
+    <string name="helper_switch">Screen reading and taps</string>
+    <string name="helper_running">On. The computer can see the screen and send taps.</string>
+    <string name="helper_starting">Starting.</string>
+    <string name="helper_off">Off. The computer cannot see the screen or send taps.</string>
+    <string name="helper_needs_computer">Off. Plug in a computer and start it from there.</string>
+    <string name="helper_needs_pairing">Off. Pair wireless debugging below to turn this on here.</string>
+    <string name="helper_needs_wireless">Off. Turn on wireless debugging first.</string>
+    <string name="wireless_switch">Wireless debugging</string>
+    <string name="wireless_summary">Lets the phone start screen reading without a USB cable, and lets the computer reach Chrome.</string>
+    <string name="wireless_needs_permission">PhoneAPI can show this, but cannot change it until a computer grants permission.</string>
     <string name="wireless_pair">Pair wireless debugging</string>
+    <string name="pair_not">Do this once, so the phone can turn on screen reading without a USB cable.</string>
+    <string name="pair_yes">Paired. The phone can turn on screen reading without a USB cable.</string>
     <string name="wireless_needs_developer">Turn on Developer options first: in Settings, open About phone and tap Build number seven times.</string>
-    <string name="tokens_title">Paired computers</string>
-    <string name="tokens_none">None yet.</string>
-    <string name="revoke">Revoke</string>
+    <string name="tokens_title">Computers with access</string>
+    <string name="tokens_none">None yet. A computer shows up here after it is granted access.</string>
+    <string name="revoke">Remove access</string>
 </resources>

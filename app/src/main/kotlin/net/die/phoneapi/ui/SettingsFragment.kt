@@ -1,8 +1,6 @@
 package net.die.phoneapi.ui
 
 import android.content.ActivityNotFoundException
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Intent
 import android.os.Build
 import android.os.Bundle
@@ -16,17 +14,17 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.preference.Preference
 import androidx.preference.PreferenceCategory
 import androidx.preference.PreferenceFragmentCompat
+import androidx.preference.SwitchPreferenceCompat
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import net.die.phoneapi.PhoneApiApp
 import net.die.phoneapi.R
-import net.die.phoneapi.helperclient.HelperLaunch
 import net.die.phoneapi.helperclient.notificationsAllowed
 import net.die.phoneapi.model.HelperStatus
 import net.die.phoneapi.model.TokenInfo
 
-/** Status, the adb commands, wireless debugging pairing, and tokens. */
+/** Helper, wireless debugging, pairing, and tokens. */
 class SettingsFragment : PreferenceFragmentCompat() {
     private val graph
         get() = PhoneApiApp.graph
@@ -35,16 +33,26 @@ class SettingsFragment : PreferenceFragmentCompat() {
         setPreferencesFromResource(R.xml.preferences, rootKey)
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
             findPreference<Preference>(KEY_WIRELESS)?.isVisible = false
+            findPreference<Preference>(KEY_PAIR)?.isVisible = false
         }
-        findPreference<Preference>(KEY_FORWARD)?.setOnPreferenceClickListener {
-            copy(forwardCommand())
-            true
+        findPreference<SwitchPreferenceCompat>(KEY_HELPER)?.setOnPreferenceChangeListener { _, value
+            ->
+            if (value == true) graph.helperSupervisor.nudge() else graph.helperSupervisor.stop()
+            false
         }
-        findPreference<Preference>(KEY_HELPER)?.setOnPreferenceClickListener {
-            copy(helperCommand())
-            true
+        findPreference<SwitchPreferenceCompat>(KEY_WIRELESS)?.setOnPreferenceChangeListener {
+            _,
+            value ->
+            val on = value as? Boolean ?: return@setOnPreferenceChangeListener false
+            try {
+                graph.helperSupervisor.setWirelessEnabled(on)
+                true
+            } catch (e: SecurityException) {
+                Log.w(TAG, "Could not change wireless debugging", e)
+                false
+            }
         }
-        findPreference<Preference>(KEY_WIRELESS)?.setOnPreferenceClickListener {
+        findPreference<Preference>(KEY_PAIR)?.setOnPreferenceClickListener {
             pairWireless()
             true
         }
@@ -54,53 +62,61 @@ class SettingsFragment : PreferenceFragmentCompat() {
         super.onViewCreated(view, savedInstanceState)
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
-                launch { watchStatus() }
+                launch { watchControls() }
                 launch { refreshTokens() }
             }
         }
     }
 
-    private suspend fun watchStatus() {
-        combine(graph.helper.status, graph.settings.settings) { helper, settings ->
-                Status(helper, settings.port)
+    private suspend fun watchControls() {
+        combine(graph.helper.status, graph.helperSupervisor.wireless) { helper, wirelessOn ->
+                Controls(
+                    helper,
+                    wirelessOn,
+                    graph.helperSupervisor.isPaired(),
+                    graph.helperSupervisor.canStartHelper(),
+                )
             }
-            .collect { status ->
-                findPreference<Preference>(KEY_STATUS)?.summary = statusText(status)
-                findPreference<Preference>(KEY_FORWARD)?.summary = forwardCommand()
-                findPreference<Preference>(KEY_HELPER)?.summary = helperCommand()
+            .collect { controls ->
+                showHelper(controls)
+                showWireless(controls)
+                showPair(controls)
             }
     }
 
-    private fun statusText(status: Status): String {
-        val helperState =
-            when (status.helper) {
-                HelperStatus.RUNNING -> R.string.helper_state_running
-                HelperStatus.STARTING -> R.string.helper_state_starting
-                HelperStatus.NEEDS_PAIRING,
-                HelperStatus.NEEDS_USB,
-                HelperStatus.STOPPED -> R.string.helper_state_off
+    private fun showHelper(controls: Controls) {
+        val helper = findPreference<SwitchPreferenceCompat>(KEY_HELPER) ?: return
+        val running = controls.helper == HelperStatus.RUNNING
+        val starting = controls.helper == HelperStatus.STARTING
+        helper.isChecked = running
+        helper.isEnabled = running || (controls.canStart && !starting)
+        helper.summary =
+            when {
+                running -> getString(R.string.helper_running)
+                starting -> getString(R.string.helper_starting)
+                Build.VERSION.SDK_INT < Build.VERSION_CODES.R ->
+                    getString(R.string.helper_needs_computer)
+                !controls.paired -> getString(R.string.helper_needs_pairing)
+                !controls.canStart -> getString(R.string.helper_needs_wireless)
+                else -> getString(R.string.helper_off)
             }
-        val listener =
-            getString(R.string.status_abstract, status.port, requireContext().packageName)
-        return listener + "\n" + getString(R.string.status_helper, getString(helperState))
     }
 
-    private fun forwardCommand(): String {
-        val port = graph.settings.current.port
-        val name = requireContext().packageName
-        return "adb forward tcp:$port localabstract:$name"
+    private fun showWireless(controls: Controls) {
+        val wireless = findPreference<SwitchPreferenceCompat>(KEY_WIRELESS) ?: return
+        val canWrite = graph.helperSupervisor.canControlWireless()
+        wireless.isChecked = controls.wirelessOn
+        wireless.isEnabled = canWrite
+        wireless.summary =
+            getString(
+                if (canWrite) R.string.wireless_summary else R.string.wireless_needs_permission
+            )
     }
 
-    private fun helperCommand(): String {
-        val pkg = requireContext().packageName
-        val service = "adb shell am start-foreground-service -n $pkg/.server.ListenerService"
-        return service + "\n" + HelperLaunch.command(pkg)
-    }
-
-    private fun copy(text: String) {
-        val clipboard = requireContext().getSystemService(ClipboardManager::class.java)
-        clipboard.setPrimaryClip(ClipData.newPlainText("phoneapi", text))
-        Toast.makeText(requireContext(), R.string.copied, Toast.LENGTH_SHORT).show()
+    private fun showPair(controls: Controls) {
+        val pair = findPreference<Preference>(KEY_PAIR) ?: return
+        pair.summary = getString(if (controls.paired) R.string.pair_yes else R.string.pair_not)
+        pair.isSelectable = !controls.paired
     }
 
     private fun refreshTokens() {
@@ -110,7 +126,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
             category.removeAll()
             if (infos.isEmpty()) {
                 category.addPreference(
-                    Preference(requireContext()).apply {
+                    Preference(preferenceManager.context).apply {
                         title = getString(R.string.tokens_none)
                         isSelectable = false
                     }
@@ -122,7 +138,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
     }
 
     private fun tokenPreference(info: TokenInfo) =
-        Preference(requireContext()).apply {
+        Preference(preferenceManager.context).apply {
             key = "token-${info.id}"
             title = info.name
             summary = getString(R.string.revoke)
@@ -160,13 +176,17 @@ class SettingsFragment : PreferenceFragmentCompat() {
         }
     }
 
-    private data class Status(val helper: HelperStatus, val port: Int)
+    private data class Controls(
+        val helper: HelperStatus,
+        val wirelessOn: Boolean,
+        val paired: Boolean,
+        val canStart: Boolean,
+    )
 
     private companion object {
-        const val KEY_STATUS = "status"
-        const val KEY_FORWARD = "forward"
         const val KEY_HELPER = "helper"
         const val KEY_WIRELESS = "wireless"
+        const val KEY_PAIR = "pair"
         const val KEY_TOKENS = "tokens"
         const val TAG = "PhoneApi"
         const val FRAGMENT_ARG_KEY = ":settings:fragment_args_key"

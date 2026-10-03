@@ -47,12 +47,15 @@ internal class HelperSupervisor(
     private val finder = AdbEndpointFinder(context, ioDispatcher)
     private val secure = SecureSettings(context.contentResolver)
     private var failures = 0
+
+    /** The user turned the helper off. Automatic restarts wait until the next [nudge]. */
+    @Volatile private var holdOff = false
     private val wirelessState = MutableStateFlow(wirelessEnabled())
     private val wirelessObserver =
         object : ContentObserver(Handler(Looper.getMainLooper())) {
             override fun onChange(selfChange: Boolean) {
                 wirelessState.value = wirelessEnabled()
-                nudge()
+                scope.launch { runAttempt(resetFailures = true) }
             }
         }
 
@@ -81,9 +84,28 @@ internal class HelperSupervisor(
         scope.launch { runAttempt() }
     }
 
-    /** User-driven retry. Resets the backoff counter. */
+    /** User-driven start. Resets the backoff counter and clears a user stop. */
     fun nudge() {
-        scope.launch { runAttempt(resetFailures = true) }
+        scope.launch { runAttempt(resetFailures = true, resume = true) }
+    }
+
+    /** User-driven stop. The process exits, and nothing starts it again until [nudge]. */
+    fun stop() {
+        holdOff = true
+        scope.launch { gate.withLock { helper.shutdown() } }
+    }
+
+    fun isPaired(): Boolean = keys.isPaired
+
+    /** The phone can launch the helper over wireless debugging. */
+    fun canStartHelper(): Boolean = wirelessReady()
+
+    fun canControlWireless(): Boolean =
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && secure.canWrite(context)
+
+    fun setWirelessEnabled(on: Boolean) {
+        secure.setWirelessEnabled(on)
+        wirelessState.value = wirelessEnabled()
     }
 
     fun wirelessEnabled(): Boolean =
@@ -141,11 +163,16 @@ internal class HelperSupervisor(
         throw failure ?: error("Wireless debugging pairing failed")
     }
 
-    private suspend fun runAttempt(resetFailures: Boolean = false) {
+    private suspend fun runAttempt(resetFailures: Boolean = false, resume: Boolean = false) {
         var reset = resetFailures
+        var allow = resume
         while (true) {
             val delayMs =
                 gate.withLock {
+                    if (allow) {
+                        holdOff = false
+                        allow = false
+                    }
                     if (reset) {
                         failures = 0
                         reset = false
@@ -157,7 +184,7 @@ internal class HelperSupervisor(
     }
 
     private suspend fun doAttempt(): Long? {
-        if (helper.isRunning) return null
+        if (holdOff || helper.isRunning) return null
         if (!wirelessReady()) {
             helper.setStatus(idleStatus())
             return null

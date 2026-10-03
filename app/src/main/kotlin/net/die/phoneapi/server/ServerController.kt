@@ -6,8 +6,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 /**
- * Runs the abstract-socket API while at least one holder (the foreground service, or the settings
- * UI) wants it.
+ * Runs the abstract-socket API while at least one holder wants it. [ListenerService] is that
+ * holder, started by the client over adb.
  */
 class ServerController(
     private val scope: CoroutineScope,

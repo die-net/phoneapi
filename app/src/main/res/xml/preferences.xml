@@ -1,17 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android">
     <Preference
-        android:key="status"
+        android:key="intro"
+        android:persistent="false"
         android:selectable="false"
-        android:title="@string/status_title" />
-    <Preference
-        android:key="forward"
-        android:title="@string/forward_title" />
-    <Preference
+        android:summary="@string/intro" />
+    <SwitchPreferenceCompat
         android:key="helper"
-        android:title="@string/helper_title" />
-    <Preference
+        android:persistent="false"
+        android:title="@string/helper_switch" />
+    <SwitchPreferenceCompat
         android:key="wireless"
+        android:persistent="false"
+        android:summary="@string/wireless_summary"
+        android:title="@string/wireless_switch" />
+    <Preference
+        android:key="pair"
         android:title="@string/wireless_pair" />
     <PreferenceCategory
         android:key="tokens"

@@ -49,7 +49,7 @@ scripts/pair-adb.sh
 scripts/helper-start.sh
 ```
 
-Open PhoneAPI for status, the USB forward command, the helper start command, and the list of tokens. On Android 11 and newer the same screen can pair Wireless Debugging. You can revoke a token there at any time.
+Open PhoneAPI for screen reading and taps, wireless debugging, and the computers that have access. That switch starts the helper and shuts it down. On Android 11 and newer the same screen can turn Wireless Debugging on and pair it. You can remove a computer's access there at any time.
 
 ## Pairing
 
@@ -108,7 +108,7 @@ Launch it once from the computer:
 scripts/helper-start.sh
 ```
 
-The process detaches, so the command returns while the helper keeps running. That USB start does not survive a reboot; run it again after reboot, or start the listener and helper over Wireless Debugging. On Android 11+, after pairing Wireless Debugging once, the app restarts the helper itself after a crash or a package update while its process is running. A successful launch leaves Wireless Debugging on, because that connection is also how the browser API reaches Chrome. Granting `WRITE_SECURE_SETTINGS`, which `dev-setup.sh` does, is what allows the app to turn Wireless Debugging on.
+The process detaches, so the command returns while the helper keeps running. That USB start does not survive a reboot; run it again after reboot, or start the listener and helper over Wireless Debugging. On Android 11+, after pairing Wireless Debugging once, the app restarts the helper itself after a crash or a package update while its process is running. Turning the helper switch off shuts that process down and leaves it stopped until the switch is turned on again. A successful launch leaves Wireless Debugging on, because that connection is also how the browser API reaches Chrome. Granting `WRITE_SECURE_SETTINGS`, which `dev-setup.sh` does, is what allows the app to turn Wireless Debugging on.
 
 On Android 10, browser calls use a USB tunnel instead. `scripts/helper-start.sh` installs it. By hand:
 
@@ -117,7 +117,7 @@ adb forward tcp:9222 localabstract:chrome_devtools_remote
 adb reverse localabstract:phoneapi_cdp tcp:9222
 ```
 
-To pair Wireless Debugging from the phone (Android 11+), tap "Pair wireless debugging" in the app. It opens Developer options and watches mDNS for this phone's pairing service. When the system "Pair device with pairing code" dialog opens, a heads-up notification asks for the code inline. The dialog has to stay in front: Android closes the pairing port when it is dismissed, including when the user switches apps. On Android 10 that row is hidden. The USB command stays available.
+To pair Wireless Debugging from the phone (Android 11+), tap "Pair wireless debugging" in the app. It opens Developer options and watches mDNS for this phone's pairing service. When the system "Pair device with pairing code" dialog opens, a heads-up notification asks for the code inline. The dialog has to stay in front: Android closes the pairing port when it is dismissed, including when the user switches apps. On Android 10 that row is hidden.
 
 These calls need the helper: UI snapshots and finds, injected input, key events, typing, `POST /v1/apps/{pkg}/stop` and `/clear`, screenshots, logcat, every `/v1/browser` route, and the mirror and audio-submix stream paths. App launch and wake still run without it. Wake falls back to a system activity when the helper is down. A launch from a background process needs the helper, because Android blocks the app itself from starting activities then.
 

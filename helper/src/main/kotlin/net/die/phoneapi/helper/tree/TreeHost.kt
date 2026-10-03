@@ -3,6 +3,8 @@ package net.die.phoneapi.helper.tree
 import android.graphics.Rect
 import android.os.Build
 import android.os.Bundle
+import android.os.RemoteException
+import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import java.util.concurrent.atomic.AtomicInteger
@@ -50,7 +52,7 @@ internal class TreeHost(private val client: () -> ITreeClient?) {
                 onEvent = { event -> created?.onEvent(event) },
                 onConnection = { up ->
                     if (up) created?.onConnected()
-                    client()?.onConnected(up)
+                    notify { it.onConnected(up) }
                 },
                 busy = { holds.get() > 0 },
             )
@@ -327,31 +329,41 @@ internal class TreeHost(private val client: () -> ITreeClient?) {
 
     private fun result(value: TreeResult): String = json.encodeToString(value)
 
+    /** A dead client must not take down this process. Events arrive on the helper's looper. */
+    private fun notify(block: (ITreeClient) -> Unit) {
+        val current = client() ?: return
+        try {
+            block(current)
+        } catch (e: RemoteException) {
+            Log.w(TAG, "UI client is gone", e)
+        }
+    }
+
     private inner class RemoteSink : UiSink {
         private var ime = ImeState(visible = false)
         private var foreground: String? = null
 
         override fun emit(type: String, body: JsonObject) {
-            client()?.onBus(type, body.toString())
+            notify { it.onBus(type, body.toString()) }
         }
 
         override fun setIme(state: ImeState) {
             if (state == ime) return
             ime = state
             imePackage = state.packageName
-            client()?.onIme(json.encodeToString(state))
+            notify { it.onIme(json.encodeToString(state)) }
         }
 
         override fun setForeground(packageName: String?) {
             if (packageName == foreground) return
             foreground = packageName
-            client()?.onForeground(packageName.orEmpty())
+            notify { it.onForeground(packageName.orEmpty()) }
         }
 
         override fun foreground(): String? = foreground
 
         override fun onTick(seq: Long, windowsVersion: Long, lastChangeMs: Long) {
-            client()?.onSeq(seq, windowsVersion, lastChangeMs)
+            notify { it.onSeq(seq, windowsVersion, lastChangeMs) }
         }
     }
 
@@ -384,4 +396,8 @@ internal class TreeHost(private val client: () -> ITreeClient?) {
     @Serializable private data class Found(val found: Boolean)
 
     @Serializable private data class FocusedText(val length: Int)
+
+    private companion object {
+        const val TAG = "PhoneApiHelper"
+    }
 }
