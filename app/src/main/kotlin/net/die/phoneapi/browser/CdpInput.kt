@@ -5,6 +5,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import net.die.phoneapi.input.CdpContact
 import net.die.phoneapi.input.TouchPhase
 import net.die.phoneapi.input.TouchSample
 import net.die.phoneapi.input.touchTimeline
@@ -12,7 +13,11 @@ import net.die.phoneapi.model.Point
 import net.die.phoneapi.model.TimedPoint
 
 /** Plays pointer paths on the open page with `Input.dispatchTouchEvent`. */
-internal suspend fun dispatchTouchPath(cdp: CdpSession, pointers: List<List<TimedPoint>>) {
+internal suspend fun dispatchTouchPath(
+    cdp: CdpSession,
+    pointers: List<List<TimedPoint>>,
+    contact: CdpContact,
+) {
     val samples = touchTimeline(pointers)
     val active = LinkedHashMap<Int, Point>()
     var last = 0L
@@ -27,7 +32,7 @@ internal suspend fun dispatchTouchPath(cdp: CdpSession, pointers: List<List<Time
             batch += samples[index]
             index++
         }
-        playBatch(cdp, active, batch)
+        playBatch(cdp, active, batch, contact)
     }
 }
 
@@ -67,6 +72,7 @@ private suspend fun playBatch(
     cdp: CdpSession,
     active: LinkedHashMap<Int, Point>,
     batch: List<TouchSample>,
+    contact: CdpContact,
 ) {
     val starting = batch.filter { it.phase == TouchPhase.DOWN }
     val moving = batch.filter { it.phase == TouchPhase.MOVE }
@@ -77,29 +83,40 @@ private suspend fun playBatch(
         val points =
             if (wasEmpty) active.entries.map { it.key to it.value }
             else starting.map { it.pointer to Point(it.x, it.y) }
-        sendTouch(cdp, "touchStart", points)
+        sendTouch(cdp, "touchStart", points, contact)
     }
     for (sample in moving) active[sample.pointer] = Point(sample.x, sample.y)
-    if (moving.isNotEmpty()) sendTouch(cdp, "touchMove", active.entries.map { it.key to it.value })
+    if (moving.isNotEmpty()) {
+        sendTouch(cdp, "touchMove", active.entries.map { it.key to it.value }, contact)
+    }
     for (sample in ending) active.remove(sample.pointer)
     if (ending.isEmpty()) return
-    if (active.isEmpty()) sendTouch(cdp, "touchEnd", emptyList())
-    else sendTouch(cdp, "touchMove", active.entries.map { it.key to it.value })
+    if (active.isEmpty()) sendTouch(cdp, "touchEnd", emptyList(), contact)
+    else sendTouch(cdp, "touchMove", active.entries.map { it.key to it.value }, contact)
 }
 
-private suspend fun sendTouch(cdp: CdpSession, type: String, points: List<Pair<Int, Point>>) {
+private suspend fun sendTouch(
+    cdp: CdpSession,
+    type: String,
+    points: List<Pair<Int, Point>>,
+    contact: CdpContact,
+) {
     cdp.call(
         "Input.dispatchTouchEvent",
         buildJsonObject {
             put("type", type)
-            put("touchPoints", JsonArray(points.map { touchPoint(it.first, it.second) }))
+            put("touchPoints", JsonArray(points.map { touchPoint(it.first, it.second, contact) }))
         },
     )
 }
 
-private fun touchPoint(id: Int, point: Point): JsonObject = buildJsonObject {
+private fun touchPoint(id: Int, point: Point, contact: CdpContact): JsonObject = buildJsonObject {
     put("x", point.x)
     put("y", point.y)
+    put("radiusX", contact.radiusX)
+    put("radiusY", contact.radiusY)
+    put("rotationAngle", contact.rotationAngle)
+    put("force", contact.force)
     put("id", id)
 }
 
