@@ -109,13 +109,6 @@ command:mcp() {
     token="$PAIRING_TOKEN"
     scheme="$PAIRING_SCHEME"
 
-    case "$host" in
-        localhost | 127.0.0.1 | ::1) ;;
-        *)
-            echo "phoneapi mcp: $host is not a loopback address. /mcp rejects other Host values unless allowedHosts is set. Use 'phoneapi pair'." >&2
-            ;;
-    esac
-
     if [[ $host == *:* && $host != \[* ]]; then
         url_host="[$host]"
     else

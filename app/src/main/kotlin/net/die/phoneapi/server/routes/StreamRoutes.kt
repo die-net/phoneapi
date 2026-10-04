@@ -1,10 +1,12 @@
 package net.die.phoneapi.server.routes
 
+import android.util.Log
 import io.ktor.http.ContentType
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.response.respondBytes
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
+import io.ktor.server.websocket.DefaultWebSocketServerSession
 import io.ktor.server.websocket.webSocket
 import io.ktor.websocket.CloseReason
 import io.ktor.websocket.close
@@ -36,8 +38,12 @@ fun Route.streamRoutes(services: ServerServices) {
                 close(CloseReason(CloseReason.Codes.CANNOT_ACCEPT, "Video needs the shell helper"))
                 return@webSocket
             }
-            services.power.wake()
-            services.video.serve(this, videoSpec(call))
+            try {
+                services.power.wake()
+                services.video.serve(this, videoSpec(call))
+            } catch (e: ApiException) {
+                failVideo(this, e)
+            }
         }
         webSocket("/v1/stream/audio") {
             if (!services.device.capabilities().streamAudioSubmix) {
@@ -75,6 +81,29 @@ private fun videoSpec(call: ApplicationCall): VideoSpec =
         fps = queryInt(call, "fps", DEFAULT_FPS, MIN_FPS, MAX_FPS),
         bitRate = queryInt(call, "bitRate", DEFAULT_BIT_RATE, MIN_BIT_RATE, MAX_BIT_RATE),
     )
+
+/**
+ * Close reason text is at most 123 bytes, so a long codec message has to be cut on a UTF-8
+ * boundary. Logging is best-effort: `android.util.Log` throws in JVM unit tests.
+ */
+private suspend fun failVideo(session: DefaultWebSocketServerSession, error: ApiException) {
+    session.close(CloseReason(CloseReason.Codes.INTERNAL_ERROR, closeReasonText(error.message)))
+    runCatching { Log.w(TAG, "video stream failed", error) }
+}
+
+private fun closeReasonText(message: String?): String {
+    val text = message?.takeIf { it.isNotBlank() } ?: "The video encoder could not start"
+    val bytes = text.toByteArray(Charsets.UTF_8)
+    if (bytes.size <= CLOSE_REASON_BYTES) return text
+    var end = CLOSE_REASON_BYTES
+    while (end > 0 && (bytes[end].toInt() and 0xC0) == 0x80) end--
+    return bytes.copyOf(end).toString(Charsets.UTF_8).ifBlank {
+        "The video encoder could not start"
+    }
+}
+
+private const val TAG = "PhoneApiStream"
+private const val CLOSE_REASON_BYTES = 123
 
 private fun queryInt(call: ApplicationCall, name: String, default: Int, min: Int, max: Int): Int {
     val raw = call.request.queryParameters[name] ?: return default

@@ -11,9 +11,12 @@ import io.modelcontextprotocol.kotlin.sdk.types.TextResourceContents
 import net.die.phoneapi.server.ServerServices
 import net.die.phoneapi.server.token
 
-/** Streamable HTTP MCP at `/mcp`. Tools and resources follow the caller's scopes. */
+/**
+ * Streamable HTTP MCP at `/mcp`. Tools and resources follow the caller's scopes. DNS rebinding
+ * protection stays off: the rest of the API is a superset of these tools and does not check Host.
+ */
 internal fun Application.installPhoneMcp(services: ServerServices) {
-    mcpStatelessStreamableHttp(path = "/mcp") {
+    mcpStatelessStreamableHttp(path = "/mcp", enableDnsRebindingProtection = false) {
         val scopes = call.token.scopes
         val tools = visibleMcpTools(scopes, services.device.capabilities())
         val resources = mcpResources(scopes)

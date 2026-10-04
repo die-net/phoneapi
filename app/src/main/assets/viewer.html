@@ -7,8 +7,8 @@
   <style>
     html, body { margin: 0; height: 100%; background: #111; color: #ddd; font: 14px sans-serif; }
     body { display: flex; flex-direction: column; align-items: center; }
-    canvas { max-width: 100%; max-height: calc(100% - 2.5rem); background: #000; }
-    p { margin: 0.5rem; }
+    canvas { max-width: 100%; max-height: calc(100% - 4rem); background: #000; }
+    p { margin: 0.5rem; max-width: 40rem; text-align: center; }
   </style>
 </head>
 <body>
@@ -87,20 +87,39 @@ function decoderConfig(nals) {
   return { codec, description };
 }
 
+function reportDecoder(error) {
+  if (!window.isSecureContext) {
+    status.textContent = "VideoDecoder is missing. WebCodecs needs https or http://127.0.0.1; this page is " + location.protocol + "//" + location.host + ".";
+    return;
+  }
+  status.textContent = error
+    ? "VideoDecoder failed: " + error
+    : "VideoDecoder is missing. This browser has no WebCodecs.";
+}
+
 let epoch = 0;
 function makeDecoder() {
+  if (typeof VideoDecoder !== "function") {
+    reportDecoder();
+    return null;
+  }
   const mine = ++epoch;
-  return new VideoDecoder({
-    output(frame) {
-      if (mine !== epoch) { frame.close(); return; }
-      if (canvas.width !== frame.displayWidth) canvas.width = frame.displayWidth;
-      if (canvas.height !== frame.displayHeight) canvas.height = frame.displayHeight;
-      ctx.drawImage(frame, 0, 0);
-      frame.close();
-      status.textContent = canvas.width + "×" + canvas.height;
-    },
-    error(e) { if (mine === epoch) status.textContent = String(e); }
-  });
+  try {
+    return new VideoDecoder({
+      output(frame) {
+        if (mine !== epoch) { frame.close(); return; }
+        if (canvas.width !== frame.displayWidth) canvas.width = frame.displayWidth;
+        if (canvas.height !== frame.displayHeight) canvas.height = frame.displayHeight;
+        ctx.drawImage(frame, 0, 0);
+        frame.close();
+        status.textContent = canvas.width + "×" + canvas.height;
+      },
+      error(e) { if (mine === epoch) status.textContent = String(e); }
+    });
+  } catch (error) {
+    reportDecoder(error);
+    return null;
+  }
 }
 let video = makeDecoder();
 let configured = false;
@@ -108,10 +127,16 @@ let streamWidth = 0;
 let streamHeight = 0;
 
 function configureVideo(payload) {
+  if (!video) return;
   const config = decoderConfig(startCodes(payload));
   if (!config || configured) return;
   if (video.state === "closed") return;
-  video.configure({ codec: config.codec, description: config.description, optimizeForLatency: true });
+  try {
+    video.configure({ codec: config.codec, description: config.description, optimizeForLatency: true });
+  } catch (error) {
+    reportDecoder(error);
+    return;
+  }
   configured = true;
 }
 
@@ -121,7 +146,7 @@ function onHeader(info) {
   streamHeight = info.height;
   status.textContent = info.width + "×" + info.height;
   if (!changed) return;
-  if (video.state !== "closed") video.close();
+  if (video && video.state !== "closed") video.close();
   video = makeDecoder();
   configured = false;
 }
@@ -132,7 +157,7 @@ function onVideo(data) {
   const payload = bytes.subarray(9);
   if (type === 1) { configureVideo(payload); return; }
   if (!configured) configureVideo(payload);
-  if (!configured || video.state !== "configured") return;
+  if (!video || !configured || video.state !== "configured") return;
   const nals = startCodes(payload);
   if (!nals.length) return;
   let ts = 0n;
@@ -144,16 +169,22 @@ function onVideo(data) {
   }));
 }
 
-const vs = socket("/v1/stream/video");
-vs.binaryType = "arraybuffer";
-vs.onmessage = (event) => {
-  if (typeof event.data === "string") {
-    onHeader(JSON.parse(event.data));
-    return;
-  }
-  onVideo(event.data);
-};
-vs.onerror = () => { status.textContent = "Video socket failed"; };
+if (video) {
+  const vs = socket("/v1/stream/video");
+  vs.binaryType = "arraybuffer";
+  vs.onmessage = (event) => {
+    if (typeof event.data === "string") {
+      onHeader(JSON.parse(event.data));
+      return;
+    }
+    onVideo(event.data);
+  };
+  vs.onerror = () => { status.textContent = "Video socket failed"; };
+  vs.onclose = (event) => {
+    const reason = event.reason ? " " + event.reason : "";
+    status.textContent = "Video socket closed " + event.code + reason;
+  };
+}
 
 let audioDecoder = null;
 let audioCtx = null;
@@ -197,15 +228,17 @@ function onAudio(data) {
   audioDecoder.decode(new EncodedAudioChunk({ type: "key", timestamp: Number(ts), data: payload }));
 }
 
-const as = socket("/v1/stream/audio");
-as.binaryType = "arraybuffer";
-as.onmessage = (event) => {
-  if (typeof event.data === "string") {
-    window.__audioCodec = JSON.parse(event.data).codec;
-    return;
-  }
-  onAudio(event.data);
-};
+if (typeof AudioDecoder === "function") {
+  const as = socket("/v1/stream/audio");
+  as.binaryType = "arraybuffer";
+  as.onmessage = (event) => {
+    if (typeof event.data === "string") {
+      window.__audioCodec = JSON.parse(event.data).codec;
+      return;
+    }
+    onAudio(event.data);
+  };
+}
 
 document.body.addEventListener("click", () => {
   if (!audioCtx) audioCtx = new AudioContext();
