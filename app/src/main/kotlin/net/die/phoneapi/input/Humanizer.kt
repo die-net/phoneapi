@@ -24,6 +24,9 @@ data class SwipeSpec(
  * Turns targets into touch paths that look like a finger. Every path starts at its own `tMs`
  * (relative to the gesture start); paths that don't overlap in time are sequential touches.
  */
+/** Hold used when humanize is off. CDP taps use the same delay. */
+internal const val PLAIN_TAP_HOLD_MS = 60L
+
 class Humanizer(private val random: Random = Random.Default) {
 
     /** One tap: jittered inside the inner [INNER_FRACTION] of [target], held with micro-moves. */
@@ -217,7 +220,7 @@ class Humanizer(private val random: Random = Random.Default) {
         const val INNER_FRACTION = 0.6f
         const val MIN_HOLD_MS = 50L
         const val MAX_HOLD_MS = 120L
-        const val PLAIN_HOLD_MS = 60L
+        const val PLAIN_HOLD_MS = PLAIN_TAP_HOLD_MS
         const val HOLD_JITTER_LOW = 0.95
         const val HOLD_JITTER_HIGH = 1.05
         const val MIN_MICRO_MOVES = 1
