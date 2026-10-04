@@ -212,10 +212,12 @@ internal class AudioTap {
         }
         val app = Application()
         val attach =
-            ContextWrapper::class.java.getDeclaredMethod(
-                "attachBaseContext",
-                Context::class.java,
-            )
+            ContextWrapper::class
+                .java
+                .getDeclaredMethod(
+                    "attachBaseContext",
+                    Context::class.java,
+                )
         attach.isAccessible = true
         attach.invoke(app, ShellContext())
         val field = threadClass.getDeclaredField("mInitialApplication")

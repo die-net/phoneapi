@@ -59,6 +59,31 @@ public data class SwipeRequest(
 
 @Serializable public data class TimedPoint(val x: Float, val y: Float, val tMs: Long)
 
+/** One contact change on `WS /v1/input/pointer`. `cancel` omits the other fields. */
+@Serializable(with = PointerOpSerializer::class)
+public enum class PointerOp {
+    @SerialName("down") DOWN,
+    @SerialName("move") MOVE,
+    @SerialName("up") UP,
+    @SerialName("cancel") CANCEL,
+}
+
+public object PointerOpSerializer :
+    LenientEnumSerializer<PointerOp>(
+        serialName = "net.die.phoneapi.model.PointerOp",
+        wires = listOf("down", "move", "up", "cancel"),
+        values = { enumValues<PointerOp>() },
+    )
+
+@Serializable
+public data class PointerFrame(
+    @Doc("down, move, up, or cancel.") val op: PointerOp,
+    @Doc("Contact id, 0 through 9. Omit on cancel.") val id: Int = 0,
+    @Doc("Screen x in pixels. Omit on cancel.") val x: Float = 0f,
+    @Doc("Screen y in pixels. Omit on cancel.") val y: Float = 0f,
+    @Doc("Milliseconds since this gesture's first down. Omit on cancel.") val tMs: Long = 0,
+)
+
 @Serializable
 public data class GestureRequest(
     /** One path per pointer; times are relative to the gesture start. */

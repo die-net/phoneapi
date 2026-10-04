@@ -32,6 +32,7 @@ import net.die.phoneapi.model.NavigateRequest
 import net.die.phoneapi.model.NodeActionRequest
 import net.die.phoneapi.model.OpenTabRequest
 import net.die.phoneapi.model.PinStatus
+import net.die.phoneapi.model.PointerFrame
 import net.die.phoneapi.model.Scope
 import net.die.phoneapi.model.SetPinRequest
 import net.die.phoneapi.model.SwipeRequest
@@ -171,6 +172,13 @@ public val phoneApiEndpoints: List<ApiEndpoint> =
             "Replay pointer paths.",
             serializer<GestureRequest>(),
             serializer<ActionResult>(),
+        ),
+        endpoint(
+            ApiMethod.WEBSOCKET,
+            "/v1/input/pointer",
+            Scope.CONTROL,
+            "Live pointer contacts as JSON text frames.",
+            serializer<PointerFrame>(),
         ),
         endpoint(
             ApiMethod.POST,

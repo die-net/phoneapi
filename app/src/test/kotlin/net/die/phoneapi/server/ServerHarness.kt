@@ -7,6 +7,8 @@ import io.ktor.client.request.header
 import io.ktor.http.HttpHeaders
 import io.ktor.server.testing.ApplicationTestBuilder
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.flow.emptyFlow
 import net.die.phoneapi.core.AppsService
 import net.die.phoneapi.core.BrowserService
@@ -45,6 +47,7 @@ import net.die.phoneapi.model.KeyRequest
 import net.die.phoneapi.model.KeyguardState
 import net.die.phoneapi.model.LaunchRequest
 import net.die.phoneapi.model.NodeActionRequest
+import net.die.phoneapi.model.PointerFrame
 import net.die.phoneapi.model.Scope
 import net.die.phoneapi.model.ScreenState
 import net.die.phoneapi.model.SwipeRequest
@@ -103,6 +106,7 @@ internal class FakeApi {
     var capabilities = allCapabilities()
     var inputTaps = 0
     var imeShow: ImeShowRequest? = null
+    val pointerSessions = Channel<List<PointerFrame>>(capacity = Channel.UNLIMITED)
 
     val services: ServerServices =
         ServerServices(
@@ -117,6 +121,12 @@ internal class FakeApi {
                     override suspend fun swipe(request: SwipeRequest) = acted()
 
                     override suspend fun gesture(request: GestureRequest) = acted()
+
+                    override suspend fun pointer(frames: ReceiveChannel<PointerFrame>) {
+                        val seen = mutableListOf<PointerFrame>()
+                        for (frame in frames) seen.add(frame)
+                        pointerSessions.send(seen)
+                    }
 
                     override suspend fun key(request: KeyRequest) = acted()
 

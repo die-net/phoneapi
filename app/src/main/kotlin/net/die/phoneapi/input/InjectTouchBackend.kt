@@ -5,6 +5,8 @@ import android.os.SystemClock
 import android.view.InputDevice
 import android.view.MotionEvent
 import kotlin.coroutines.CoroutineContext
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -14,6 +16,7 @@ import net.die.phoneapi.helper.AxisRange
 import net.die.phoneapi.helper.IHelper
 import net.die.phoneapi.helper.TouchscreenInfo
 import net.die.phoneapi.helperclient.HelperConnection
+import net.die.phoneapi.model.PointerFrame
 import net.die.phoneapi.model.TimedPoint
 
 /**
@@ -62,6 +65,115 @@ class InjectTouchBackend(
             throw ApiException.helperDropped(e)
         } finally {
             events.forEach { it.recycle() }
+        }
+    }
+
+    /**
+     * Injects one gesture as frames arrive. The [gestures] lock is held until the last finger lifts
+     * or the gesture is cancelled. Closing [frames], or cancelling this coroutine, injects
+     * `ACTION_CANCEL` while a contact is still down so the touch is released.
+     */
+    suspend fun playLive(
+        first: PointerFrame,
+        frames: ReceiveChannel<PointerFrame>,
+        clamp: (PointerFrame) -> PointerFrame = { it },
+    ) {
+        gestures.withLock {
+            val proxy = helper.require()
+            val device =
+                try {
+                    touchscreen(proxy)
+                } catch (e: RemoteException) {
+                    throw ApiException.helperDropped(e)
+                }
+            val live = LiveTouch(proxy, device)
+            try {
+                playPointerGesture(first, frames, clamp) { event -> live.inject(event) }
+            } finally {
+                withContext(NonCancellable) { live.release() }
+            }
+        }
+    }
+
+    /**
+     * One finger-down span. Active contacts are recorded before the binder call so a disconnect
+     * during injection still has something to cancel. The binder call itself is not cancellable: a
+     * down that the system already accepted has to be remembered, or the finger would stick.
+     */
+    private inner class LiveTouch(private val proxy: IHelper, private val screen: TouchscreenInfo) {
+        private var downTime = 0L
+        private val active = LinkedHashMap<Int, PointerPoint>()
+
+        suspend fun inject(event: PointerEvent) {
+            if (event.points.isEmpty()) return
+            val now = SystemClock.uptimeMillis()
+            if (active.isEmpty()) downTime = now
+            val eventTime =
+                if (now <= downTime) downTime else (downTime + event.tMs).coerceIn(downTime, now)
+            val samples =
+                event.points.map { point ->
+                    TouchSample(point.id, point.x, point.y, event.tMs, TouchPhase.MOVE)
+                }
+            val motion = obtain(downTime, eventTime, motionAction(event), samples, screen)
+            // A down or move is recorded first, so a disconnect mid-call can still cancel that
+            // finger. A lift is recorded only after the call, so a failed up does not forget it.
+            val lifts =
+                event.phase == PointerPhase.POINTER_UP ||
+                    event.phase == PointerPhase.UP ||
+                    event.phase == PointerPhase.CANCEL
+            if (!lifts) remember(event)
+            try {
+                withContext(NonCancellable) {
+                    withContext(io) { proxy.injectMotionEvent(motion, WAIT_FOR_FINISH) }
+                }
+                if (lifts) remember(event)
+            } catch (e: RemoteException) {
+                throw ApiException.helperDropped(e)
+            } finally {
+                motion.recycle()
+            }
+        }
+
+        suspend fun release() {
+            if (active.isEmpty()) return
+            val points = active.values.toList()
+            val event =
+                PointerEvent(
+                    PointerPhase.CANCEL,
+                    id = -1,
+                    points = points,
+                    tMs = points.maxOf { it.tMs },
+                )
+            inject(event)
+        }
+
+        private fun remember(event: PointerEvent) {
+            when (event.phase) {
+                PointerPhase.DOWN,
+                PointerPhase.POINTER_DOWN,
+                PointerPhase.MOVE -> {
+                    active.clear()
+                    event.points.forEach { active[it.id] = it }
+                }
+                PointerPhase.POINTER_UP -> active.remove(event.id)
+                PointerPhase.UP,
+                PointerPhase.CANCEL -> active.clear()
+            }
+        }
+
+        private fun motionAction(event: PointerEvent): Int =
+            when (event.phase) {
+                PointerPhase.DOWN -> MotionEvent.ACTION_DOWN
+                PointerPhase.POINTER_DOWN -> pointerIndex(MotionEvent.ACTION_POINTER_DOWN, event)
+                PointerPhase.MOVE -> MotionEvent.ACTION_MOVE
+                PointerPhase.POINTER_UP -> pointerIndex(MotionEvent.ACTION_POINTER_UP, event)
+                PointerPhase.UP -> MotionEvent.ACTION_UP
+                PointerPhase.CANCEL -> MotionEvent.ACTION_CANCEL
+            }
+
+        private fun pointerIndex(base: Int, event: PointerEvent): Int {
+            val index = event.points.indexOfFirst { it.id == event.id }.coerceAtLeast(0)
+            return base or (index shl MotionEvent.ACTION_POINTER_INDEX_SHIFT)
         }
     }
 

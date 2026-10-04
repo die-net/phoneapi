@@ -3,6 +3,7 @@ package net.die.phoneapi.input
 import android.accessibilityservice.AccessibilityService
 import android.view.KeyEvent
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -18,6 +19,8 @@ import net.die.phoneapi.model.ImeShowRequest
 import net.die.phoneapi.model.KeyRequest
 import net.die.phoneapi.model.NodeSelector
 import net.die.phoneapi.model.Point
+import net.die.phoneapi.model.PointerFrame
+import net.die.phoneapi.model.PointerOp
 import net.die.phoneapi.model.Rect
 import net.die.phoneapi.model.SwipeDirection
 import net.die.phoneapi.model.SwipeRequest
@@ -75,6 +78,18 @@ class InputServiceImpl(
             result(touch.gesture(pointers))
         }
 
+    override suspend fun pointer(frames: ReceiveChannel<PointerFrame>) {
+        while (true) {
+            val first = awaitDown(frames) ?: return
+            prepare(true)
+            try {
+                withContext(io) { touch.playLive(clamp(first), frames, ::clamp) }
+            } finally {
+                tree.invalidate()
+            }
+        }
+    }
+
     override suspend fun key(request: KeyRequest): ActionResult =
         action(request.autoWake) {
             val name = request.key.trim().uppercase().removePrefix("KEYCODE_")
@@ -125,6 +140,24 @@ class InputServiceImpl(
 
     override suspend fun showIme(request: ImeShowRequest): ActionResult =
         action(request.autoWake) { imeShow.show(request) }
+
+    /** The next real finger-down. Move, up, and cancel are ignored until one arrives. */
+    private suspend fun awaitDown(frames: ReceiveChannel<PointerFrame>): PointerFrame? {
+        for (frame in frames) {
+            if (frame.op == PointerOp.DOWN && frame.id in 0..MAX_POINTER_ID && frame.tMs >= 0L) {
+                return frame
+            }
+        }
+        return null
+    }
+
+    private fun clamp(frame: PointerFrame): PointerFrame {
+        if (frame.op == PointerOp.CANCEL) return frame
+        val screen = display()
+        val maxX = (screen.widthPx - 1).coerceAtLeast(0).toFloat()
+        val maxY = (screen.heightPx - 1).coerceAtLeast(0).toFloat()
+        return frame.copy(x = frame.x.coerceIn(0f, maxX), y = frame.y.coerceIn(0f, maxY))
+    }
 
     private suspend fun awaitImeHidden(): Boolean =
         withTimeoutOrNull(IME_HIDE_WAIT_MS) { state.state.first { !it.ime.visible } } != null

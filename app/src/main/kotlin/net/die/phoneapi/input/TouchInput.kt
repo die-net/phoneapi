@@ -1,8 +1,10 @@
 package net.die.phoneapi.input
 
 import android.view.ViewConfiguration
+import kotlinx.coroutines.channels.ReceiveChannel
 import net.die.phoneapi.model.DisplayInfo
 import net.die.phoneapi.model.Point
+import net.die.phoneapi.model.PointerFrame
 import net.die.phoneapi.model.Rect
 import net.die.phoneapi.model.TimedPoint
 
@@ -40,6 +42,14 @@ class TouchInput(
 
     suspend fun gesture(pointers: List<List<TimedPoint>>): TouchOutcome =
         perform(pointers, withEnds = true)
+
+    suspend fun playLive(
+        first: PointerFrame,
+        frames: ReceiveChannel<PointerFrame>,
+        clamp: (PointerFrame) -> PointerFrame,
+    ) {
+        inject.playLive(first, frames, clamp)
+    }
 
     /** Reports where each stroke started, and also where it ended when [withEnds] is set. */
     private suspend fun perform(
