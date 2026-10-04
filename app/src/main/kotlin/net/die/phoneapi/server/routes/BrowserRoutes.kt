@@ -16,7 +16,11 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import net.die.phoneapi.browser.DEVTOOLS_CLOSED
 import net.die.phoneapi.core.ApiException
+import net.die.phoneapi.model.BrowserGestureRequest
+import net.die.phoneapi.model.BrowserKeyRequest
+import net.die.phoneapi.model.BrowserSwipeRequest
 import net.die.phoneapi.model.BrowserTapRequest
+import net.die.phoneapi.model.BrowserTextRequest
 import net.die.phoneapi.model.ConsoleRequest
 import net.die.phoneapi.model.EvalRequest
 import net.die.phoneapi.model.NavigateRequest
@@ -26,7 +30,7 @@ import net.die.phoneapi.server.CdpPipe
 import net.die.phoneapi.server.ServerServices
 import net.die.phoneapi.server.scoped
 
-/** Browser routes: targets, navigation, snapshot, tap, evaluate, console, and raw CDP. */
+/** Browser routes: targets, navigation, snapshot, input, evaluate, console, and raw CDP. */
 fun Route.browserRoutes(services: ServerServices) {
     scoped(Scope.BROWSER) {
         get("/v1/browser/targets") { call.respond(services.browser.targets()) }
@@ -43,6 +47,22 @@ fun Route.browserRoutes(services: ServerServices) {
         }
         post("/v1/browser/targets/{id}/tap") {
             call.respond(services.browser.tap(call.targetId(), call.receive<BrowserTapRequest>()))
+        }
+        post("/v1/browser/targets/{id}/swipe") {
+            call.respond(
+                services.browser.swipe(call.targetId(), call.receive<BrowserSwipeRequest>())
+            )
+        }
+        post("/v1/browser/targets/{id}/gesture") {
+            call.respond(
+                services.browser.gesture(call.targetId(), call.receive<BrowserGestureRequest>())
+            )
+        }
+        post("/v1/browser/targets/{id}/key") {
+            call.respond(services.browser.key(call.targetId(), call.receive<BrowserKeyRequest>()))
+        }
+        post("/v1/browser/targets/{id}/text") {
+            call.respond(services.browser.text(call.targetId(), call.receive<BrowserTextRequest>()))
         }
         post("/v1/browser/targets/{id}/evaluate") {
             call.respond(services.browser.evaluate(call.targetId(), call.receive<EvalRequest>()))

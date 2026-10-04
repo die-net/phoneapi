@@ -154,6 +154,10 @@ Target ids look like `chrome_devtools_remote~<pageId>`. Chrome must publish DevT
 | `POST` | `/v1/browser/targets/{id}/navigate` | browser | `NavigateRequest` |
 | `GET` | `/v1/browser/targets/{id}/snapshot` | browser | Compact AX outline → `BrowserSnapshot` |
 | `POST` | `/v1/browser/targets/{id}/tap` | browser | Ref or CSS. `input` `touch` (default) or `cdp` (`BrowserTapRequest`) |
+| `POST` | `/v1/browser/targets/{id}/swipe` | browser | CSS pixels or a direction. `input` `touch` or `cdp` (`BrowserSwipeRequest`) |
+| `POST` | `/v1/browser/targets/{id}/gesture` | browser | Pointer paths in CSS pixels. `input` `touch` or `cdp` (`BrowserGestureRequest`) |
+| `POST` | `/v1/browser/targets/{id}/key` | browser | Key name. `input` `touch` or `cdp` (`BrowserKeyRequest`) |
+| `POST` | `/v1/browser/targets/{id}/text` | browser | Type. `touch` uses text modes; `cdp` inserts (`BrowserTextRequest`) |
 | `POST` | `/v1/browser/targets/{id}/evaluate` | browser | Isolated-world JS (`EvalRequest`) → `EvalResult` |
 | `POST` | `/v1/browser/targets/{id}/console` | browser | Collect logs for a timeout (`ConsoleRequest`) |
 
@@ -203,7 +207,9 @@ For stdio hosts (Cursor, etc.), run `phoneapi mcp` (with the helper up). It inst
 | `open_intent` | control | Start an intent |
 | `device_wake` / `device_unlock` / `device_lock` | control | Power / keyguard |
 | `browser_targets` / `browser_open` / `browser_navigate` | browser | Tab list and navigation |
-| `browser_snapshot` / `browser_tap` / `browser_eval` / `browser_console` | browser | AX outline, tap (`input` `touch` or `cdp`), JS, logs |
+| `browser_snapshot` / `browser_tap` / `browser_swipe` / `browser_gesture` | browser | AX outline and pointer input. `input` `touch` (default) or `cdp` |
+| `browser_key` / `browser_text` | browser | Key and text. `cdp` stays on a background tab; device keys such as HOME need `touch` |
+| `browser_eval` / `browser_console` | browser | JS and logs |
 | `screenshot` | observe | PNG last resort (`scale` default 0.5) |
 | `logcat_tail` | observe | Recent lines via helper |
 
@@ -226,7 +232,7 @@ When node ids are not stable, tool descriptions say so. Raw CDP, streams, and to
 | Browser log `level` | `verbose`, `info`, `warning`, `error` |
 | Swipe `direction` | `up`, `down`, `left`, `right` |
 | Text `mode` | `auto`, `keyboard`, `keyevent`, `setText` |
-| Browser tap `input` | `touch` (default; bring the tab forward and inject a touchscreen event), `cdp` (dispatch on that target, including a background tab) |
+| Browser `input` | `touch` (default; bring the tab forward and inject a hardware event), `cdp` (dispatch on that target, including a background tab). Swipe and gesture coordinates are CSS viewport pixels. |
 | Node `action` | `click`, `longClick`, `focus`, `clearFocus`, `select`, `setText`, `scrollForward`, `scrollBackward`, `expand`, `collapse`, `dismiss`, `showOnScreen`, `imeEnter`, plus other platform / app-listed names. `imeEnter` needs Android 11. |
 
 Full request and response schemas live in OpenAPI and under `api-model` (`DeviceInfo`, `UiSnapshot`, `TapRequest`, `WaitRequest`, `BrowserTarget`, `ApiError`, …).

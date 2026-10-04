@@ -11,10 +11,14 @@ import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import net.die.phoneapi.core.ApiException
+import net.die.phoneapi.input.SwipeSpec
 import net.die.phoneapi.model.ActionResult
 import net.die.phoneapi.model.BrowserInput
 import net.die.phoneapi.model.BrowserTapRequest
+import net.die.phoneapi.model.KeyRequest
+import net.die.phoneapi.model.Point
 import net.die.phoneapi.model.Rect
+import net.die.phoneapi.model.TextRequest
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertThrows
@@ -452,13 +456,18 @@ class BrowserServiceTest {
     }
 
     @Suppress("MissingUseCall")
-    private fun service(
+    internal fun service(
         response: ByteArray,
         sockets: String,
         content: suspend (String?) -> Rect = { Rect(0, 0, 1, 1) },
         touch: suspend (Rect, Boolean) -> ActionResult = { _, _ ->
             ActionResult(ok = true)
         },
+        swipe: suspend (Point, Point, SwipeSpec) -> ActionResult = { _, _, _ ->
+            ActionResult(ok = false)
+        },
+        press: suspend (KeyRequest) -> ActionResult = { ActionResult(ok = false) },
+        type: suspend (TextRequest) -> ActionResult = { ActionResult(ok = false) },
         open: (String) -> DevtoolsSocket = { ScriptedSocket(response) },
         targetTimeoutMs: Long = 5_000,
         axTreeCap: Int = AX_TREE_CACHE_CAP,
@@ -473,6 +482,9 @@ class BrowserServiceTest {
             websocketKey = { KEY },
             contentBounds = content,
             touchAt = touch,
+            swipeAt = swipe,
+            pressKey = press,
+            typeText = type,
             targetTimeoutMs = targetTimeoutMs,
             axTreeCap = axTreeCap,
             prepare = prepare,
@@ -534,13 +546,13 @@ class BrowserServiceTest {
         asciiLines("HTTP/1.1 200 OK", "Content-Length: ${body.toByteArray().size}") +
             body.toByteArray()
 
-    private fun switched(): ByteArray =
+    internal fun switched(): ByteArray =
         asciiLines(
             "HTTP/1.1 101 Switching Protocols",
             "Sec-WebSocket-Accept: ${websocketAccept(KEY)}",
         )
 
-    private fun serverTextFrame(text: String): ByteArray {
+    internal fun serverTextFrame(text: String): ByteArray {
         val payload = text.toByteArray(Charsets.UTF_8)
         val out = ByteArrayOutputStream()
         out.write(0x81)
@@ -556,13 +568,13 @@ class BrowserServiceTest {
         return out.toByteArray()
     }
 
-    private fun metrics(id: Int) =
+    internal fun metrics(id: Int) =
         """{"id":$id,"result":{"cssVisualViewport":{"pageX":0,"pageY":0,"clientWidth":412.19049072265625,"clientHeight":783.2380981445312},"visualViewport":{"clientWidth":1082,"clientHeight":2056}}}"""
 
     private fun quad(id: Int) =
         """{"id":$id,"result":{"quads":[[165.619049,453.68454,246.56548,453.68454,246.56548,479.27979,165.61905,479.27979]]}}"""
 
-    private companion object {
+    internal companion object {
         const val KEY = "dGhlIHNhbXBsZSBub25jZQ=="
         const val CHROME =
             """[{"name":"chrome_devtools_remote","pid":4,"package":"com.android.chrome"}]"""

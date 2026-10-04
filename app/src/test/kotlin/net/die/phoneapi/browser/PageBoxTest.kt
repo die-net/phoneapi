@@ -6,6 +6,7 @@ import kotlinx.serialization.json.jsonObject
 import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.core.ApiJson
 import net.die.phoneapi.model.Rect
+import net.die.phoneapi.model.SwipeDirection
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -57,6 +58,22 @@ class PageBoxTest {
         val point = viewportTap(quads(), metrics(pageY = 0.0), humanize = true, random = Random(1))
         assertTrue(point.x in 165.62f..246.57f)
         assertTrue(point.y in 453.68f..479.28f)
+    }
+
+    @Test
+    fun `maps a css point onto screen`() {
+        val point = screenPoint(100f, 200f, metrics(pageY = 0.0), CONTENT)
+        assertEquals(262.50f, point.x, 0.05f)
+        assertEquals(808.00f, point.y, 0.05f)
+    }
+
+    @Test
+    fun `page swipe goes upward`() {
+        val (from, to) = directionSwipe(null, metrics(pageY = 0.0), SwipeDirection.UP, 0.6f)
+        assertEquals(206.10f, from.x, 0.05f)
+        assertEquals(570.20f, from.y, 0.05f)
+        assertEquals(206.10f, to.x, 0.05f)
+        assertEquals(213.04f, to.y, 0.05f)
     }
 
     @Test
