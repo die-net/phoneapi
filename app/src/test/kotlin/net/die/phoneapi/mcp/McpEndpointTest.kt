@@ -69,8 +69,21 @@ class McpEndpointTest {
         assertEquals(0, api.waits.calls)
     }
 
+    @Test
+    fun `lan host reaches mcp`() = testApplication {
+        val api = FakeApi()
+        val observe = api.tokens.issue("observe", setOf(Scope.OBSERVE))
+        application { phoneApiModule(api.services) }
+        val names =
+            withMcp(observe, host = "192.168.1.5") { client ->
+                client.listTools().tools.map { it.name }
+            }
+        assertTrue("device_info" in names)
+    }
+
     private suspend fun <T> ApplicationTestBuilder.withMcp(
         secret: String,
+        host: String = "localhost",
         block: suspend (Client) -> T,
     ): T {
         return createClient {
@@ -89,7 +102,7 @@ class McpEndpointTest {
                             ),
                         requestBuilder = {
                             header(HttpHeaders.Authorization, "Bearer $secret")
-                            header(HttpHeaders.Host, "localhost")
+                            header(HttpHeaders.Host, host)
                         },
                     )
                 try {
