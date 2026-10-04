@@ -18,7 +18,10 @@ import net.die.phoneapi.model.UnlockRequest
 import net.die.phoneapi.server.ServerServices
 import net.die.phoneapi.server.scoped
 
-/** `GET /v1/device`, `POST /v1/device/wake|unlock|lock`, and `PUT|DELETE /v1/device/pin`. */
+/**
+ * `GET /v1/device`, `POST /v1/device/wake|unlock|lock|orientation`, and `PUT|DELETE
+ * /v1/device/pin`.
+ */
 fun Route.deviceRoutes(services: ServerServices) {
     scoped(Scope.OBSERVE) {
         get("/v1/device") { call.respond(services.device.info()) }
@@ -29,6 +32,9 @@ fun Route.deviceRoutes(services: ServerServices) {
             call.respond(services.power.unlock(bodyOrDefault(call, UnlockRequest())))
         }
         post("/v1/device/lock") { call.respond(services.power.lock()) }
+        post("/v1/device/orientation") {
+            call.respond(services.power.orientation(call.receive()))
+        }
     }
     scoped(Scope.ADMIN) {
         put("/v1/device/pin") {

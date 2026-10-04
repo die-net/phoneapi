@@ -101,6 +101,7 @@ Authenticated errors are JSON:
 | `POST` | `/v1/device/wake` | control | Turn the screen on → `ActionResult` |
 | `POST` | `/v1/device/unlock` | control | Dismiss keyguard (`UnlockRequest`, optional) |
 | `POST` | `/v1/device/lock` | control | Lock the device |
+| `POST` | `/v1/device/orientation` | control | Auto-rotate, or lock to `lock` / `0` / `90` / `180` / `270` (`OrientationRequest`) |
 | `PUT` | `/v1/device/pin` | admin | Store unlock PIN (`SetPinRequest`) → `PinStatus` |
 | `DELETE` | `/v1/device/pin` | admin | Clear stored PIN → 204 |
 
@@ -186,7 +187,7 @@ Auth: Bearer header, the `phoneapi` cookie, or `access_token` on the upgrade URL
 
 `/v1/input/pointer` frames are `{"op":"down"|"move"|"up","id":0,"x":1,"y":2,"tMs":0}` or `{"op":"cancel"}`. `id` is the contact, 0 through 9. `tMs` is milliseconds since that gesture's first `down`, shared by every contact. `x` and `y` are screen pixels. The first `down` is `ACTION_DOWN`; another finger is `ACTION_POINTER_DOWN`. A `move` carries the latest point of every finger still down. The last `up` is `ACTION_UP`. `cancel`, a bad frame, or the socket closing while a contact is down injects `ACTION_CANCEL` and releases the touch. An 11th `down`, or a `move`/`up` for an id that is not down, is ignored. Closing with nothing down injects nothing.
 
-`GET /viewer?access_token=` (stream) sets the `phoneapi` cookie and redirects to `/viewer`. The page then uses that cookie. It closes the video socket while the page is hidden and opens it again when the page is visible. It opens the audio socket only while the browser will play sound.
+`GET /viewer?access_token=` (stream) sets the `phoneapi` cookie and redirects to `/viewer`. The page then uses that cookie. It closes the video socket while the page is hidden and opens it again when the page is visible. It opens the audio socket only while the browser will play sound. One button cycles `POST /v1/device/orientation` through `auto`, `0`, `90`, `180`, and `270`.
 
 ## MCP
 
@@ -211,6 +212,7 @@ For stdio hosts (Cursor, etc.), run `phoneapi mcp` (with the helper up). It inst
 | `app_launch` / `app_stop` / `app_clear` | control | Package control (`stop`/`clear` need helper) |
 | `open_intent` | control | Start an intent |
 | `device_wake` / `device_unlock` / `device_lock` | control | Power / keyguard |
+| `device_orientation` | control | Auto-rotate, or lock the screen to the current or a named rotation |
 | `browser_targets` / `browser_open` / `browser_navigate` | browser | Tab list and navigation |
 | `browser_snapshot` / `browser_tap` / `browser_swipe` / `browser_gesture` | browser | AX outline and pointer input. `input` `touch` (default) or `cdp` |
 | `browser_key` / `browser_text` | browser | Key and text. `cdp` stays on a background tab; device keys such as HOME need `touch` |
@@ -236,6 +238,7 @@ When node ids are not stable, tool descriptions say so. Raw CDP, streams, and to
 | Browser element `state` | `present`, `absent`, `visible` |
 | Browser log `level` | `verbose`, `info`, `warning`, `error` |
 | Swipe `direction` | `up`, `down`, `left`, `right` |
+| Screen `orientation` | `auto`, `lock`, `0`, `90`, `180`, `270`. `0` is the device's natural orientation. `display.autoRotate` reports the system setting; `display.rotation` is the current quarter-turn (`0`–`3`). An app can still force its own orientation. |
 | Text `mode` | `auto`, `keyboard`, `keyevent`, `setText` |
 | Browser `input` | `touch` (default; bring the tab forward and inject a hardware event), `cdp` (dispatch on that target, including a background tab). Swipe and gesture coordinates are CSS viewport pixels. |
 | Node `action` | `click`, `longClick`, `focus`, `clearFocus`, `select`, `setText`, `scrollForward`, `scrollBackward`, `expand`, `collapse`, `dismiss`, `showOnScreen`, `imeEnter`, plus other platform / app-listed names. `imeEnter` needs Android 11. |

@@ -2,6 +2,7 @@ package net.die.phoneapi.helper.compat
 
 import android.app.UiAutomation
 import android.os.Looper
+import java.lang.reflect.InvocationTargetException
 
 /**
  * Connects a shell [UiAutomation]. `UiAutomationConnection` and `connect` are hidden, so the
@@ -19,10 +20,14 @@ internal object ShellUiAutomation {
                 .java
                 .getConstructor(Looper::class.java, type)
                 .newInstance(looper, connection) as UiAutomation
-        UiAutomation::class
-            .java
-            .getMethod("connect", Int::class.javaPrimitiveType)
-            .invoke(ui, flags)
+        try {
+            UiAutomation::class
+                .java
+                .getMethod("connect", Int::class.javaPrimitiveType)
+                .invoke(ui, flags)
+        } catch (e: InvocationTargetException) {
+            throw IllegalStateException(e.cause?.message ?: "UiAutomation connect failed", e)
+        }
         return ui
     }
 

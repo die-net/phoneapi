@@ -101,6 +101,15 @@ class HelperConnection(private val bus: EventBus, private val idleStatus: Helper
         return accepted
     }
 
+    private fun stopPrevious(proxy: IHelper) {
+        Log.i(TAG, "Stopping the previous helper")
+        try {
+            proxy.shutdown()
+        } catch (e: RemoteException) {
+            Log.i(TAG, "Previous helper stopped", e)
+        }
+    }
+
     private fun abandon(proxy: IHelper) {
         try {
             proxy.shutdown()
@@ -112,9 +121,7 @@ class HelperConnection(private val bus: EventBus, private val idleStatus: Helper
 
     private fun accept(newBinder: IBinder, proxy: IHelper): Boolean {
         val previous = binder
-        if (previous != null && previous != newBinder) {
-            runCatching { previous.unlinkToDeath(deathRecipient, 0) }
-        }
+        val replaced = previous != null && previous != newBinder
         if (previous != newBinder) {
             try {
                 newBinder.linkToDeath(deathRecipient, 0)
@@ -122,6 +129,12 @@ class HelperConnection(private val bus: EventBus, private val idleStatus: Helper
                 Log.w(TAG, "Helper died before registration", e)
                 return false
             }
+        }
+        if (replaced) {
+            runCatching { previous.unlinkToDeath(deathRecipient, 0) }
+            // The old process may still hold UiAutomation. A second one cannot register until it
+            // exits, and global buttons then fail.
+            helper?.let { stopPrevious(it) }
         }
         val first = helper == null
         binder = newBinder

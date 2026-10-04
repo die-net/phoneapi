@@ -2,6 +2,8 @@ package net.die.phoneapi.model
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import net.die.phoneapi.model.schema.Doc
+import net.die.phoneapi.model.schema.LenientEnumSerializer
 
 @Serializable
 public data class ApiError(
@@ -59,6 +61,8 @@ public data class DisplayInfo(
     val densityDpi: Int,
     val rotation: Int,
     val refreshRate: Float,
+    /** True when system auto-rotate is on. An app can still force its own orientation. */
+    val autoRotate: Boolean = false,
 )
 
 @Serializable
@@ -93,6 +97,35 @@ public data class Capabilities(
     @SerialName("encoder.lowLatency") val encoderLowLatency: Boolean,
     @SerialName("adb.wireless") val adbWireless: Boolean,
     @SerialName("settings.secure") val settingsSecure: Boolean,
+)
+
+/**
+ * `auto` follows the sensor. `lock` freezes the current rotation. `0`, `90`, `180`, and `270` lock
+ * to that rotation from the device's natural orientation (portrait on a phone).
+ */
+@Serializable(with = ScreenOrientationSerializer::class)
+public enum class ScreenOrientation {
+    @SerialName("auto") AUTO,
+    @SerialName("lock") LOCK,
+    @SerialName("0") R0,
+    @SerialName("90") R90,
+    @SerialName("180") R180,
+    @SerialName("270") R270,
+}
+
+public object ScreenOrientationSerializer :
+    LenientEnumSerializer<ScreenOrientation>(
+        serialName = "net.die.phoneapi.model.ScreenOrientation",
+        wires = listOf("auto", "lock", "0", "90", "180", "270"),
+        values = { enumValues<ScreenOrientation>() },
+    )
+
+@Serializable
+public data class OrientationRequest(
+    @Doc(
+        "auto follows the sensor. lock freezes the current rotation. 0, 90, 180, and 270 lock to that rotation from the device's natural orientation."
+    )
+    val orientation: ScreenOrientation
 )
 
 /** Body of `PUT /v1/device/pin`. The value is stored and never returned. */

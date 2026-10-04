@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.hardware.display.DisplayManager
 import android.os.Build
+import android.provider.Settings
 import android.view.Display
 import net.die.phoneapi.model.Capabilities
 import net.die.phoneapi.model.DeviceInfo
@@ -77,6 +78,12 @@ class DeviceInfoProvider(
             densityDpi = metrics.densityDpi,
             rotation = display.rotation,
             refreshRate = mode.refreshRate,
+            autoRotate =
+                Settings.System.getInt(
+                    context.contentResolver,
+                    Settings.System.ACCELEROMETER_ROTATION,
+                    0,
+                ) == 1,
         )
     }
 

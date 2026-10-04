@@ -166,7 +166,14 @@ class TreeSession(
                 helper.require().tree(op, envelope(body))
             } catch (e: RemoteException) {
                 throw ApiException.helperDropped(e)
-            }
+            } catch (e: IllegalStateException) {
+                throw ApiException(
+                    503,
+                    "helper_error",
+                    e.message ?: "The helper tree call failed",
+                    cause = e,
+                )
+            } ?: throw ApiException.helperDropped()
         val result = ApiJson.decodeFromString(TreeResult.serializer(), raw)
         if (result.status != 200) {
             throw ApiException(

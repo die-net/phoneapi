@@ -47,6 +47,7 @@ import net.die.phoneapi.model.KeyRequest
 import net.die.phoneapi.model.KeyguardState
 import net.die.phoneapi.model.LaunchRequest
 import net.die.phoneapi.model.NodeActionRequest
+import net.die.phoneapi.model.OrientationRequest
 import net.die.phoneapi.model.PointerFrame
 import net.die.phoneapi.model.Scope
 import net.die.phoneapi.model.ScreenState
@@ -106,6 +107,7 @@ internal class FakeApi {
     var capabilities = allCapabilities()
     var inputTaps = 0
     var imeShow: ImeShowRequest? = null
+    var orientation: OrientationRequest? = null
     val pointerSessions = Channel<List<PointerFrame>>(capacity = Channel.UNLIMITED)
 
     val services: ServerServices =
@@ -142,7 +144,13 @@ internal class FakeApi {
             apps = FakeApps,
             waits = waits,
             browser = FakeBrowser,
-            power = FakePower,
+            power =
+                object : PowerService by FakePower {
+                    override suspend fun orientation(request: OrientationRequest): ActionResult {
+                        this@FakeApi.orientation = request
+                        return acted()
+                    }
+                },
             tokens = tokens,
             ioDispatcher = Dispatchers.Unconfined,
             device =
@@ -291,6 +299,8 @@ private object FakePower : PowerService {
     override suspend fun unlock(request: UnlockRequest) = acted()
 
     override suspend fun lock() = acted()
+
+    override suspend fun orientation(request: OrientationRequest) = acted()
 
     override suspend fun prepareForAction(autoWake: Boolean) = false
 }

@@ -15,6 +15,7 @@ import net.die.phoneapi.model.FindRequest
 import net.die.phoneapi.model.ImeShowRequest
 import net.die.phoneapi.model.IntentRequest
 import net.die.phoneapi.model.KeyRequest
+import net.die.phoneapi.model.OrientationRequest
 import net.die.phoneapi.model.Scope
 import net.die.phoneapi.model.SwipeRequest
 import net.die.phoneapi.model.TapRequest
@@ -247,6 +248,16 @@ private val MCP_TOOLS: List<McpTool> =
             arguments = serializer<EmptyArgs>(),
             annotations = destructive,
             call = { graph, _, _ -> deviceLock(graph) },
+        ),
+        McpTool(
+            name = "device_orientation",
+            description =
+                "Set screen orientation. auto follows the sensor. lock freezes the current rotation. 0, 90, 180, and 270 lock to that rotation from the device's natural orientation. An app can still force its own orientation.",
+            scope = Scope.CONTROL,
+            available = always,
+            arguments = serializer<OrientationRequest>(),
+            annotations = changes,
+            call = { graph, _, request -> deviceOrientation(graph, request) },
         ),
         McpTool(
             name = "browser_targets",
