@@ -128,10 +128,8 @@ class AppGraph(
         )
 
     val keys = InjectKeyBackend(helper, ioDispatcher)
-    val touch =
-        TouchInput(InjectTouchBackend(helper, ioDispatcher), Humanizer()) {
-            deviceInfo.display()
-        }
+    private val touchBackend = InjectTouchBackend(helper, ioDispatcher)
+    val touch = TouchInput(touchBackend, Humanizer()) { deviceInfo.display() }
     val screenshots = Screenshotter(ioDispatcher, ::helperScreenshot)
     val power: PowerService =
         PowerServiceImpl(
@@ -275,6 +273,8 @@ class AppGraph(
                 )
             },
             devtoolsGap = DevtoolsPreconditions(context)::explain,
+            refreshHz = { deviceInfo.display().refreshRate },
+            contact = { touchBackend.contact() },
         )
 
     fun start() {

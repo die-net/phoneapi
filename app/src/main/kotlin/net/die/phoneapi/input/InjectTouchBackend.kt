@@ -12,7 +12,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import net.die.phoneapi.core.ApiException
-import net.die.phoneapi.helper.AxisRange
 import net.die.phoneapi.helper.IHelper
 import net.die.phoneapi.helper.TouchscreenInfo
 import net.die.phoneapi.helperclient.HelperConnection
@@ -28,6 +27,16 @@ class InjectTouchBackend(
     private val io: CoroutineContext,
 ) {
     val name = "inject"
+
+    /** The ellipse stamped on injected touches. CDP uses the same contact. */
+    internal suspend fun contact(): FingerContact {
+        val proxy = helper.require()
+        return try {
+            FingerContact.from(touchscreen(proxy))
+        } catch (e: RemoteException) {
+            throw ApiException.helperDropped(e)
+        }
+    }
 
     private val gestures = Mutex()
     private val screenLock = Mutex()
@@ -264,6 +273,7 @@ private fun obtain(
     pointers: List<TouchSample>,
     screen: TouchscreenInfo,
 ): MotionEvent {
+    val contact = FingerContact.from(screen)
     val properties =
         Array(pointers.size) { index ->
             MotionEvent.PointerProperties().apply {
@@ -277,11 +287,11 @@ private fun obtain(
                 val sample = pointers[index]
                 x = sample.x
                 y = sample.y
-                pressure = along(screen.pressure, PRESSURE_FRACTION)
-                size = along(screen.size, SIZE_FRACTION)
-                touchMajor = along(screen.touchMajor, SIZE_FRACTION)
-                touchMinor = along(screen.touchMinor, SIZE_FRACTION)
-                orientation = along(screen.orientation, CENTER_FRACTION)
+                pressure = contact.pressure
+                size = contact.size
+                touchMajor = contact.touchMajor
+                touchMinor = contact.touchMinor
+                orientation = contact.orientation
             }
         }
     // A device's source mask can include bits the input verifier does not know. On API 36 an
@@ -306,15 +316,3 @@ private fun obtain(
         0,
     )
 }
-
-/**
- * A point [fraction] of the way from min to max, so a finger is not the exact center of the range.
- */
-private fun along(range: AxisRange, fraction: Float): Float {
-    if (range.max <= range.min) return range.min
-    return range.min + (range.max - range.min) * fraction
-}
-
-private const val PRESSURE_FRACTION = 0.55f
-private const val SIZE_FRACTION = 0.08f
-private const val CENTER_FRACTION = 0.5f

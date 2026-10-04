@@ -11,6 +11,21 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class HumanizerTest {
+    @Test
+    fun `fallback finger matches the injected contact`() {
+        val contact = FingerContact.fallback
+        assertEquals(0.55f, contact.pressure, 0.0001f)
+        assertEquals(0.08f, contact.size, 0.0001f)
+        assertEquals(0.08f, contact.touchMajor, 0.0001f)
+        assertEquals(0.08f, contact.touchMinor, 0.0001f)
+        assertEquals(0f, contact.orientation, 0.0001f)
+        val cdp = contact.toCdp(2.5f)
+        assertEquals(0.016f, cdp.radiusX, 0.0001f)
+        assertEquals(0.016f, cdp.radiusY, 0.0001f)
+        assertEquals(0.55f, cdp.force, 0.0001f)
+        assertEquals(0f, cdp.rotationAngle, 0.0001f)
+    }
+
     private val target = Rect(100, 200, 300, 300)
 
     @Test
