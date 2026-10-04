@@ -1,5 +1,6 @@
 package net.die.phoneapi.core
 
+import kotlinx.coroutines.channels.ReceiveChannel
 import net.die.phoneapi.model.ActionResult
 import net.die.phoneapi.model.AppInfo
 import net.die.phoneapi.model.BrowserGestureRequest
@@ -21,6 +22,7 @@ import net.die.phoneapi.model.IntentRequest
 import net.die.phoneapi.model.KeyRequest
 import net.die.phoneapi.model.LaunchRequest
 import net.die.phoneapi.model.NodeActionRequest
+import net.die.phoneapi.model.PointerFrame
 import net.die.phoneapi.model.Scope
 import net.die.phoneapi.model.SwipeRequest
 import net.die.phoneapi.model.TapRequest
@@ -49,6 +51,12 @@ interface InputService {
     suspend fun swipe(request: SwipeRequest): ActionResult
 
     suspend fun gesture(request: GestureRequest): ActionResult
+
+    /**
+     * Live contacts from `WS /v1/input/pointer`. Reads [frames] until the channel closes. A contact
+     * that is still down then is cancelled, which releases the touch.
+     */
+    suspend fun pointer(frames: ReceiveChannel<PointerFrame>)
 
     suspend fun key(request: KeyRequest): ActionResult
 

@@ -270,7 +270,15 @@ document.body.addEventListener("pointerdown", unlockAudio, { once: true });
 
 let display = null;
 let inputQueue = Promise.resolve();
-let stroke = null;
+let pointerSocket = null;
+let pointerRetry = null;
+const contacts = new Map();
+const usedSlots = new Set();
+let gestureT0 = 0;
+const MAX_CONTACTS = 10;
+const TAP_SLOP = 12;
+const MOVE_SLOP = 2;
+const MOVE_MS = 16;
 
 function unlockAudio() {
   if (!audioCtx) audioCtx = new AudioContext();
@@ -317,65 +325,118 @@ async function sendInput(path, body) {
   status.textContent = detail;
 }
 
-function beginStroke(event) {
+function connectPointer() {
+  if (pointerRetry !== null) {
+    clearTimeout(pointerRetry);
+    pointerRetry = null;
+  }
+  const next = socket("/v1/input/pointer");
+  pointerSocket = next;
+  next.onclose = () => {
+    if (pointerSocket !== next) return;
+    contacts.clear();
+    usedSlots.clear();
+    gestureT0 = 0;
+    pointerRetry = setTimeout(connectPointer, 500);
+  };
+}
+
+function allocSlot() {
+  for (let id = 0; id < MAX_CONTACTS; id++) {
+    if (!usedSlots.has(id)) {
+      usedSlots.add(id);
+      return id;
+    }
+  }
+  return -1;
+}
+
+function gestureMs(timeStamp) {
+  return Math.max(0, Math.round(timeStamp - gestureT0));
+}
+
+function sendPointer(body) {
+  if (!pointerSocket || pointerSocket.readyState !== WebSocket.OPEN) return;
+  pointerSocket.send(JSON.stringify(body));
+}
+
+function beginContact(event) {
   if (canvas.width < 8 || canvas.height < 8) return;
   if (event.pointerType === "mouse" && event.button !== 0) return;
-  if (stroke) return;
+  event.preventDefault();
+  if (contacts.has(event.pointerId)) return;
+  const id = allocSlot();
+  if (id < 0) return;
   unlockAudio();
   canvas.setPointerCapture(event.pointerId);
   const point = screenPoint(event);
-  stroke = { id: event.pointerId, t0: event.timeStamp, points: [{ x: point.x, y: point.y, tMs: 0 }] };
+  if (contacts.size === 0) gestureT0 = event.timeStamp;
+  const tMs = gestureMs(event.timeStamp);
+  contacts.set(event.pointerId, {
+    id: id,
+    originX: point.x,
+    originY: point.y,
+    x: point.x,
+    y: point.y,
+    moved: false,
+    lastX: point.x,
+    lastY: point.y,
+    lastT: tMs,
+  });
+  sendPointer({ op: "down", id: id, x: point.x, y: point.y, tMs: tMs });
+}
+
+function extendContact(event) {
+  const contact = contacts.get(event.pointerId);
+  if (!contact) return;
   event.preventDefault();
+  const point = screenPoint(event);
+  const tMs = gestureMs(event.timeStamp);
+  contact.x = point.x;
+  contact.y = point.y;
+  if (!contact.moved && Math.hypot(point.x - contact.originX, point.y - contact.originY) < TAP_SLOP) return;
+  contact.moved = true;
+  const moved = Math.hypot(point.x - contact.lastX, point.y - contact.lastY);
+  if (moved < MOVE_SLOP && tMs - contact.lastT < MOVE_MS) return;
+  contact.lastX = point.x;
+  contact.lastY = point.y;
+  contact.lastT = tMs;
+  sendPointer({ op: "move", id: contact.id, x: point.x, y: point.y, tMs: tMs });
 }
 
-function extendStroke(event) {
-  if (!stroke || event.pointerId !== stroke.id) return;
+function endContact(event) {
+  const contact = contacts.get(event.pointerId);
+  if (!contact) return;
   const point = screenPoint(event);
-  const tMs = Math.max(0, Math.round(event.timeStamp - stroke.t0));
-  const last = stroke.points[stroke.points.length - 1];
-  const moved = Math.hypot(point.x - last.x, point.y - last.y);
-  if (stroke.points.length > 1 && moved < 2) {
-    last.x = point.x;
-    last.y = point.y;
-    last.tMs = tMs;
+  const tMs = gestureMs(event.timeStamp);
+  contacts.delete(event.pointerId);
+  usedSlots.delete(contact.id);
+  const inside = !contact.moved &&
+    Math.hypot(point.x - contact.originX, point.y - contact.originY) < TAP_SLOP;
+  const x = inside ? contact.originX : point.x;
+  const y = inside ? contact.originY : point.y;
+  if (contacts.size === 0) gestureT0 = 0;
+  sendPointer({ op: "up", id: contact.id, x: x, y: y, tMs: tMs });
+}
+
+function cancelContact(event) {
+  const contact = contacts.get(event.pointerId);
+  if (!contact) return;
+  const tMs = gestureMs(event.timeStamp);
+  contacts.delete(event.pointerId);
+  usedSlots.delete(contact.id);
+  if (contacts.size === 0) {
+    gestureT0 = 0;
+    sendPointer({ op: "cancel" });
     return;
   }
-  if (moved < 2 && tMs < 16) return;
-  stroke.points.push({ x: point.x, y: point.y, tMs: tMs });
+  sendPointer({ op: "up", id: contact.id, x: contact.x, y: contact.y, tMs: tMs });
 }
 
-function endStroke(event) {
-  if (!stroke || event.pointerId !== stroke.id) return;
-  const finished = stroke;
-  stroke = null;
-  const point = screenPoint(event);
-  const tMs = Math.max(0, Math.round(event.timeStamp - finished.t0));
-  const start = finished.points[0];
-  const distance = Math.hypot(point.x - start.x, point.y - start.y);
-  if (distance < 12) {
-    postInput("/v1/input/tap", {
-      x: start.x,
-      y: start.y,
-      humanize: false,
-      holdMs: Math.min(10000, Math.max(1, tMs)),
-      autoWake: true,
-    });
-    return;
-  }
-  const last = finished.points[finished.points.length - 1];
-  if (last.tMs !== tMs || Math.hypot(point.x - last.x, point.y - last.y) >= 2) {
-    finished.points.push({ x: point.x, y: point.y, tMs: tMs });
-  } else {
-    last.x = point.x;
-    last.y = point.y;
-  }
-  postInput("/v1/input/gesture", { pointers: [finished.points], autoWake: true });
-}
-
-canvas.addEventListener("pointerdown", beginStroke);
-canvas.addEventListener("pointermove", extendStroke);
-canvas.addEventListener("pointerup", endStroke);
-canvas.addEventListener("pointercancel", endStroke);
+canvas.addEventListener("pointerdown", beginContact);
+canvas.addEventListener("pointermove", extendContact);
+canvas.addEventListener("pointerup", endContact);
+canvas.addEventListener("pointercancel", cancelContact);
 canvas.addEventListener("contextmenu", (event) => event.preventDefault());
 
 document.addEventListener("keydown", (event) => {
@@ -408,6 +469,7 @@ document.getElementById("keys").addEventListener("pointerdown", (event) => {
 });
 
 loadDisplay();
+connectPointer();
 </script>
 </body>
 </html>

@@ -127,6 +127,8 @@ Authenticated errors are JSON:
 
 `autoWake` (default true) turns the screen on and leaves the keyguard up. Dismiss the keyguard with `POST /v1/device/unlock`.
 
+`/viewer` does not post a finished swipe. It streams the canvas on `WS /v1/input/pointer` so the phone moves while the finger is still down.
+
 ### Apps and intents
 
 | Method | Path | Scope | Summary |
@@ -177,9 +179,12 @@ Auth: Bearer header, the `phoneapi` cookie, or `access_token` on the upgrade URL
 | Path | Scope | Summary |
 | --- | --- | --- |
 | `/v1/events` | observe | JSON event frames (see Conventions) |
+| `/v1/input/pointer` | control | Live pointer contacts (`PointerFrame` JSON text frames) |
 | `/v1/browser/targets/{id}/cdp` | browser | Raw CDP |
 | `/v1/stream/video` | stream | H.264; query `maxSize`, `fps`, `bitRate` |
 | `/v1/stream/audio` | stream | Device audio (submix capability) |
+
+`/v1/input/pointer` frames are `{"op":"down"|"move"|"up","id":0,"x":1,"y":2,"tMs":0}` or `{"op":"cancel"}`. `id` is the contact, 0 through 9. `tMs` is milliseconds since that gesture's first `down`, shared by every contact. `x` and `y` are screen pixels. The first `down` is `ACTION_DOWN`; another finger is `ACTION_POINTER_DOWN`. A `move` carries the latest point of every finger still down. The last `up` is `ACTION_UP`. `cancel`, a bad frame, or the socket closing while a contact is down injects `ACTION_CANCEL` and releases the touch. An 11th `down`, or a `move`/`up` for an id that is not down, is ignored. Closing with nothing down injects nothing.
 
 `GET /viewer?access_token=` (stream) sets the `phoneapi` cookie and redirects to `/viewer`. The page then uses that cookie.
 
