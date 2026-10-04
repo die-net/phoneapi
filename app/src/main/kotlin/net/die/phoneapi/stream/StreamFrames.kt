@@ -36,6 +36,26 @@ internal fun videoHeader(width: Int, height: Int, spec: VideoSpec): String = bui
 }
     .toString()
 
+private val AOPUS_MAGIC = "AOPUSHDR".encodeToByteArray()
+private const val AOPUS_HEADER = 16
+
+/**
+ * Android's Opus encoder wraps the identification header as `AOPUSHDR` plus a length. WebCodecs
+ * wants the `OpusHead` bytes on their own. Other codec configs, including AAC, are unchanged.
+ */
+internal fun audioCodecDescription(data: ByteArray): ByteArray {
+    if (
+        data.size < AOPUS_HEADER ||
+            !data.copyOfRange(0, AOPUS_MAGIC.size).contentEquals(AOPUS_MAGIC)
+    ) {
+        return data
+    }
+    val size = (data[8].toInt() and 0xff) or ((data[9].toInt() and 0xff) shl 8)
+    val end = AOPUS_HEADER + size
+    if (size <= 0 || end > data.size) return data
+    return data.copyOfRange(AOPUS_HEADER, end)
+}
+
 /** Text frame sent once on the audio socket before binary frames. */
 internal fun audioHeader(codec: String, sampleRate: Int, channels: Int): String = buildJsonObject {
     put("codec", codec)

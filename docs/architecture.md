@@ -47,7 +47,7 @@ Unauthenticated or unknown Bearer tokens get an **empty 404** (no banner).
 
 Bearer tokens are minted over ADB (`CREATE_TOKEN` through `ShellCommandReceiver`, DUMP-protected). The shell user is already trusted, so the phone does not need an Allow dialog for that path. `phoneapi pair` writes pairing JSON (scheme `http`, host `127.0.0.1`, port, token) to `~/.config/phoneapi/pairing.json`. `phoneapi server` installs the forward from that file.
 
-Scopes: `observe`, `control`, `browser`, `stream`, `admin`. Routes and MCP tools are gated by scope and by `capabilities` from `/v1/device`. `?access_token=` is only for WebSocket upgrades and `GET /viewer`, not for `/mcp`.
+Scopes: `observe`, `control`, `browser`, `stream`, `admin`. Routes and MCP tools are gated by scope and by `capabilities` from `/v1/device`. `?access_token=` is only for WebSocket upgrades and `GET /viewer` (which sets a cookie and redirects), not for `/mcp`.
 
 Wireless Debugging pairing on Android 11+ is a separate concept. It allows the app to self-pair so the helper and Chrome DevTools keep working without USB.
 

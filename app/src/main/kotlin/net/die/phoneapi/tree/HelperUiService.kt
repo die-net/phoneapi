@@ -14,23 +14,23 @@ import net.die.phoneapi.model.UiSnapshot
 
 /** [UiService] that asks the helper for the tree and injects real clicks itself. */
 class HelperUiService(
-    private val prepare: suspend (Boolean, Boolean) -> Boolean,
+    private val prepare: suspend (Boolean) -> Boolean,
     private val tree: TreeSession,
     private val touch: TouchInput,
     private val seq: StateFlow<Long>,
 ) : UiService {
     override suspend fun snapshot(options: SnapshotOptions): UiSnapshot {
-        prepare(options.autoWake, true)
+        prepare(options.autoWake)
         return tree.snapshot(options)
     }
 
     override suspend fun find(request: FindRequest): FindResult {
-        prepare(true, true)
+        prepare(true)
         return tree.find(request)
     }
 
     override suspend fun act(ref: String, request: NodeActionRequest): ActionResult {
-        val woke = prepare(request.autoWake, false)
+        val woke = prepare(request.autoWake)
         val action = request.action
         val click = action.equals(ActionNames.CLICK, ignoreCase = true)
         val longClick = action.equals(ActionNames.LONG_CLICK, ignoreCase = true)

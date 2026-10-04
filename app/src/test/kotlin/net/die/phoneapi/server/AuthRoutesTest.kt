@@ -2,11 +2,16 @@ package net.die.phoneapi.server
 
 import io.ktor.client.plugins.websocket.webSocket
 import io.ktor.client.request.get
+import io.ktor.client.request.header
 import io.ktor.client.statement.bodyAsText
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.testing.testApplication
+import kotlin.time.Duration.Companion.seconds
+import kotlinx.coroutines.withTimeout
 import net.die.phoneapi.model.Scope
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
@@ -48,10 +53,30 @@ class AuthRoutesTest {
             assertEquals(HttpStatusCode.NotFound, rest.status)
             assertEquals("", rest.bodyAsText())
 
-            val viewer = client.get("/viewer?access_token=$stream")
-            assertEquals(HttpStatusCode.OK, viewer.status)
-            assertTrue(viewer.bodyAsText().contains("viewer"))
+            val viewer = client.get("/viewer?access_token=$stream&maxSize=720")
+            assertEquals(HttpStatusCode.Found, viewer.status)
+            assertEquals("/viewer?maxSize=720", viewer.headers[HttpHeaders.Location])
+            assertFalse(viewer.bodyAsText().contains(stream))
+            val setCookie = viewer.headers[HttpHeaders.SetCookie].orEmpty()
+            assertTrue(setCookie.startsWith("$VIEWER_COOKIE=$stream"))
+            assertTrue(setCookie.contains("HttpOnly"))
+            assertTrue(setCookie.contains("SameSite=Strict"))
 
+            val page =
+                client.get("/viewer") { header(HttpHeaders.Cookie, "$VIEWER_COOKIE=$stream") }
+            assertEquals(HttpStatusCode.OK, page.status)
+            assertTrue(page.bodyAsText().contains("viewer"))
+
+            val device =
+                client.get("/v1/device") { header(HttpHeaders.Cookie, "$VIEWER_COOKIE=$observe") }
+            assertEquals(HttpStatusCode.OK, device.status)
+
+            withTimeout(5.seconds) {
+                client.webSocket(
+                    "/v1/events",
+                    { header(HttpHeaders.Cookie, "$VIEWER_COOKIE=$observe") },
+                ) {}
+            }
             client.webSocket("/v1/events?access_token=$observe") {}
         }
     }

@@ -117,33 +117,19 @@ class PowerServiceImpl(
         )
     }
 
-    override suspend fun prepareForAction(autoWake: Boolean, allowLocked: Boolean): Boolean {
+    override suspend fun prepareForAction(autoWake: Boolean): Boolean {
         lease.extend()
-        val summary = state.refresh()
-        val needsWake = autoWake && summary.screen != ScreenState.ON
-        val needsUnlock = !allowLocked && summary.keyguard.locked
-        if (!needsWake && !needsUnlock) return false
-        return mutex.withLock { prepare(autoWake, allowLocked) }
+        if (!autoWake || screenOn()) return false
+        return mutex.withLock { wakeIfOff() }
     }
 
-    private suspend fun prepare(autoWake: Boolean, allowLocked: Boolean): Boolean {
-        var changed = false
-        if (autoWake && !screenOn()) {
-            turnScreenOn()
-            changed = awaitScreenOn()
-            // Acting on a device that stayed dark is still better than refusing outright, so this
-            // only gives up when the keyguard check below finds the device locked.
-            if (!changed) Log.w(TAG, "Auto-wake did not turn the screen on")
-        }
-        if (!allowLocked && keyguard.isKeyguardLocked) {
-            val attempt =
-                if (autoWake) dismissKeyguard(useStoredPin = true)
-                else
-                    Attempt(ok = false, message = "autoWake is off, so the lock screen was left up")
-            if (!attempt.ok) throw deviceLocked(attempt.message)
-            changed = true
-        }
-        return changed
+    /** Turns the screen on. A failed wake still lets the action run against a dark screen. */
+    private suspend fun wakeIfOff(): Boolean {
+        if (screenOn()) return false
+        turnScreenOn()
+        val on = awaitScreenOn()
+        if (!on) Log.w(TAG, "Auto-wake did not turn the screen on")
+        return on
     }
 
     private fun screenOn(): Boolean = state.refresh().screen == ScreenState.ON
@@ -271,18 +257,6 @@ class PowerServiceImpl(
 
     private fun needsUser(why: String?) =
         ApiException(409, "needs_user", why ?: NO_PIN, state = state.refresh())
-
-    private fun deviceLocked(why: String?): ApiException {
-        val summary = state.refresh()
-        val detail = why?.let { " ($it)" }.orEmpty()
-        return ApiException(
-            409,
-            "device_locked",
-            "The device is locked$detail. Unlock it with POST /v1/device/unlock, or pass " +
-                "autoWake=true once a PIN is configured.",
-            state = summary,
-        )
-    }
 
     private companion object {
         const val TAG = "PhoneApiPower"

@@ -119,5 +119,6 @@ public data class NodeActionRequest(
     val mode: ActionMode = ActionMode.REAL,
     @Doc("Replacement text for setText.") val text: String? = null,
     @Doc("Act even when the node is covered.") val force: Boolean = false,
-    @Doc("Wake and unlock the device first. Defaults to true.") val autoWake: Boolean = true,
+    @Doc("Turn the screen on first. Leaves the keyguard up. Defaults to true.")
+    val autoWake: Boolean = true,
 )

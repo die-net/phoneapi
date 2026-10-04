@@ -24,14 +24,21 @@ private val TokenKey = AttributeKey<TokenInfo>("phoneapi.token")
 /** `GET /viewer`. The page and its WebSocket upgrades are the only query-token callers. */
 internal const val VIEWER_PATH = "/viewer"
 
+/**
+ * Set when `/viewer` is opened with `access_token`, then sent on later requests so the token is not
+ * kept in the address bar. HttpOnly, so the page cannot read it.
+ */
+internal const val VIEWER_COOKIE = "phoneapi"
+
 class AuthConfig {
     lateinit var tokens: TokenGateway
 }
 
 /**
  * Every request needs a valid bearer token. `access_token` is accepted only on [VIEWER_PATH] and on
- * WebSocket upgrades, because a query parameter is copied into logs and history. Unauthenticated
- * requests get an empty 404, so the server reveals as little as possible about what it is.
+ * WebSocket upgrades, because a query parameter is copied into logs and history. That page sets
+ * [VIEWER_COOKIE] and redirects so the browser can drop the query. Unauthenticated requests get an
+ * empty 404, so the server reveals as little as possible about what it is.
  */
 val BearerAuth =
     createApplicationPlugin("BearerAuth", ::AuthConfig) {
@@ -44,7 +51,10 @@ val BearerAuth =
                     ?.trim()
             val query =
                 call.request.queryParameters["access_token"]?.trim()?.takeIf { it.isNotEmpty() }
-            val secret = header ?: query?.takeIf { call.acceptsAccessTokenQuery() }
+            val cookie = call.request.cookies[VIEWER_COOKIE]?.trim()?.takeIf { it.isNotEmpty() }
+            // The query token wins over an older cookie on the viewer and on sockets, so opening a
+            // new link replaces the cookie instead of keeping the previous one.
+            val secret = header ?: query?.takeIf { call.acceptsAccessTokenQuery() } ?: cookie
             val info = secret?.let(tokens::authenticate)
             if (info == null) {
                 call.respondBytes(ByteArray(0), status = HttpStatusCode.NotFound)

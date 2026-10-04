@@ -15,7 +15,8 @@ Install, pairing, and the helper lifecycle are in the [README](../README.md). De
 | Mechanism | Where |
 | --- | --- |
 | `Authorization: Bearer <token>` | All REST calls and `POST /mcp` |
-| `?access_token=<token>` | Only `GET /viewer` and WebSocket upgrades |
+| Cookie `phoneapi` | Set by `GET /viewer?access_token=`; sent on later requests, including WebSocket upgrades |
+| `?access_token=<token>` | Only that viewer URL (it redirects and drops the query) and WebSocket upgrades |
 
 Missing or unknown tokens get an **empty HTTP 404** (no JSON body). Authenticated calls that lack a required scope get **403** `forbidden`.
 
@@ -124,6 +125,8 @@ Authenticated errors are JSON:
 | `POST` | `/v1/ime/hide` | control | Hide soft keyboard |
 | `POST` | `/v1/ime/show` | control | Focus editable + show IME (`ImeShowRequest`) |
 
+`autoWake` (default true) turns the screen on and leaves the keyguard up. Dismiss the keyguard with `POST /v1/device/unlock`.
+
 ### Apps and intents
 
 | Method | Path | Scope | Summary |
@@ -165,7 +168,7 @@ Target ids look like `chrome_devtools_remote~<pageId>`. Chrome must publish DevT
 
 ## WebSockets
 
-Auth: Bearer header or `access_token` on the upgrade URL.
+Auth: Bearer header, the `phoneapi` cookie, or `access_token` on the upgrade URL.
 
 | Path | Scope | Summary |
 | --- | --- | --- |
@@ -174,7 +177,7 @@ Auth: Bearer header or `access_token` on the upgrade URL.
 | `/v1/stream/video` | stream | H.264; query `maxSize`, `fps`, `bitRate` |
 | `/v1/stream/audio` | stream | Device audio (submix capability) |
 
-`GET /viewer` (stream) serves the WebCodecs page; pass `?access_token=`.
+`GET /viewer?access_token=` (stream) sets the `phoneapi` cookie and redirects to `/viewer`. The page then uses that cookie.
 
 ## MCP
 

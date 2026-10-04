@@ -34,7 +34,7 @@ import net.die.phoneapi.tree.TreeSession
  * reports a page, network, or target event.
  */
 internal class WaitServiceImpl(
-    private val prepare: suspend (Boolean, Boolean) -> Boolean,
+    private val prepare: suspend (Boolean) -> Boolean,
     private val tree: TreeSession,
     private val state: DeviceStateTracker,
     private val bus: EventBus,
@@ -54,7 +54,7 @@ internal class WaitServiceImpl(
         validate(request)
         // Waiting never wakes the device on its own, but it does keep the screen from going dark
         // underneath a long wait.
-        prepare(false, true)
+        prepare(false)
         val browserWatch =
             BrowserWatch(browser, io, openDevtools).takeIf {
                 (request.all + request.any).any(::isBrowserCondition)

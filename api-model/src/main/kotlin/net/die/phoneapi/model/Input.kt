@@ -16,7 +16,8 @@ public data class TapRequest(
     @Doc("Jitter the point and timing. Defaults to true.") val humanize: Boolean = true,
     @Doc("Tap even when the node is covered by the keyboard or another window.")
     val force: Boolean = false,
-    @Doc("Wake and unlock the device first. Defaults to true.") val autoWake: Boolean = true,
+    @Doc("Turn the screen on first. Leaves the keyguard up. Defaults to true.")
+    val autoWake: Boolean = true,
 )
 
 /** Direction of a swipe that does not name [SwipeRequest.from] and [SwipeRequest.to]. */
@@ -52,7 +53,8 @@ public data class SwipeRequest(
     @Doc("Keep velocity at release instead of stopping before the pointer lifts.")
     val fling: Boolean = true,
     @Doc("Jitter the path and timing. Defaults to true.") val humanize: Boolean = true,
-    @Doc("Wake and unlock the device first. Defaults to true.") val autoWake: Boolean = true,
+    @Doc("Turn the screen on first. Leaves the keyguard up. Defaults to true.")
+    val autoWake: Boolean = true,
 )
 
 @Serializable public data class TimedPoint(val x: Float, val y: Float, val tMs: Long)
@@ -61,6 +63,7 @@ public data class SwipeRequest(
 public data class GestureRequest(
     /** One path per pointer; times are relative to the gesture start. */
     val pointers: List<List<TimedPoint>>,
+    @Doc("Turn the screen on first. Leaves the keyguard up. Defaults to true.")
     val autoWake: Boolean = true,
 )
 
@@ -73,6 +76,7 @@ public data class KeyRequest(
     val key: String,
     val longPress: Boolean = false,
     val metaState: Int = 0,
+    @Doc("Turn the screen on first. Leaves the keyguard up. Defaults to true.")
     val autoWake: Boolean = true,
 )
 
@@ -100,7 +104,8 @@ public data class TextRequest(
     @Doc("Press the IME action (Enter, Go, or Search) afterwards.") val submit: Boolean = false,
     @Doc("Minimum delay between characters, in milliseconds.") val minDelayMs: Long = 40,
     @Doc("Maximum delay between characters, in milliseconds.") val maxDelayMs: Long = 140,
-    @Doc("Wake and unlock the device first. Defaults to true.") val autoWake: Boolean = true,
+    @Doc("Turn the screen on first. Leaves the keyguard up. Defaults to true.")
+    val autoWake: Boolean = true,
 )
 
 @Serializable
@@ -109,7 +114,8 @@ public data class ImeShowRequest(
         "Editable node to focus, the same selector as tap, including ref. Omit to use the field that already has input focus."
     )
     val selector: NodeSelector? = null,
-    @Doc("Wake and unlock the device first. Defaults to true.") val autoWake: Boolean = true,
+    @Doc("Turn the screen on first. Leaves the keyguard up. Defaults to true.")
+    val autoWake: Boolean = true,
 )
 
 @Serializable

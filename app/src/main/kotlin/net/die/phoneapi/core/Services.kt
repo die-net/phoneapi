@@ -63,11 +63,10 @@ interface PowerService {
     suspend fun lock(): ActionResult
 
     /**
-     * Called before every action. Wakes (and unlocks, if possible) when [autoWake] is set and the
-     * screen is off, extends the awake lease, and returns whether the device was woken. Throws `409
-     * device_locked` when the device stays locked.
+     * Called before every action. When [autoWake] is set and the screen is off, turns it on and
+     * returns whether that happened. Extends the awake lease. Leaves the keyguard up.
      */
-    suspend fun prepareForAction(autoWake: Boolean, allowLocked: Boolean = false): Boolean
+    suspend fun prepareForAction(autoWake: Boolean): Boolean
 }
 
 interface AppsService {
