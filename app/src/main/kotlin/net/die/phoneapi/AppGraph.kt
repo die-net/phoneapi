@@ -296,7 +296,8 @@ class AppGraph(
         val port = settings.current.port
         return "http://127.0.0.1:$port/viewer?access_token=TOKEN\n" +
             "Replace TOKEN with this device's bearer token. " +
-            "The query parameter is accepted only by GET /viewer and by WebSocket upgrades. " +
+            "That URL sets a cookie and redirects to /viewer without the token. " +
+            "The query parameter is also accepted on WebSocket upgrades. " +
             "Expose the server on the computer first with `phoneapi server` " +
             "(or `phoneapi pair` to mint a token). " +
             "Expected local port $port for package ${context.packageName}."

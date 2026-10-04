@@ -79,6 +79,17 @@ class StreamFramesTest {
     }
 
     @Test
+    fun `unwraps android opus header`() {
+        val opusHead = ByteArray(19) { index -> (index + 1).toByte() }
+        val wrapped = ByteArray(16 + opusHead.size)
+        "AOPUSHDR".encodeToByteArray().copyInto(wrapped)
+        wrapped[8] = opusHead.size.toByte()
+        opusHead.copyInto(wrapped, 16)
+        assertEquals(opusHead.toList(), audioCodecDescription(wrapped).toList())
+        assertEquals(opusHead.toList(), audioCodecDescription(opusHead).toList())
+    }
+
+    @Test
     fun `audio header names the codec`() {
         val json = Json.parseToJsonElement(audioHeader("opus", 48_000, 2)).jsonObject
         assertEquals("opus", json.getValue("codec").jsonPrimitive.content)

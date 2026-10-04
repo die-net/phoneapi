@@ -360,7 +360,7 @@ private val MCP_RESOURCES =
             uri = "phoneapi://viewer",
             name = "viewer",
             description =
-                "WebCodecs page at /viewer. Pass the bearer token as access_token. That query parameter is accepted only by the page and by WebSocket upgrades.",
+                "WebCodecs page at /viewer. Pass the bearer token as access_token. That URL sets a cookie and redirects without the token. WebSocket upgrades also accept the query parameter.",
             mimeType = "text/plain",
             read = { services -> services.viewerText() },
         ),

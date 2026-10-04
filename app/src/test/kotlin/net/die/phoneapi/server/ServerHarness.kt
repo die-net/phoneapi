@@ -166,6 +166,7 @@ internal class FakeApi {
 
 internal fun ApplicationTestBuilder.apiClient(): HttpClient = createClient {
     expectSuccess = false
+    followRedirects = false
     install(WebSockets)
 }
 
@@ -269,7 +270,7 @@ private object FakePower : PowerService {
 
     override suspend fun lock() = acted()
 
-    override suspend fun prepareForAction(autoWake: Boolean, allowLocked: Boolean) = false
+    override suspend fun prepareForAction(autoWake: Boolean) = false
 }
 
 private val VIEWER_HTML = "<html>viewer</html>".encodeToByteArray()

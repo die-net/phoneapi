@@ -2,8 +2,11 @@ package net.die.phoneapi.server.routes
 
 import android.util.Log
 import io.ktor.http.ContentType
+import io.ktor.http.Cookie
+import io.ktor.http.encodeURLParameter
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.response.respondBytes
+import io.ktor.server.response.respondRedirect
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
 import io.ktor.server.websocket.DefaultWebSocketServerSession
@@ -15,6 +18,7 @@ import kotlinx.coroutines.sync.withLock
 import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.model.Scope
 import net.die.phoneapi.server.ServerServices
+import net.die.phoneapi.server.VIEWER_COOKIE
 import net.die.phoneapi.server.VIEWER_PATH
 import net.die.phoneapi.server.scoped
 import net.die.phoneapi.stream.DEFAULT_BIT_RATE
@@ -32,7 +36,16 @@ import net.die.phoneapi.stream.VideoSpec
 fun Route.streamRoutes(services: ServerServices) {
     val viewer = CachedBytes(services.viewerHtml)
     scoped(Scope.STREAM) {
-        get(VIEWER_PATH) { call.respondBytes(viewer.bytes(), ContentType.Text.Html) }
+        get(VIEWER_PATH) {
+            val presented =
+                call.request.queryParameters["access_token"]?.trim()?.takeIf { it.isNotEmpty() }
+            if (presented != null) {
+                call.response.cookies.append(viewerCookie(presented))
+                call.respondRedirect(call.viewerPathWithoutAccessToken())
+                return@get
+            }
+            call.respondBytes(viewer.bytes(), ContentType.Text.Html)
+        }
         webSocket("/v1/stream/video") {
             if (!services.device.capabilities().streamVideoMirror) {
                 close(CloseReason(CloseReason.Codes.CANNOT_ACCEPT, "Video needs the shell helper"))
@@ -59,6 +72,29 @@ fun Route.streamRoutes(services: ServerServices) {
             services.audio.serve(this)
         }
     }
+}
+
+/** Session cookie for the viewer. Not `Secure`: the page is served over the plain HTTP forward. */
+private fun viewerCookie(secret: String): Cookie =
+    Cookie(
+        name = VIEWER_COOKIE,
+        value = secret,
+        path = "/",
+        httpOnly = true,
+        extensions = mapOf("SameSite" to "Strict"),
+    )
+
+/** Drops `access_token` and keeps any other query parameters. */
+private fun ApplicationCall.viewerPathWithoutAccessToken(): String {
+    val names = request.queryParameters.names().filter { it != "access_token" }
+    if (names.isEmpty()) return VIEWER_PATH
+    val query =
+        names.joinToString("&") { name ->
+            request.queryParameters.getAll(name).orEmpty().joinToString("&") { value ->
+                "${name.encodeURLParameter()}=${value.encodeURLParameter()}"
+            }
+        }
+    return "$VIEWER_PATH?$query"
 }
 
 /** A bundled page, read once the first time a client asks for it. */

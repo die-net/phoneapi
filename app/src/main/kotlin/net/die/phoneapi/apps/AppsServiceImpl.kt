@@ -33,7 +33,7 @@ import net.die.phoneapi.model.LaunchRequest
 class AppsServiceImpl(
     private val context: Context,
     private val io: CoroutineDispatcher,
-    private val prepare: suspend (Boolean, Boolean) -> Boolean,
+    private val prepare: suspend (Boolean) -> Boolean,
     private val invalidateSnapshots: () -> Unit,
     private val seq: StateFlow<Long>,
     private val shell: HelperShell,
@@ -52,7 +52,7 @@ class AppsServiceImpl(
         }
 
     override suspend fun launch(packageName: String, request: LaunchRequest): ActionResult {
-        val woke = prepare(true, false)
+        val woke = prepare(true)
         val intent = launchIntent(packageName, request)
         start(intent)
         val arrived = foreground(intent, packageName, request.wait)
@@ -73,7 +73,7 @@ class AppsServiceImpl(
         manage(packageName, "clear", listOf("pm", "clear", packageName))
 
     override suspend fun intent(request: IntentRequest): ActionResult {
-        val woke = prepare(true, false)
+        val woke = prepare(true)
         val intent = buildIntent(request)
         start(intent)
         val packageName = request.packageName ?: intent.component?.packageName

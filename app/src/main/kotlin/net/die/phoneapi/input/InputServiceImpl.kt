@@ -26,7 +26,7 @@ import net.die.phoneapi.model.TextRequest
 import net.die.phoneapi.tree.TreeSession
 
 class InputServiceImpl(
-    private val prepare: suspend (Boolean, Boolean) -> Boolean,
+    private val prepare: suspend (Boolean) -> Boolean,
     private val io: CoroutineDispatcher,
     private val tree: TreeSession,
     private val seq: StateFlow<Long>,
@@ -131,7 +131,7 @@ class InputServiceImpl(
 
     /** Wakes if needed, runs [block] off the main thread, and fills in `woke` and `seq`. */
     private suspend fun action(autoWake: Boolean, block: suspend () -> ActionResult): ActionResult {
-        val woke = prepare(autoWake, false)
+        val woke = prepare(autoWake)
         val result = withContext(io) { block() }
         tree.invalidate()
         return result.copy(woke = woke, seq = seq.value)

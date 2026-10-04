@@ -205,7 +205,7 @@ internal class AudioStream(
                 val view = csd.duplicate()
                 val bytes = ByteArray(view.remaining())
                 view.get(bytes)
-                publishConfig(bytes)
+                publishConfig(audioCodecDescription(bytes))
             }
         }
 
@@ -226,7 +226,7 @@ internal class AudioStream(
                 return
             } ?: return
         if (info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG != 0) {
-            publishConfig(data)
+            publishConfig(audioCodecDescription(data))
             return
         }
         emit(packFrame(FRAME_DELTA, info.presentationTimeUs, data))

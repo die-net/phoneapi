@@ -1,12 +1,26 @@
 package net.die.phoneapi.helper.compat
 
 import android.annotation.SuppressLint
+import android.app.Application
+import android.content.Context
+import android.content.ContextWrapper
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.os.Binder
+import android.os.Build
+import android.os.Handler
+import android.os.IBinder
+import android.os.Looper
 import android.os.ParcelFileDescriptor
+import android.os.Process
 import android.util.Log
 import java.io.IOException
+import java.io.OutputStream
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
+import net.die.phoneapi.helper.HelperDaemon
 
 /**
  * Records device audio through [MediaRecorder.AudioSource.REMOTE_SUBMIX] and writes PCM s16le to a
@@ -36,22 +50,34 @@ internal class AudioTap {
             val minimum =
                 AudioRecord.getMinBufferSize(sampleRate, mask, AudioFormat.ENCODING_PCM_16BIT)
             check(minimum > 0) { "No audio buffer for $sampleRate Hz" }
-            val audio = newRecord(mask, sampleRate, minimum * 2)
-            if (audio.state != AudioRecord.STATE_INITIALIZED) {
-                audio.release()
-                error("AudioRecord did not initialize")
-            }
-            val pipe = ParcelFileDescriptor.createPipe()
-            audio.startRecording()
-            running = true
-            record = audio
-            writeEnd = pipe[1]
-            thread =
-                Thread({ pump(audio, pipe[1], minimum, token) }, "phoneapi-audio").also {
-                    it.isDaemon = true
-                    it.start()
+            // Android 11 only allows this capture while the shell uid is in the foreground, and
+            // AudioRecord names a process with no application "uid:<n>", which AppOps rejects.
+            val poppedShell = bringShellForward()
+            try {
+                useShellPackage()
+                val audio = newRecord(mask, sampleRate, minimum * 2)
+                if (audio.state != AudioRecord.STATE_INITIALIZED) {
+                    audio.release()
+                    error("AudioRecord did not initialize")
                 }
-            pipe[0]
+                val pipe = ParcelFileDescriptor.createPipe()
+                audio.startRecording()
+                if (audio.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
+                    audio.release()
+                    error("AudioRecord did not start")
+                }
+                running = true
+                record = audio
+                writeEnd = pipe[1]
+                thread =
+                    Thread({ pump(audio, pipe[1], minimum, token) }, "phoneapi-audio").also {
+                        it.isDaemon = true
+                        it.start()
+                    }
+                pipe[0]
+            } finally {
+                if (poppedShell) dismissShellActivity()
+            }
         }
 
     fun stop() {
@@ -98,26 +124,164 @@ internal class AudioTap {
             .build()
 
     private fun pump(audio: AudioRecord, end: ParcelFileDescriptor, chunk: Int, token: Int) {
-        val buffer = ByteArray(chunk)
         try {
             ParcelFileDescriptor.AutoCloseOutputStream(end).use { output ->
-                // token rejects a pump that outlives join() once start() has replaced it.
-                while (running && token == generation) {
-                    val read = audio.read(buffer, 0, buffer.size)
-                    if (read < 0) break
-                    if (read > 0) output.write(buffer, 0, read)
-                }
+                copyAudio(audio, output, ByteArray(chunk), token)
             }
         } catch (e: IOException) {
             Log.i(TAG, "audio reader stopped", e)
         } catch (e: IllegalStateException) {
             Log.i(TAG, "audio reader stopped", e)
+        } catch (e: InterruptedException) {
+            Log.i(TAG, "audio reader stopped", e)
         }
+    }
+
+    // token rejects a pump that outlives join() once start() has replaced it.
+    private fun copyAudio(
+        audio: AudioRecord,
+        output: OutputStream,
+        buffer: ByteArray,
+        token: Int,
+    ) {
+        var loggedEmpty = false
+        while (running && token == generation) {
+            val read = audio.read(buffer, 0, buffer.size)
+            if (read < 0) return
+            if (read == 0) {
+                // An idle remote-submix track returns immediately. Sleep instead of spinning.
+                if (!loggedEmpty) Log.w(TAG, "audio read returned no samples")
+                loggedEmpty = true
+                Thread.sleep(EMPTY_READ_MS)
+            } else {
+                output.write(buffer, 0, read)
+            }
+        }
+    }
+
+    /**
+     * On Android 11 the shell uid is treated as cached, and remote-submix capture then never leaves
+     * standby. Marking this process important, and briefly opening the shell heap-dump activity
+     * where that activity exists, is what lets [AudioRecord.startRecording] attach.
+     */
+    private fun bringShellForward(): Boolean {
+        if (Build.VERSION.SDK_INT != Build.VERSION_CODES.R) return false
+        markProcessImportant()
+        return startShellActivity()
+    }
+
+    /**
+     * [AudioRecord] reads [android.app.ActivityThread.currentOpPackageName] while it is
+     * constructed. A process with no application is named `uid:<n>`, and AppOps refuses that name.
+     * The activity thread's handler has to be created on the helper looper.
+     */
+    private fun useShellPackage() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+        val looper = HelperDaemon.looper()
+        if (Looper.myLooper() == looper) {
+            installShellPackage()
+            return
+        }
+        val failure = AtomicReference<ReflectiveOperationException>()
+        val done = CountDownLatch(1)
+        Handler(looper).post {
+            try {
+                installShellPackage()
+            } catch (e: ReflectiveOperationException) {
+                failure.set(e)
+            }
+            done.countDown()
+        }
+        if (!done.await(PACKAGE_WAIT_SECONDS, TimeUnit.SECONDS)) {
+            Log.w(TAG, "shell package timed out")
+            return
+        }
+        failure.get()?.let { Log.w(TAG, "shell package", it) }
+    }
+
+    private fun installShellPackage() {
+        val threadClass = Class.forName("android.app.ActivityThread")
+        var thread = threadClass.getMethod("currentActivityThread").invoke(null)
+        if (thread == null) {
+            val constructor = threadClass.getDeclaredConstructor()
+            constructor.isAccessible = true
+            thread = constructor.newInstance()
+            val current = threadClass.getDeclaredField("sCurrentActivityThread")
+            current.isAccessible = true
+            current.set(null, thread)
+        }
+        val app = Application()
+        val attach =
+            ContextWrapper::class.java.getDeclaredMethod(
+                "attachBaseContext",
+                Context::class.java,
+            )
+        attach.isAccessible = true
+        attach.invoke(app, ShellContext())
+        val field = threadClass.getDeclaredField("mInitialApplication")
+        field.isAccessible = true
+        field.set(thread, app)
+    }
+
+    private fun markProcessImportant() {
+        try {
+            val manager = Class.forName("android.app.ActivityManager")
+            val service = manager.getDeclaredMethod("getService").invoke(null) ?: return
+            val method =
+                service.javaClass.getMethod(
+                    "setProcessImportant",
+                    IBinder::class.java,
+                    Int::class.javaPrimitiveType,
+                    Boolean::class.javaPrimitiveType,
+                    String::class.java,
+                )
+            method.invoke(service, Binder(), Process.myPid(), true, "phoneapi-audio")
+        } catch (e: ReflectiveOperationException) {
+            Log.w(TAG, "audio importance", e)
+        }
+    }
+
+    private fun startShellActivity(): Boolean {
+        val output =
+            runShell("am", "start", "-n", "$SHELL_PACKAGE/.HeapDumpActivity") ?: return false
+        val started = !output.contains("Error", ignoreCase = true)
+        if (started) Thread.sleep(SHELL_ACTIVITY_MS)
+        return started
+    }
+
+    private fun dismissShellActivity() {
+        runShell("am", "force-stop", SHELL_PACKAGE)
+    }
+
+    private fun runShell(vararg command: String): String? =
+        try {
+            val process = ProcessBuilder(*command).redirectErrorStream(true).start()
+            val output = process.inputStream.readBytes().decodeToString()
+            if (!process.waitFor(SHELL_COMMAND_SECONDS, TimeUnit.SECONDS)) {
+                process.destroy()
+                null
+            } else {
+                output
+            }
+        } catch (e: IOException) {
+            Log.i(TAG, command.joinToString(" "), e)
+            null
+        }
+
+    private class ShellContext : ContextWrapper(null) {
+        override fun getPackageName(): String = SHELL_PACKAGE
+
+        override fun getOpPackageName(): String = SHELL_PACKAGE
     }
 
     private companion object {
         const val TAG = "PhoneApiHelper"
         const val JOIN_MS = 500L
+        const val EMPTY_READ_MS = 20L
+        const val SHELL_ACTIVITY_MS = 200L
+        const val SHELL_COMMAND_SECONDS = 2L
+        const val PACKAGE_WAIT_SECONDS = 2L
+        const val SHELL_PACKAGE = "com.android.shell"
         val SAMPLE_RATE_RANGE = 8_000..96_000
     }
 }

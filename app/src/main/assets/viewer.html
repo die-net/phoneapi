@@ -6,25 +6,38 @@
   <title>PhoneAPI</title>
   <style>
     html, body { margin: 0; height: 100%; background: #111; color: #ddd; font: 14px sans-serif; }
-    body { display: flex; flex-direction: column; align-items: center; }
-    canvas { max-width: 100%; max-height: calc(100% - 4rem); background: #000; }
-    p { margin: 0.5rem; max-width: 40rem; text-align: center; }
+    body { display: flex; flex-direction: column; align-items: center; user-select: none; }
+    #stage { flex: 1; min-height: 0; width: 100%; display: flex; align-items: center; justify-content: center; }
+    canvas { max-width: 100%; max-height: 100%; background: #000; touch-action: none; cursor: crosshair; }
+    #keys { display: flex; flex-wrap: wrap; justify-content: center; gap: 0.4rem; width: min(32rem, 100%); padding: 0.35rem 0.5rem 0; box-sizing: border-box; }
+    #keys button { width: 2.25rem; height: 2.25rem; padding: 0; display: grid; place-items: center; background: #1c1c1c; color: #ddd; border: 1px solid #3a3a3a; border-radius: 4px; touch-action: manipulation; }
+    #keys button:active { background: #333; }
+    #keys svg { width: 1.25rem; height: 1.25rem; fill: currentColor; }
+    p { margin: 0.4rem 0.5rem 0.6rem; max-width: 40rem; text-align: center; }
   </style>
 </head>
 <body>
-<canvas id="screen" width="2" height="2"></canvas>
+<div id="stage"><canvas id="screen" width="2" height="2"></canvas></div>
+<nav id="keys" aria-label="Phone buttons">
+  <button type="button" data-key="BACK" title="Back" aria-label="Back"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20z"/></svg></button>
+  <button type="button" data-key="HOME" title="Home" aria-label="Home"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z"/></svg></button>
+  <button type="button" data-key="RECENTS" title="Recents" aria-label="Recents"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V5h14z"/></svg></button>
+  <button type="button" data-key="VOLUME_DOWN" title="Volume down" aria-label="Volume down"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18.5 12c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM5 9v6h4l5 5V4L9 9z"/></svg></button>
+  <button type="button" data-key="VOLUME_UP" title="Volume up" aria-label="Volume up"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9v6h4l5 5V4L7 9zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg></button>
+  <button type="button" data-key="VOLUME_MUTE" title="Mute" aria-label="Mute"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3 3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9zM12 4 9.91 6.09 12 8.18z"/></svg></button>
+  <button type="button" data-key="POWER" title="Power" aria-label="Power"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M13 3h-2v10h2zm4.83 2.17-1.42 1.42C17.99 7.86 19 9.81 19 12c0 3.87-3.13 7-7 7s-7-3.13-7-7c0-2.19 1.01-4.14 2.58-5.42L6.17 5.17C4.23 6.82 3 9.26 3 12c0 4.97 4.03 9 9 9s9-4.03 9-9c0-2.74-1.23-5.18-3.17-6.83z"/></svg></button>
+  <button type="button" data-key="LOCK" title="Lock" aria-label="Lock"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2m-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2m3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1s3.1 1.39 3.1 3.1z"/></svg></button>
+  <button type="button" data-key="NOTIFICATIONS" title="Notifications" aria-label="Notifications"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.89 2 2 2m6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1z"/></svg></button>
+  <button type="button" data-key="QUICK_SETTINGS" title="Quick settings" aria-label="Quick settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17v2h6v-2zm0-12v2h10V5zm10 16v-2h8v-2h-8v-2h-2v6zM7 9v2H3v2h4v2h2V9zm14 4v-2H11v2zm-6-4h2V7h4V5h-4V3h-2z"/></svg></button>
+</nav>
 <p id="status">Connecting</p>
 <script>
 const status = document.getElementById("status");
 const canvas = document.getElementById("screen");
 const ctx = canvas.getContext("2d");
-const params = new URLSearchParams(location.search);
-const token = params.get("access_token") || "";
-const auth = "access_token=" + encodeURIComponent(token);
-
 function socket(path) {
   const scheme = location.protocol === "https:" ? "wss://" : "ws://";
-  return new WebSocket(scheme + location.host + path + "?" + auth);
+  return new WebSocket(scheme + location.host + path);
 }
 
 function startCodes(bytes) {
@@ -145,6 +158,7 @@ function onHeader(info) {
   streamWidth = info.width;
   streamHeight = info.height;
   status.textContent = info.width + "×" + info.height;
+  loadDisplay();
   if (!changed) return;
   if (video && video.state !== "closed") video.close();
   video = makeDecoder();
@@ -191,7 +205,10 @@ let audioCtx = null;
 let nextAt = 0;
 
 function playAudio(data) {
-  if (!audioCtx) return;
+  if (!audioCtx || audioCtx.state !== "running") {
+    data.close();
+    return;
+  }
   const channels = [];
   for (let c = 0; c < data.numberOfChannels; c++) {
     const samples = new Float32Array(data.numberOfFrames);
@@ -219,7 +236,12 @@ function onAudio(data) {
       output: playAudio,
       error(e) { status.textContent = String(e); }
     });
-    audioDecoder.configure({ codec, sampleRate: 48000, numberOfChannels: 2, description: payload });
+    try {
+      audioDecoder.configure({ codec, sampleRate: 48000, numberOfChannels: 2, description: payload });
+    } catch (error) {
+      status.textContent = "AudioDecoder failed: " + error;
+      audioDecoder = null;
+    }
     return;
   }
   if (!audioDecoder || audioDecoder.state !== "configured") return;
@@ -238,12 +260,154 @@ if (typeof AudioDecoder === "function") {
     }
     onAudio(event.data);
   };
+  as.onclose = (event) => {
+    const reason = event.reason ? " " + event.reason : "";
+    status.textContent = "Audio socket closed " + event.code + reason;
+  };
 }
 
-document.body.addEventListener("click", () => {
+document.body.addEventListener("pointerdown", unlockAudio, { once: true });
+
+let display = null;
+let inputQueue = Promise.resolve();
+let stroke = null;
+
+function unlockAudio() {
   if (!audioCtx) audioCtx = new AudioContext();
   audioCtx.resume();
-}, { once: true });
+}
+
+async function loadDisplay() {
+  try {
+    const response = await fetch("/v1/device");
+    if (!response.ok) return;
+    display = (await response.json()).display;
+  } catch (error) {
+    // Frame pixels are used until the display size is known.
+  }
+}
+
+function screenPoint(event) {
+  const rect = canvas.getBoundingClientRect();
+  const frameX = (event.clientX - rect.left) * (canvas.width / rect.width);
+  const frameY = (event.clientY - rect.top) * (canvas.height / rect.height);
+  const scaleX = display && canvas.width > 2 ? display.widthPx / canvas.width : 1;
+  const scaleY = display && canvas.height > 2 ? display.heightPx / canvas.height : 1;
+  return { x: frameX * scaleX, y: frameY * scaleY };
+}
+
+function postInput(path, body) {
+  inputQueue = inputQueue.then(() => sendInput(path, body)).catch(() => {});
+}
+
+async function sendInput(path, body) {
+  const response = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (response.ok) return;
+  let detail = "Input HTTP " + response.status;
+  try {
+    const error = await response.json();
+    if (error.message) detail = error.message;
+  } catch (ignored) {
+    // A non-JSON body keeps the status code.
+  }
+  status.textContent = detail;
+}
+
+function beginStroke(event) {
+  if (canvas.width < 8 || canvas.height < 8) return;
+  if (event.pointerType === "mouse" && event.button !== 0) return;
+  if (stroke) return;
+  unlockAudio();
+  canvas.setPointerCapture(event.pointerId);
+  const point = screenPoint(event);
+  stroke = { id: event.pointerId, t0: event.timeStamp, points: [{ x: point.x, y: point.y, tMs: 0 }] };
+  event.preventDefault();
+}
+
+function extendStroke(event) {
+  if (!stroke || event.pointerId !== stroke.id) return;
+  const point = screenPoint(event);
+  const tMs = Math.max(0, Math.round(event.timeStamp - stroke.t0));
+  const last = stroke.points[stroke.points.length - 1];
+  const moved = Math.hypot(point.x - last.x, point.y - last.y);
+  if (stroke.points.length > 1 && moved < 2) {
+    last.x = point.x;
+    last.y = point.y;
+    last.tMs = tMs;
+    return;
+  }
+  if (moved < 2 && tMs < 16) return;
+  stroke.points.push({ x: point.x, y: point.y, tMs: tMs });
+}
+
+function endStroke(event) {
+  if (!stroke || event.pointerId !== stroke.id) return;
+  const finished = stroke;
+  stroke = null;
+  const point = screenPoint(event);
+  const tMs = Math.max(0, Math.round(event.timeStamp - finished.t0));
+  const start = finished.points[0];
+  const distance = Math.hypot(point.x - start.x, point.y - start.y);
+  if (distance < 12) {
+    postInput("/v1/input/tap", {
+      x: start.x,
+      y: start.y,
+      humanize: false,
+      holdMs: Math.min(10000, Math.max(1, tMs)),
+      autoWake: true,
+    });
+    return;
+  }
+  const last = finished.points[finished.points.length - 1];
+  if (last.tMs !== tMs || Math.hypot(point.x - last.x, point.y - last.y) >= 2) {
+    finished.points.push({ x: point.x, y: point.y, tMs: tMs });
+  } else {
+    last.x = point.x;
+    last.y = point.y;
+  }
+  postInput("/v1/input/gesture", { pointers: [finished.points], autoWake: true });
+}
+
+canvas.addEventListener("pointerdown", beginStroke);
+canvas.addEventListener("pointermove", extendStroke);
+canvas.addEventListener("pointerup", endStroke);
+canvas.addEventListener("pointercancel", endStroke);
+canvas.addEventListener("contextmenu", (event) => event.preventDefault());
+
+document.addEventListener("keydown", (event) => {
+  if (event.metaKey || event.ctrlKey || event.altKey || event.isComposing) return;
+  if (event.key === "Backspace") {
+    event.preventDefault();
+    postInput("/v1/input/key", { key: "DEL", autoWake: true });
+    return;
+  }
+  let text = "";
+  if (event.key === "Enter") text = "\n";
+  else if (event.key.length === 1) text = event.key;
+  if (!text) return;
+  event.preventDefault();
+  postInput("/v1/input/text", { text: text, autoWake: true });
+});
+
+document.addEventListener("compositionend", (event) => {
+  if (!event.data) return;
+  postInput("/v1/input/text", { text: event.data, autoWake: true });
+});
+
+document.getElementById("keys").addEventListener("pointerdown", (event) => {
+  const button = event.target.closest("button");
+  if (!button) return;
+  if (!button.dataset.key) return;
+  event.preventDefault();
+  unlockAudio();
+  postInput("/v1/input/key", { key: button.dataset.key, autoWake: true });
+});
+
+loadDisplay();
 </script>
 </body>
 </html>
