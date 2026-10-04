@@ -5,6 +5,7 @@ import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.ln
+import kotlin.math.min
 import kotlin.math.roundToLong
 import kotlin.math.sqrt
 import kotlin.random.Random
@@ -26,6 +27,16 @@ data class SwipeSpec(
  */
 /** Hold used when humanize is off. CDP taps use the same delay. */
 internal const val PLAIN_TAP_HOLD_MS = 60L
+
+/** How the contact ellipse changes along a humanized stroke. */
+internal enum class FingerMotion {
+    /** A tap or long press: the patch grows, holds, then eases off. */
+    PRESS,
+    /** A swipe that stops before the finger lifts. */
+    DRAG,
+    /** A swipe that releases while the finger is still moving. */
+    FLING,
+}
 
 class Humanizer(private val random: Random = Random.Default) {
 
@@ -113,6 +124,85 @@ class Humanizer(private val random: Random = Random.Default) {
             points += TimedPoint(to.x, to.y, points.last().tMs + dwell)
         }
         return points
+    }
+
+    /**
+     * One [FingerShape] per point of a stroke. Humanized contacts are one finger for the whole
+     * stroke: an ellipse that grows as it lands and eases as it lifts, with a small walk between
+     * samples. Pressure follows that same curve. A plain stroke repeats [FingerShape.steady].
+     */
+    internal fun finger(count: Int, motion: FingerMotion, humanize: Boolean): List<FingerShape> {
+        if (!humanize || count <= 0) return List(count.coerceAtLeast(0)) { FingerShape.steady }
+        val major0 = (MAJOR_BASE + gaussian(MAJOR_BASE_SIGMA)).coerceIn(MAJOR_MIN, MAJOR_MAX)
+        val aspect = random.nextDouble(ASPECT_MIN, ASPECT_MAX).toFloat()
+        val pressure0 =
+            (PRESSURE_BASE + gaussian(PRESSURE_BASE_SIGMA)).coerceIn(PRESSURE_MIN, PRESSURE_MAX)
+        var orient = (ORIENT_CENTER + gaussian(ORIENT_BASE_SIGMA)).coerceIn(ORIENT_MIN, ORIENT_MAX)
+        var sizeWalk = 0f
+        var pressureWalk = 0f
+        return List(count) { i ->
+            val u = if (count == 1) 0.5f else i.toFloat() / (count - 1)
+            val depth = depth(u, motion)
+            sizeWalk =
+                (sizeWalk * WALK_KEEP + gaussian(SIZE_WALK_SIGMA)).coerceIn(-SIZE_WALK, SIZE_WALK)
+            pressureWalk =
+                (pressureWalk * WALK_KEEP + gaussian(PRESSURE_WALK_SIGMA)).coerceIn(
+                    -PRESSURE_WALK,
+                    PRESSURE_WALK,
+                )
+            orient = (orient + gaussian(ORIENT_WALK_SIGMA)).coerceIn(ORIENT_MIN, ORIENT_MAX)
+            val major =
+                (major0 * (MAJOR_FLOOR + MAJOR_SPAN * depth) + sizeWalk).coerceIn(
+                    MAJOR_CLAMP_MIN,
+                    MAJOR_CLAMP_MAX,
+                )
+            val minor = (major * aspect).coerceIn(MINOR_CLAMP_MIN, major * MINOR_MAX_OF_MAJOR)
+            val size = ((major + minor) / 2f).coerceIn(MINOR_CLAMP_MIN, MAJOR_CLAMP_MAX)
+            val pressure =
+                (pressure0 * (PRESSURE_FLOOR + PRESSURE_SPAN * depth) + pressureWalk).coerceIn(
+                    PRESSURE_CLAMP_MIN,
+                    PRESSURE_CLAMP_MAX,
+                )
+            FingerShape(pressure, size, major, minor, orient)
+        }
+    }
+
+    /**
+     * Keeps a caller-supplied gesture. Endpoints stay put. Intermediate points pick up the same
+     * sub-pixel noise as a swipe, and each stroke gets a contact curve for how it moves.
+     */
+    internal fun humanGesture(pointers: List<List<TimedPoint>>, humanize: Boolean): HumanGesture {
+        val paths = pointers.map { path -> if (humanize) noise(path) else path }
+        val fingers = paths.map { path -> finger(path.size, motionOf(path), humanize) }
+        return HumanGesture(paths, fingers)
+    }
+
+    private fun noise(path: List<TimedPoint>): List<TimedPoint> {
+        if (path.size < 3) return path
+        return path.mapIndexed { index, point ->
+            if (index == 0 || index == path.lastIndex) point
+            else
+                point.copy(
+                    x = point.x + gaussian(PATH_NOISE_SIGMA_PX),
+                    y = point.y + gaussian(PATH_NOISE_SIGMA_PX),
+                )
+        }
+    }
+
+    /** A stroke that barely travels is a press. One that is still fast at the end is a fling. */
+    private fun motionOf(path: List<TimedPoint>): FingerMotion {
+        if (path.size < 2) return FingerMotion.PRESS
+        val first = path.first()
+        val last = path.last()
+        if (hypot(last.x - first.x, last.y - first.y) < TAP_TRAVEL_PX) return FingerMotion.PRESS
+        val speeds =
+            path.zipWithNext().map { (a, b) ->
+                val dt = (b.tMs - a.tMs).coerceAtLeast(1)
+                hypot(b.x - a.x, b.y - a.y) / dt
+            }
+        val peak = speeds.max()
+        return if (peak > 0f && speeds.last() >= peak * FLING_SPEED_FRACTION) FingerMotion.FLING
+        else FingerMotion.DRAG
     }
 
     private fun tapAt(
@@ -209,6 +299,30 @@ class Humanizer(private val random: Random = Random.Default) {
         else peak * (FLING_RAMP / 2 + (u - FLING_RAMP))
     }
 
+    /**
+     * 0 at the edges of a press, 1 while the finger is planted. A fling stays planted at release.
+     */
+    private fun depth(u: Float, motion: FingerMotion): Float {
+        fun smooth(edge: Float): Float {
+            val s = edge.coerceIn(0f, 1f)
+            return s * s * (3 - 2 * s)
+        }
+        return when (motion) {
+            FingerMotion.PRESS -> {
+                val edge = min(smooth(u / PRESS_EDGE), smooth((1f - u) / PRESS_EDGE))
+                PRESS_DEPTH_FLOOR + (1f - PRESS_DEPTH_FLOOR) * edge
+            }
+            FingerMotion.DRAG -> {
+                val edge = min(smooth(u / DRAG_EDGE), smooth((1f - u) / DRAG_EDGE))
+                DRAG_DEPTH_FLOOR + (1f - DRAG_DEPTH_FLOOR) * edge
+            }
+            FingerMotion.FLING -> {
+                val rise = smooth(u / DRAG_EDGE)
+                DRAG_DEPTH_FLOOR + (1f - DRAG_DEPTH_FLOOR) * rise
+            }
+        }
+    }
+
     /** Standard normal via Box-Muller, scaled by [sigma]. */
     private fun gaussian(sigma: Float): Float {
         val u1 = 1.0 - random.nextDouble()
@@ -244,8 +358,50 @@ class Humanizer(private val random: Random = Random.Default) {
         const val MIN_SAMPLE_HZ = 30f
         const val MAX_SAMPLE_HZ = 240f
         const val MS_PER_SECOND = 1000.0
+        const val MAJOR_BASE = 0.08f
+        const val MAJOR_BASE_SIGMA = 0.012f
+        const val MAJOR_MIN = 0.05f
+        const val MAJOR_MAX = 0.12f
+        const val MAJOR_FLOOR = 0.75f
+        const val MAJOR_SPAN = 0.4f
+        const val MAJOR_CLAMP_MIN = 0.035f
+        const val MAJOR_CLAMP_MAX = 0.16f
+        const val MINOR_CLAMP_MIN = 0.02f
+        const val MINOR_MAX_OF_MAJOR = 0.96f
+        const val ASPECT_MIN = 0.72
+        const val ASPECT_MAX = 0.93
+        const val PRESSURE_BASE = 0.55f
+        const val PRESSURE_BASE_SIGMA = 0.03f
+        const val PRESSURE_MIN = 0.42f
+        const val PRESSURE_MAX = 0.68f
+        const val PRESSURE_FLOOR = 0.7f
+        const val PRESSURE_SPAN = 0.45f
+        const val PRESSURE_CLAMP_MIN = 0.25f
+        const val PRESSURE_CLAMP_MAX = 0.85f
+        const val PRESS_EDGE = 0.28f
+        const val PRESS_DEPTH_FLOOR = 0.35f
+        const val DRAG_EDGE = 0.12f
+        const val DRAG_DEPTH_FLOOR = 0.82f
+        const val WALK_KEEP = 0.65f
+        const val SIZE_WALK_SIGMA = 0.003f
+        const val SIZE_WALK = 0.008f
+        const val PRESSURE_WALK_SIGMA = 0.004f
+        const val PRESSURE_WALK = 0.012f
+        const val ORIENT_CENTER = 0.5f
+        const val ORIENT_BASE_SIGMA = 0.012f
+        const val ORIENT_WALK_SIGMA = 0.004f
+        const val ORIENT_MIN = 0.42f
+        const val ORIENT_MAX = 0.58f
+        const val TAP_TRAVEL_PX = 12f
+        const val FLING_SPEED_FRACTION = 0.6f
     }
 }
+
+/** A gesture after humanizing: one finger curve per pointer, aligned with [pointers]. */
+internal data class HumanGesture(
+    val pointers: List<List<TimedPoint>>,
+    val fingers: List<List<FingerShape>>,
+)
 
 private fun midpoint(a: Point, b: Point) = Point((a.x + b.x) / 2f, (a.y + b.y) / 2f)
 

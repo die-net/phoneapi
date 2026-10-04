@@ -4,9 +4,32 @@ import net.die.phoneapi.helper.AxisRange
 import net.die.phoneapi.helper.TouchscreenInfo
 
 /**
- * The ellipse [InjectTouchBackend] stamps on every injected touch. CDP touches use the same
- * numbers, converted the way Chrome turns a MotionEvent into a touch: radius is half the major or
- * minor axis in CSS pixels, force is pressure, and rotation is orientation in degrees.
+ * Where a finger sits on each touchscreen axis, as a fraction from min to max. [steady] is the
+ * fixed contact used when humanize is off. A humanized stroke varies these from sample to sample.
+ */
+internal data class FingerShape(
+    val pressure: Float,
+    val size: Float,
+    val major: Float,
+    val minor: Float,
+    val orientation: Float,
+) {
+    companion object {
+        val steady =
+            FingerShape(
+                PRESSURE_FRACTION,
+                SIZE_FRACTION,
+                SIZE_FRACTION,
+                SIZE_FRACTION,
+                CENTER_FRACTION,
+            )
+    }
+}
+
+/**
+ * The ellipse [InjectTouchBackend] stamps on an injected touch. CDP touches use the same numbers,
+ * converted the way Chrome turns a MotionEvent into a touch: radius is half the major or minor axis
+ * in CSS pixels, force is pressure, and rotation is orientation in degrees.
  */
 internal data class FingerContact(
     val pressure: Float,
@@ -26,16 +49,18 @@ internal data class FingerContact(
     }
 
     companion object {
-        /** Matches the helper's fallback touchscreen, whose axes run from 0 to 1 (orientation 0). */
-        val fallback: FingerContact = from(fallbackScreen())
+        /**
+         * Matches the helper's fallback touchscreen, whose axes run from 0 to 1 (orientation 0).
+         */
+        val fallback: FingerContact = from(fallbackTouchscreen())
 
-        fun from(screen: TouchscreenInfo): FingerContact =
+        fun from(screen: TouchscreenInfo, shape: FingerShape = FingerShape.steady): FingerContact =
             FingerContact(
-                pressure = along(screen.pressure, PRESSURE_FRACTION),
-                size = along(screen.size, SIZE_FRACTION),
-                touchMajor = along(screen.touchMajor, SIZE_FRACTION),
-                touchMinor = along(screen.touchMinor, SIZE_FRACTION),
-                orientation = along(screen.orientation, CENTER_FRACTION),
+                pressure = along(screen.pressure, shape.pressure),
+                size = along(screen.size, shape.size),
+                touchMajor = along(screen.touchMajor, shape.major),
+                touchMinor = along(screen.touchMinor, shape.minor),
+                orientation = along(screen.orientation, shape.orientation),
             )
     }
 }
@@ -53,7 +78,7 @@ private fun along(range: AxisRange?, fraction: Float): Float {
     return range.min + (range.max - range.min) * fraction
 }
 
-private fun fallbackScreen(): TouchscreenInfo =
+internal fun fallbackTouchscreen(): TouchscreenInfo =
     TouchscreenInfo().apply {
         pressure = axis(0f, 1f)
         size = axis(0f, 1f)
@@ -68,7 +93,9 @@ private fun axis(min: Float, max: Float): AxisRange =
         this.max = max
     }
 
-/** A point [fraction] of the way from min to max, so a finger is not the exact center of the range. */
+/**
+ * A point [fraction] of the way from min to max, so a finger is not the exact center of the range.
+ */
 private const val PRESSURE_FRACTION = 0.55f
 private const val SIZE_FRACTION = 0.08f
 private const val CENTER_FRACTION = 0.5f

@@ -252,7 +252,7 @@ class AppGraph(
                 touched(outcome)
             },
             swipeAt = { from, to, spec -> touched(touch.swipe(from, to, spec)) },
-            gestureAt = { pointers -> touched(touch.gesture(pointers)) },
+            gestureAt = { pointers, humanize -> touched(touch.gesture(pointers, humanize)) },
             pressKey = { request -> input.key(request) },
             typeText = { request -> input.text(request) },
             prepare = { autoWake -> power.prepareForAction(autoWake) },
@@ -274,7 +274,7 @@ class AppGraph(
             },
             devtoolsGap = DevtoolsPreconditions(context)::explain,
             refreshHz = { deviceInfo.display().refreshRate },
-            contact = { touchBackend.contact() },
+            touchscreen = { touchBackend.touchscreen() },
         )
 
     fun start() {

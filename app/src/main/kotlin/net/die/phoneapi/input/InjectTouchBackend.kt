@@ -28,11 +28,11 @@ class InjectTouchBackend(
 ) {
     val name = "inject"
 
-    /** The ellipse stamped on injected touches. CDP uses the same contact. */
-    internal suspend fun contact(): FingerContact {
+    /** The touchscreen axes. CDP maps the same finger fractions through them. */
+    internal suspend fun touchscreen(): TouchscreenInfo {
         val proxy = helper.require()
         return try {
-            FingerContact.from(touchscreen(proxy))
+            touchscreen(proxy)
         } catch (e: RemoteException) {
             throw ApiException.helperDropped(e)
         }
@@ -45,7 +45,13 @@ class InjectTouchBackend(
     @Volatile private var screenProxy: IHelper? = null
     @Volatile private var screen: TouchscreenInfo? = null
 
-    suspend fun perform(pointers: List<List<TimedPoint>>): Boolean = gestures.withLock {
+    suspend fun perform(pointers: List<List<TimedPoint>>): Boolean =
+        shapedPerform(pointers, emptyList())
+
+    internal suspend fun shapedPerform(
+        pointers: List<List<TimedPoint>>,
+        fingers: List<List<FingerShape>>,
+    ): Boolean = gestures.withLock {
         val proxy = helper.require()
         val device =
             try {
@@ -55,7 +61,7 @@ class InjectTouchBackend(
             }
         val samples =
             try {
-                touchTimeline(pointers)
+                touchTimeline(pointers, fingers)
             } catch (e: IllegalArgumentException) {
                 throw ApiException.badRequest(e.message ?: "Invalid gesture", e)
             }
@@ -273,7 +279,6 @@ private fun obtain(
     pointers: List<TouchSample>,
     screen: TouchscreenInfo,
 ): MotionEvent {
-    val contact = FingerContact.from(screen)
     val properties =
         Array(pointers.size) { index ->
             MotionEvent.PointerProperties().apply {
@@ -285,6 +290,7 @@ private fun obtain(
         Array(pointers.size) { index ->
             MotionEvent.PointerCoords().apply {
                 val sample = pointers[index]
+                val contact = FingerContact.from(screen, sample.shape)
                 x = sample.x
                 y = sample.y
                 pressure = contact.pressure
