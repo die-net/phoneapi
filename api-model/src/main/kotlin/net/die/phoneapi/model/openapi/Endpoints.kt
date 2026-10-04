@@ -6,9 +6,13 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.serializer
 import net.die.phoneapi.model.ActionResult
 import net.die.phoneapi.model.AppInfo
+import net.die.phoneapi.model.BrowserGestureRequest
+import net.die.phoneapi.model.BrowserKeyRequest
 import net.die.phoneapi.model.BrowserSnapshot
+import net.die.phoneapi.model.BrowserSwipeRequest
 import net.die.phoneapi.model.BrowserTapRequest
 import net.die.phoneapi.model.BrowserTarget
+import net.die.phoneapi.model.BrowserTextRequest
 import net.die.phoneapi.model.ConsoleRequest
 import net.die.phoneapi.model.ConsoleResult
 import net.die.phoneapi.model.CreateTokenRequest
@@ -280,6 +284,38 @@ public val phoneApiEndpoints: List<ApiEndpoint> =
             Scope.BROWSER,
             "Tap a ref or CSS selector. input touch (default) brings the tab forward; input cdp reaches a background tab.",
             serializer<BrowserTapRequest>(),
+            serializer<ActionResult>(),
+        ),
+        endpoint(
+            ApiMethod.POST,
+            "/v1/browser/targets/{id}/swipe",
+            Scope.BROWSER,
+            "Swipe in CSS viewport pixels, or by direction. input touch (default) or cdp.",
+            serializer<BrowserSwipeRequest>(),
+            serializer<ActionResult>(),
+        ),
+        endpoint(
+            ApiMethod.POST,
+            "/v1/browser/targets/{id}/gesture",
+            Scope.BROWSER,
+            "Pointer paths in CSS viewport pixels. input touch (default) or cdp.",
+            serializer<BrowserGestureRequest>(),
+            serializer<ActionResult>(),
+        ),
+        endpoint(
+            ApiMethod.POST,
+            "/v1/browser/targets/{id}/key",
+            Scope.BROWSER,
+            "Press a key. input touch (default) or cdp. cdp rejects device keys such as HOME.",
+            serializer<BrowserKeyRequest>(),
+            serializer<ActionResult>(),
+        ),
+        endpoint(
+            ApiMethod.POST,
+            "/v1/browser/targets/{id}/text",
+            Scope.BROWSER,
+            "Type text. input touch uses the hardware text modes; input cdp inserts it.",
+            serializer<BrowserTextRequest>(),
             serializer<ActionResult>(),
         ),
         endpoint(

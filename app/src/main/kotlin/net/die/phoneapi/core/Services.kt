@@ -2,9 +2,13 @@ package net.die.phoneapi.core
 
 import net.die.phoneapi.model.ActionResult
 import net.die.phoneapi.model.AppInfo
+import net.die.phoneapi.model.BrowserGestureRequest
+import net.die.phoneapi.model.BrowserKeyRequest
 import net.die.phoneapi.model.BrowserSnapshot
+import net.die.phoneapi.model.BrowserSwipeRequest
 import net.die.phoneapi.model.BrowserTapRequest
 import net.die.phoneapi.model.BrowserTarget
+import net.die.phoneapi.model.BrowserTextRequest
 import net.die.phoneapi.model.ConsoleRequest
 import net.die.phoneapi.model.ConsoleResult
 import net.die.phoneapi.model.EvalRequest
@@ -89,6 +93,7 @@ interface WaitService {
     suspend fun wait(request: WaitRequest, scopes: Set<Scope>): WaitResult
 }
 
+@Suppress("ComplexInterface") // A tab's targets, navigation, and input are one service.
 interface BrowserService {
     suspend fun targets(): List<BrowserTarget>
 
@@ -99,6 +104,14 @@ interface BrowserService {
     suspend fun snapshot(id: String): BrowserSnapshot
 
     suspend fun tap(id: String, request: BrowserTapRequest): ActionResult
+
+    suspend fun swipe(id: String, request: BrowserSwipeRequest): ActionResult
+
+    suspend fun gesture(id: String, request: BrowserGestureRequest): ActionResult
+
+    suspend fun key(id: String, request: BrowserKeyRequest): ActionResult
+
+    suspend fun text(id: String, request: BrowserTextRequest): ActionResult
 
     suspend fun evaluate(id: String, request: EvalRequest): EvalResult
 

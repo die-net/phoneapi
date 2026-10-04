@@ -13,6 +13,7 @@ import kotlinx.serialization.json.doubleOrNull
 import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.model.Point
 import net.die.phoneapi.model.Rect
+import net.die.phoneapi.model.SwipeDirection
 
 /**
  * Maps a snapshot ref onto a screen rectangle. Letter-sized `StaticText` nodes are Chrome splitting
@@ -73,19 +74,38 @@ internal fun viewportTap(
     random: Random = Random.Default,
 ): Point {
     val frame = viewport(metrics)
-    val view = CssBox(0.0, 0.0, frame.cssWidth, frame.cssHeight)
-    var best: CssBox? = null
-    var bestArea = 0.0
-    for (element in quads) {
-        val visible = cssPlaced(element as? JsonArray, view) ?: continue
-        val area = visible.width * visible.height
-        if (area > bestArea) {
-            best = visible
-            bestArea = area
-        }
-    }
-    val box = best ?: throw ApiException(409, "offscreen", "The node is outside the viewport")
+    val box =
+        largestCss(quads, CssBox(0.0, 0.0, frame.cssWidth, frame.cssHeight))
+            ?: throw ApiException(409, "offscreen", "The node is outside the viewport")
     return cssPoint(box, humanize, random)
+}
+
+/** CSS viewport pixels of a direction swipe, across the page or inside [quads]. */
+internal fun directionSwipe(
+    quads: JsonArray?,
+    metrics: JsonObject,
+    direction: SwipeDirection,
+    distance: Float,
+): Pair<Point, Point> {
+    val frame = viewport(metrics)
+    val page = CssBox(0.0, 0.0, frame.cssWidth, frame.cssHeight)
+    val box =
+        if (quads == null) insetPage(frame)
+        else
+            largestCss(quads, page)
+                ?: throw ApiException(409, "offscreen", "The node is outside the viewport")
+    return directionEnds(box, direction, distance)
+}
+
+/** Maps a CSS viewport point onto the WebView's screen rectangle. */
+internal fun screenPoint(x: Float, y: Float, metrics: JsonObject, content: Rect): Point {
+    val frame = viewport(metrics)
+    val scaleX = frame.deviceWidth / frame.cssWidth
+    val scaleY = frame.deviceHeight / frame.cssHeight
+    return Point(
+        (content.left + x * scaleX).toFloat(),
+        (content.top + y * scaleY).toFloat(),
+    )
 }
 
 private fun placed(quad: JsonArray?, content: Rect, scaleX: Double, scaleY: Double): Rect? {
@@ -110,6 +130,53 @@ private fun box(quad: JsonArray, content: Rect, scaleX: Double, scaleY: Double):
     val bottom = ys.max()
     if (right - left < MIN_EDGE || bottom - top < MIN_EDGE) return null
     return Rect(left, top, right, bottom)
+}
+
+private fun largestCss(quads: JsonArray, view: CssBox): CssBox? {
+    var best: CssBox? = null
+    var bestArea = 0.0
+    for (element in quads) {
+        val visible = cssPlaced(element as? JsonArray, view) ?: continue
+        val area = visible.width * visible.height
+        if (area > bestArea) {
+            best = visible
+            bestArea = area
+        }
+    }
+    return best
+}
+
+private fun insetPage(frame: Viewport): CssBox {
+    val mx = frame.cssWidth * PAGE_MARGIN
+    val my = frame.cssHeight * PAGE_MARGIN
+    return CssBox(mx, my, frame.cssWidth - mx, frame.cssHeight - my)
+}
+
+private fun directionEnds(
+    box: CssBox,
+    direction: SwipeDirection,
+    distance: Float,
+): Pair<Point, Point> {
+    val span = distance.coerceIn(MIN_DISTANCE, MAX_DISTANCE)
+    val cx = ((box.left + box.right) / 2).toFloat()
+    val cy = ((box.top + box.bottom) / 2).toFloat()
+    val dx = (box.width * span / 2).toFloat()
+    val dy = (box.height * span / 2).toFloat()
+    val start =
+        when (direction) {
+            SwipeDirection.UP -> Point(cx, cy + dy)
+            SwipeDirection.DOWN -> Point(cx, cy - dy)
+            SwipeDirection.LEFT -> Point(cx + dx, cy)
+            SwipeDirection.RIGHT -> Point(cx - dx, cy)
+        }
+    val end =
+        when (direction) {
+            SwipeDirection.UP -> Point(cx, cy - dy)
+            SwipeDirection.DOWN -> Point(cx, cy + dy)
+            SwipeDirection.LEFT -> Point(cx - dx, cy)
+            SwipeDirection.RIGHT -> Point(cx + dx, cy)
+        }
+    return start to end
 }
 
 private fun cssPlaced(quad: JsonArray?, view: CssBox): CssBox? {
@@ -253,4 +320,7 @@ private const val QUAD_COORDS = 8
 private const val MIN_EDGE = 2
 private const val MIN_CSS_EDGE = 1.0
 private const val INNER_FRACTION = 0.6
+private const val PAGE_MARGIN = 0.12
+private const val MIN_DISTANCE = 0.05f
+private const val MAX_DISTANCE = 0.95f
 private const val MAX_HOPS = 40

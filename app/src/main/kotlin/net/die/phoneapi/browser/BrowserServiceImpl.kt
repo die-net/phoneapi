@@ -32,24 +32,38 @@ import kotlinx.serialization.serializer
 import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.core.ApiJson
 import net.die.phoneapi.core.BrowserService
+import net.die.phoneapi.input.SwipeSpec
 import net.die.phoneapi.model.ActionResult
+import net.die.phoneapi.model.BrowserGestureRequest
 import net.die.phoneapi.model.BrowserInput
+import net.die.phoneapi.model.BrowserKeyRequest
 import net.die.phoneapi.model.BrowserSnapshot
+import net.die.phoneapi.model.BrowserSwipeRequest
 import net.die.phoneapi.model.BrowserTapRequest
 import net.die.phoneapi.model.BrowserTarget
+import net.die.phoneapi.model.BrowserTextRequest
 import net.die.phoneapi.model.ConsoleEntry
 import net.die.phoneapi.model.ConsoleRequest
 import net.die.phoneapi.model.ConsoleResult
 import net.die.phoneapi.model.EvalRequest
 import net.die.phoneapi.model.EvalResult
+import net.die.phoneapi.model.KeyRequest
 import net.die.phoneapi.model.Point
 import net.die.phoneapi.model.Rect
+import net.die.phoneapi.model.TextRequest
+import net.die.phoneapi.model.TimedPoint
 
 /**
  * Talks to Chrome and WebView over an adb DevTools stream. One service call keeps a single
  * connection. The last accessibility tree for a target is kept so a later tap can reuse a snapshot
  * ref without fetching the tree again.
  */
+internal sealed interface TapTarget {
+    data class Ref(val id: String) : TapTarget
+
+    data class Css(val selector: String) : TapTarget
+}
+
 internal class BrowserServiceImpl(
     private val io: CoroutineContext,
     private val listSockets: suspend () -> String,
@@ -59,6 +73,14 @@ internal class BrowserServiceImpl(
     private val touchAt: suspend (Rect, Boolean) -> ActionResult = { _, _ ->
         ActionResult(ok = false)
     },
+    private val swipeAt: suspend (Point, Point, SwipeSpec) -> ActionResult = { _, _, _ ->
+        ActionResult(ok = false)
+    },
+    private val gestureAt: suspend (List<List<TimedPoint>>) -> ActionResult = {
+        ActionResult(ok = false)
+    },
+    private val pressKey: suspend (KeyRequest) -> ActionResult = { ActionResult(ok = false) },
+    private val typeText: suspend (TextRequest) -> ActionResult = { ActionResult(ok = false) },
     private val targetTimeoutMs: Long = TARGET_LIST_MS,
     private val axTreeCap: Int = AX_TREE_CACHE_CAP,
     private val prepare: suspend (Boolean) -> Boolean = { false },
@@ -70,6 +92,19 @@ internal class BrowserServiceImpl(
     },
 ) : BrowserService {
     private val axTrees = newAxCache()
+    private val pageInput: PageInput by lazy {
+        PageInput(
+            touchAt = touchAt,
+            swipeAt = swipeAt,
+            gestureAt = gestureAt,
+            pressKey = pressKey,
+            typeText = typeText,
+            contentOnScreen = { pkg -> contentOnScreen(pkg) },
+            quads = { cdp, id, wanted -> elementQuads(cdp, id, wanted) },
+            focusNode = { cdp, id, wanted -> focusParams(cdp, id, wanted) },
+            target = { ref, selector -> optionalTarget(ref, selector) },
+        )
+    }
 
     private fun newAxCache(): AxTreeCache = AxTreeCache(axTreeCap)
 
@@ -154,80 +189,81 @@ internal class BrowserServiceImpl(
     }
 
     override suspend fun tap(id: String, request: BrowserTapRequest): ActionResult {
-        val woke = prepare(request.autoWake)
+        lateinit var wanted: TapTarget
+        return act(id, request.autoWake, request.input, before = { wanted = tapTarget(request) }) {
+            cdp,
+            pkg ->
+            pageInput.tap(cdp, id, wanted, pkg, request)
+        }
+    }
+
+    override suspend fun swipe(id: String, request: BrowserSwipeRequest): ActionResult =
+        act(id, request.autoWake, request.input, before = { pageInput.checkSwipe(request) }) {
+            cdp,
+            pkg ->
+            pageInput.swipe(cdp, id, pkg, request)
+        }
+
+    override suspend fun gesture(id: String, request: BrowserGestureRequest): ActionResult =
+        act(id, request.autoWake, request.input, before = { pageInput.checkGesture(request) }) {
+            cdp,
+            pkg ->
+            pageInput.gesture(cdp, pkg, request)
+        }
+
+    override suspend fun key(id: String, request: BrowserKeyRequest): ActionResult {
+        var pageKey: DomKey? = null
+        return act(
+            id,
+            request.autoWake,
+            request.input,
+            before = { pageKey = pageInput.prepareKey(request) },
+        ) { cdp, _ ->
+            pageInput.key(cdp, request, pageKey)
+        }
+    }
+
+    override suspend fun text(id: String, request: BrowserTextRequest): ActionResult {
+        var focus: TapTarget? = null
+        return act(
+            id,
+            request.autoWake,
+            request.input,
+            before = { focus = pageInput.prepareText(request) },
+        ) { cdp, pkg ->
+            pageInput.text(cdp, id, pkg, request, focus)
+        }
+    }
+
+    private suspend fun focusParams(cdp: CdpSession, id: String, target: TapTarget): JsonObject =
+        when (target) {
+            is TapTarget.Ref ->
+                backendParams(cachedBackend(id, target.id) ?: fetchBackend(cdp, id, target.id))
+            is TapTarget.Css -> cssNode(cdp, target.selector)
+        }
+
+    private suspend fun act(
+        id: String,
+        autoWake: Boolean,
+        input: BrowserInput,
+        before: () -> Unit = {},
+        block: suspend (CdpSession, String?) -> ActionResult,
+    ): ActionResult {
+        val woke = prepare(autoWake)
         try {
-            val wanted = tapTarget(request)
+            before()
             val (socket, chromeId) = parseBrowserTargetId(id)
             val pkg =
-                if (request.input == BrowserInput.TOUCH) {
+                if (input == BrowserInput.TOUCH) {
                     browserPackage(socketList().firstOrNull { it.name == socket }, socket)
                 } else {
                     null
                 }
-            val result =
-                usePage(socket, chromeId) { cdp ->
-                    when (request.input) {
-                        BrowserInput.TOUCH -> touchTap(cdp, id, wanted, pkg, request.humanize)
-                        BrowserInput.CDP -> cdpTap(cdp, id, wanted, request.humanize)
-                    }
-                }
+            val result = usePage(socket, chromeId) { cdp -> block(cdp, pkg) }
             return result.copy(woke = woke, seq = sequence())
         } finally {
             invalidateSnapshots()
         }
-    }
-
-    /** Foregrounds the tab, then injects a touchscreen event at the element's screen box. */
-    private suspend fun touchTap(
-        cdp: CdpSession,
-        id: String,
-        wanted: TapTarget,
-        pkg: String?,
-        humanize: Boolean,
-    ): ActionResult {
-        cdp.call("Page.bringToFront")
-        delay(FRONT_SETTLE_MS)
-        val quads = elementQuads(cdp, id, wanted)
-        val target = screenTarget(quads, cdp.call("Page.getLayoutMetrics"), contentOnScreen(pkg))
-        return touchAt(target, humanize)
-    }
-
-    /**
-     * Sends the tap to this page target. No `Page.bringToFront`, so a background tab stays there.
-     */
-    private suspend fun cdpTap(
-        cdp: CdpSession,
-        id: String,
-        wanted: TapTarget,
-        humanize: Boolean,
-    ): ActionResult {
-        val quads = elementQuads(cdp, id, wanted)
-        val point = viewportTap(quads, cdp.call("Page.getLayoutMetrics"), humanize)
-        dispatchTouch(cdp, point)
-        return ActionResult(ok = true, backend = "cdp", points = listOf(point))
-    }
-
-    private suspend fun dispatchTouch(cdp: CdpSession, point: Point) {
-        cdp.call(
-            "Input.dispatchTouchEvent",
-            buildJsonObject {
-                put("type", "touchStart")
-                put("touchPoints", JsonArray(listOf(touchPoint(point))))
-            },
-        )
-        cdp.call(
-            "Input.dispatchTouchEvent",
-            buildJsonObject {
-                put("type", "touchEnd")
-                put("touchPoints", JsonArray(emptyList()))
-            },
-        )
-    }
-
-    private fun touchPoint(point: Point): JsonObject = buildJsonObject {
-        put("x", point.x)
-        put("y", point.y)
-        put("id", 0)
     }
 
     override suspend fun evaluate(id: String, request: EvalRequest): EvalResult {
@@ -413,15 +449,19 @@ internal class BrowserServiceImpl(
         return buildJsonObject { put("nodeId", nodeId) }
     }
 
-    private fun tapTarget(request: BrowserTapRequest): TapTarget {
-        val selector = request.selector?.trim()?.ifEmpty { null }
-        val ref = request.ref?.trim()?.ifEmpty { null }
-        if (selector != null && ref != null) {
+    private fun tapTarget(request: BrowserTapRequest): TapTarget =
+        optionalTarget(request.ref, request.selector)
+            ?: throw ApiException.badRequest("Pass a ref or a CSS selector")
+
+    private fun optionalTarget(ref: String?, selector: String?): TapTarget? {
+        val css = selector?.trim()?.ifEmpty { null }
+        val id = ref?.trim()?.ifEmpty { null }
+        if (css != null && id != null) {
             throw ApiException.badRequest("Pass a ref or a CSS selector, not both")
         }
-        if (selector != null) return TapTarget.Css(cssSelector(selector))
-        if (ref != null) return TapTarget.Ref(nodeRef(ref))
-        throw ApiException.badRequest("Pass a ref or a CSS selector")
+        if (css != null) return TapTarget.Css(cssSelector(css))
+        if (id != null) return TapTarget.Ref(nodeRef(id))
+        return null
     }
 
     private fun cssSelector(selector: String): String {
@@ -718,16 +758,9 @@ internal class BrowserServiceImpl(
         const val ISOLATED_WORLD = "phoneapi"
         const val PAGE_ATTEMPTS = 4
         const val PAGE_RETRY_MS = 200L
-        const val FRONT_SETTLE_MS = 200L
         const val APPEAR_MS = 500L
         const val ERROR_SNIPPET = 80
         val SKIPPED_TYPES = setOf("service_worker", "shared_worker", "worker")
-    }
-
-    private sealed interface TapTarget {
-        data class Ref(val id: String) : TapTarget
-
-        data class Css(val selector: String) : TapTarget
     }
 
     private sealed interface SocketList {

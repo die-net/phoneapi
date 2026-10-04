@@ -18,9 +18,13 @@ import net.die.phoneapi.core.WaitService
 import net.die.phoneapi.helperclient.ShellResult
 import net.die.phoneapi.model.ActionResult
 import net.die.phoneapi.model.AppInfo
+import net.die.phoneapi.model.BrowserGestureRequest
+import net.die.phoneapi.model.BrowserKeyRequest
 import net.die.phoneapi.model.BrowserSnapshot
+import net.die.phoneapi.model.BrowserSwipeRequest
 import net.die.phoneapi.model.BrowserTapRequest
 import net.die.phoneapi.model.BrowserTarget
+import net.die.phoneapi.model.BrowserTextRequest
 import net.die.phoneapi.model.Capabilities
 import net.die.phoneapi.model.ConsoleRequest
 import net.die.phoneapi.model.ConsoleResult
@@ -257,6 +261,14 @@ private object FakeBrowser : BrowserService {
     override suspend fun snapshot(id: String) = BrowserSnapshot(id = id, compact = "page")
 
     override suspend fun tap(id: String, request: BrowserTapRequest) = acted()
+
+    override suspend fun swipe(id: String, request: BrowserSwipeRequest) = acted()
+
+    override suspend fun gesture(id: String, request: BrowserGestureRequest) = acted()
+
+    override suspend fun key(id: String, request: BrowserKeyRequest) = acted()
+
+    override suspend fun text(id: String, request: BrowserTextRequest) = acted()
 
     override suspend fun evaluate(id: String, request: EvalRequest) = EvalResult()
 

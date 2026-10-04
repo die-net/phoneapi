@@ -296,6 +296,46 @@ private val MCP_TOOLS: List<McpTool> =
             call = { graph, _, request -> browserTap(graph, request) },
         ),
         McpTool(
+            name = "browser_swipe",
+            description =
+                "Swipe a browser target. from and to are CSS viewport pixels, or pass a direction. input touch (default) brings the tab forward and injects a touchscreen swipe. input cdp sends it to that target, including a background tab.",
+            scope = Scope.BROWSER,
+            available = Capabilities::browserCdp,
+            arguments = serializer<BrowserSwipeArgs>(),
+            annotations = changes,
+            call = { graph, _, request -> browserSwipe(graph, request) },
+        ),
+        McpTool(
+            name = "browser_gesture",
+            description =
+                "Play pointer paths on a browser target, in CSS viewport pixels. input touch (default) or cdp.",
+            scope = Scope.BROWSER,
+            available = Capabilities::browserCdp,
+            arguments = serializer<BrowserGestureArgs>(),
+            annotations = changes,
+            call = { graph, _, request -> browserGesture(graph, request) },
+        ),
+        McpTool(
+            name = "browser_key",
+            description =
+                "Press a key on a browser target. input touch (default) injects a hardware key after bringing the tab forward. input cdp sends it to that target. Device keys such as HOME need input touch.",
+            scope = Scope.BROWSER,
+            available = Capabilities::browserCdp,
+            arguments = serializer<BrowserKeyArgs>(),
+            annotations = changes,
+            call = { graph, _, request -> browserKey(graph, request) },
+        ),
+        McpTool(
+            name = "browser_text",
+            description =
+                "Type into a browser target. input touch (default) uses the hardware text modes after bringing the tab forward. input cdp inserts the text, including in a background tab.",
+            scope = Scope.BROWSER,
+            available = Capabilities::browserCdp,
+            arguments = serializer<BrowserTextArgs>(),
+            annotations = changes,
+            call = { graph, _, request -> browserText(graph, request) },
+        ),
+        McpTool(
             name = "browser_eval",
             description =
                 "Evaluate JavaScript in an isolated world. A script exception is a result field.",

@@ -19,8 +19,13 @@ import net.die.phoneapi.core.checkLogTag
 import net.die.phoneapi.core.windowId
 import net.die.phoneapi.helperclient.failureMessage
 import net.die.phoneapi.model.ActionMode
+import net.die.phoneapi.model.BROWSER_INPUT_DOC
+import net.die.phoneapi.model.BrowserGestureRequest
 import net.die.phoneapi.model.BrowserInput
+import net.die.phoneapi.model.BrowserKeyRequest
+import net.die.phoneapi.model.BrowserSwipeRequest
 import net.die.phoneapi.model.BrowserTapRequest
+import net.die.phoneapi.model.BrowserTextRequest
 import net.die.phoneapi.model.ConsoleRequest
 import net.die.phoneapi.model.EvalRequest
 import net.die.phoneapi.model.FindRequest
@@ -29,11 +34,15 @@ import net.die.phoneapi.model.IntentRequest
 import net.die.phoneapi.model.KeyRequest
 import net.die.phoneapi.model.LaunchRequest
 import net.die.phoneapi.model.NodeActionRequest
+import net.die.phoneapi.model.Point
 import net.die.phoneapi.model.Scope
 import net.die.phoneapi.model.SnapshotFormat
+import net.die.phoneapi.model.SwipeDirection
 import net.die.phoneapi.model.SwipeRequest
 import net.die.phoneapi.model.TapRequest
+import net.die.phoneapi.model.TextMode
 import net.die.phoneapi.model.TextRequest
+import net.die.phoneapi.model.TimedPoint
 import net.die.phoneapi.model.UnlockRequest
 import net.die.phoneapi.model.WaitCondition
 import net.die.phoneapi.model.WaitRequest
@@ -226,6 +235,91 @@ internal suspend fun browserTap(
     )
 }
 
+internal suspend fun browserSwipe(
+    services: ServerServices,
+    request: CallToolRequest,
+): CallToolResult = runTool {
+    val args = request.args<BrowserSwipeArgs>()
+    jsonText(
+        services.browser.swipe(
+            args.target,
+            BrowserSwipeRequest(
+                from = args.from,
+                to = args.to,
+                ref = args.ref,
+                selector = args.selector,
+                direction = args.direction,
+                distance = args.distance,
+                durationMs = args.durationMs,
+                fling = args.fling,
+                humanize = args.humanize,
+                autoWake = args.autoWake,
+                input = args.input,
+            ),
+        )
+    )
+}
+
+internal suspend fun browserGesture(
+    services: ServerServices,
+    request: CallToolRequest,
+): CallToolResult = runTool {
+    val args = request.args<BrowserGestureArgs>()
+    jsonText(
+        services.browser.gesture(
+            args.target,
+            BrowserGestureRequest(
+                pointers = args.pointers,
+                autoWake = args.autoWake,
+                input = args.input,
+            ),
+        )
+    )
+}
+
+internal suspend fun browserKey(
+    services: ServerServices,
+    request: CallToolRequest,
+): CallToolResult = runTool {
+    val args = request.args<BrowserKeyArgs>()
+    jsonText(
+        services.browser.key(
+            args.target,
+            BrowserKeyRequest(
+                key = args.key,
+                longPress = args.longPress,
+                metaState = args.metaState,
+                autoWake = args.autoWake,
+                input = args.input,
+            ),
+        )
+    )
+}
+
+internal suspend fun browserText(
+    services: ServerServices,
+    request: CallToolRequest,
+): CallToolResult = runTool {
+    val args = request.args<BrowserTextArgs>()
+    jsonText(
+        services.browser.text(
+            args.target,
+            BrowserTextRequest(
+                text = args.text,
+                ref = args.ref,
+                selector = args.selector,
+                mode = args.mode,
+                clear = args.clear,
+                submit = args.submit,
+                minDelayMs = args.minDelayMs,
+                maxDelayMs = args.maxDelayMs,
+                autoWake = args.autoWake,
+                input = args.input,
+            ),
+        )
+    )
+}
+
 internal suspend fun browserEval(
     services: ServerServices,
     request: CallToolRequest,
@@ -374,10 +468,56 @@ internal data class BrowserTapArgs(
     val selector: String? = null,
     val humanize: Boolean = true,
     val autoWake: Boolean = true,
-    @Doc(
-        "touch brings the tab forward and injects a touchscreen event. cdp sends the tap to that target, including a background tab. Defaults to touch."
-    )
-    val input: BrowserInput = BrowserInput.TOUCH,
+    @Doc(BROWSER_INPUT_DOC) val input: BrowserInput = BrowserInput.TOUCH,
+)
+
+@Serializable
+internal data class BrowserSwipeArgs(
+    val target: String,
+    val from: Point? = null,
+    val to: Point? = null,
+    val ref: String? = null,
+    val selector: String? = null,
+    val direction: SwipeDirection? = null,
+    val distance: Float = 0.6f,
+    val durationMs: Long = 300,
+    val fling: Boolean = true,
+    val humanize: Boolean = true,
+    val autoWake: Boolean = true,
+    @Doc(BROWSER_INPUT_DOC) val input: BrowserInput = BrowserInput.TOUCH,
+)
+
+@Serializable
+internal data class BrowserGestureArgs(
+    val target: String,
+    val pointers: List<List<TimedPoint>>,
+    val autoWake: Boolean = true,
+    @Doc(BROWSER_INPUT_DOC) val input: BrowserInput = BrowserInput.TOUCH,
+)
+
+@Serializable
+internal data class BrowserKeyArgs(
+    val target: String,
+    val key: String,
+    val longPress: Boolean = false,
+    val metaState: Int = 0,
+    val autoWake: Boolean = true,
+    @Doc(BROWSER_INPUT_DOC) val input: BrowserInput = BrowserInput.TOUCH,
+)
+
+@Serializable
+internal data class BrowserTextArgs(
+    val target: String,
+    val text: String,
+    val ref: String? = null,
+    val selector: String? = null,
+    val mode: TextMode = TextMode.AUTO,
+    val clear: Boolean = false,
+    val submit: Boolean = false,
+    val minDelayMs: Long = 40,
+    val maxDelayMs: Long = 140,
+    val autoWake: Boolean = true,
+    @Doc(BROWSER_INPUT_DOC) val input: BrowserInput = BrowserInput.TOUCH,
 )
 
 @Serializable

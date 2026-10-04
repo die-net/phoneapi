@@ -41,6 +41,7 @@ import net.die.phoneapi.input.InjectKeyBackend
 import net.die.phoneapi.input.InjectTouchBackend
 import net.die.phoneapi.input.InputServiceImpl
 import net.die.phoneapi.input.TouchInput
+import net.die.phoneapi.input.TouchOutcome
 import net.die.phoneapi.model.ActionResult
 import net.die.phoneapi.model.HelperStatus
 import net.die.phoneapi.power.PinStore
@@ -233,6 +234,14 @@ class AppGraph(
             usbDevtools.open(name, readTimeoutMs)
         }
 
+    private fun touched(outcome: TouchOutcome) =
+        ActionResult(
+            ok = outcome.ok,
+            backend = outcome.backend,
+            points = outcome.points,
+            message = if (outcome.ok) null else "The system cancelled the gesture",
+        )
+
     @Suppress("MissingUseCall")
     private fun browserService(): BrowserService =
         BrowserServiceImpl(
@@ -242,13 +251,12 @@ class AppGraph(
             contentBounds = { pkg -> tree.contentBounds(pkg.orEmpty()) },
             touchAt = { rect, humanize ->
                 val outcome = touch.tap(rect, humanize = humanize)
-                ActionResult(
-                    ok = outcome.ok,
-                    backend = outcome.backend,
-                    points = outcome.points,
-                    message = if (outcome.ok) null else "The system cancelled the gesture",
-                )
+                touched(outcome)
             },
+            swipeAt = { from, to, spec -> touched(touch.swipe(from, to, spec)) },
+            gestureAt = { pointers -> touched(touch.gesture(pointers)) },
+            pressKey = { request -> input.key(request) },
+            typeText = { request -> input.text(request) },
             prepare = { autoWake -> power.prepareForAction(autoWake) },
             sequence = { tree.seq.value },
             invalidateSnapshots = { tree.invalidate() },
