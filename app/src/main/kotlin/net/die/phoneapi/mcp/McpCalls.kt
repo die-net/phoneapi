@@ -278,6 +278,7 @@ internal suspend fun browserGesture(
             args.target,
             BrowserGestureRequest(
                 pointers = args.pointers,
+                humanize = args.humanize,
                 autoWake = args.autoWake,
                 input = args.input,
             ),
@@ -499,6 +500,8 @@ internal data class BrowserSwipeArgs(
 internal data class BrowserGestureArgs(
     val target: String,
     val pointers: List<List<TimedPoint>>,
+    @Doc("Jitter the path and vary the finger contact. Defaults to true.")
+    val humanize: Boolean = true,
     val autoWake: Boolean = true,
     @Doc(BROWSER_INPUT_DOC) val input: BrowserInput = BrowserInput.TOUCH,
 )

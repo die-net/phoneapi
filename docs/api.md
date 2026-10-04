@@ -37,7 +37,7 @@ ADB `CREATE_TOKEN` (via `phoneapi pair`) grants every scope. Narrower tokens: `P
 - JSON bodies use `Content-Type: application/json`. Many `POST`s accept `{}` when all fields have defaults.
 - Boolean query flags: bare `?name`, `true`/`1`/`yes`, or `false`/`0`/`no`.
 - Closed enums (node state, swipe direction, log level, node action names, …) are case-insensitive. An unknown value is **400** `bad_request` on REST and a tool error on MCP.
-- `humanize` defaults to **true** on taps/swipes (including browser taps). Set `false` for exact points.
+- `humanize` defaults to **true** on taps, swipes, and gestures (including browser). Set `false` for exact points and a fixed contact.
 - `/v1/device.capabilities` (and MCP `device_info`) say what works right now. MCP omits tools the token or device cannot use.
 
 ### UI snapshot
