@@ -75,7 +75,7 @@ class InputServiceImpl(
             }
             if (pointers.any { path -> path.any { it.tMs < 0 } })
                 throw ApiException.badRequest("tMs must be >= 0")
-            result(touch.gesture(pointers))
+            result(touch.gesture(pointers, request.humanize))
         }
 
     override suspend fun pointer(frames: ReceiveChannel<PointerFrame>) {

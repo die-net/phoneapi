@@ -63,7 +63,7 @@ class PageBoxTest {
     }
 
     @Test
-    fun `humanized cdp tap matches a hardware tap`() {
+    fun `cdp tap matches a hardware tap`() {
         val frame = metrics(pageY = 0.0)
         val path = cdpTapPath(quads(), frame, humanize = true, Humanizer(Random(7)))
         val dipX = 1082.0 / 412.19049072265625

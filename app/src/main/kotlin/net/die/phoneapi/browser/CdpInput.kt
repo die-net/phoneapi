@@ -5,7 +5,9 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
-import net.die.phoneapi.input.CdpContact
+import net.die.phoneapi.helper.TouchscreenInfo
+import net.die.phoneapi.input.FingerContact
+import net.die.phoneapi.input.FingerShape
 import net.die.phoneapi.input.TouchPhase
 import net.die.phoneapi.input.TouchSample
 import net.die.phoneapi.input.touchTimeline
@@ -16,10 +18,12 @@ import net.die.phoneapi.model.TimedPoint
 internal suspend fun dispatchTouchPath(
     cdp: CdpSession,
     pointers: List<List<TimedPoint>>,
-    contact: CdpContact,
+    fingers: List<List<FingerShape>>,
+    axes: TouchscreenInfo,
+    dipScale: Float,
 ) {
-    val samples = touchTimeline(pointers)
-    val active = LinkedHashMap<Int, Point>()
+    val samples = touchTimeline(pointers, fingers)
+    val active = LinkedHashMap<Int, TouchSpot>()
     var last = 0L
     var index = 0
     while (index < samples.size) {
@@ -32,7 +36,7 @@ internal suspend fun dispatchTouchPath(
             batch += samples[index]
             index++
         }
-        playBatch(cdp, active, batch, contact)
+        playBatch(cdp, active, batch, axes, dipScale)
     }
 }
 
@@ -70,54 +74,71 @@ internal suspend fun dispatchDomKey(
 
 private suspend fun playBatch(
     cdp: CdpSession,
-    active: LinkedHashMap<Int, Point>,
+    active: LinkedHashMap<Int, TouchSpot>,
     batch: List<TouchSample>,
-    contact: CdpContact,
+    axes: TouchscreenInfo,
+    dipScale: Float,
 ) {
     val starting = batch.filter { it.phase == TouchPhase.DOWN }
     val moving = batch.filter { it.phase == TouchPhase.MOVE }
     val ending = batch.filter { it.phase == TouchPhase.UP }
     val wasEmpty = active.isEmpty()
-    for (sample in starting) active[sample.pointer] = Point(sample.x, sample.y)
+    for (sample in starting) active[sample.pointer] = spot(sample)
     if (starting.isNotEmpty()) {
         val points =
             if (wasEmpty) active.entries.map { it.key to it.value }
-            else starting.map { it.pointer to Point(it.x, it.y) }
-        sendTouch(cdp, "touchStart", points, contact)
+            else starting.map { it.pointer to spot(it) }
+        sendTouch(cdp, "touchStart", points, axes, dipScale)
     }
-    for (sample in moving) active[sample.pointer] = Point(sample.x, sample.y)
+    for (sample in moving) active[sample.pointer] = spot(sample)
     if (moving.isNotEmpty()) {
-        sendTouch(cdp, "touchMove", active.entries.map { it.key to it.value }, contact)
+        sendTouch(cdp, "touchMove", active.entries.map { it.key to it.value }, axes, dipScale)
     }
     for (sample in ending) active.remove(sample.pointer)
     if (ending.isEmpty()) return
-    if (active.isEmpty()) sendTouch(cdp, "touchEnd", emptyList(), contact)
-    else sendTouch(cdp, "touchMove", active.entries.map { it.key to it.value }, contact)
+    if (active.isEmpty()) sendTouch(cdp, "touchEnd", emptyList(), axes, dipScale)
+    else sendTouch(cdp, "touchMove", active.entries.map { it.key to it.value }, axes, dipScale)
 }
+
+private fun spot(sample: TouchSample) = TouchSpot(Point(sample.x, sample.y), sample.shape)
+
+private data class TouchSpot(val at: Point, val shape: FingerShape)
 
 private suspend fun sendTouch(
     cdp: CdpSession,
     type: String,
-    points: List<Pair<Int, Point>>,
-    contact: CdpContact,
+    points: List<Pair<Int, TouchSpot>>,
+    axes: TouchscreenInfo,
+    dipScale: Float,
 ) {
     cdp.call(
         "Input.dispatchTouchEvent",
         buildJsonObject {
             put("type", type)
-            put("touchPoints", JsonArray(points.map { touchPoint(it.first, it.second, contact) }))
+            put(
+                "touchPoints",
+                JsonArray(points.map { touchPoint(it.first, it.second, axes, dipScale) }),
+            )
         },
     )
 }
 
-private fun touchPoint(id: Int, point: Point, contact: CdpContact): JsonObject = buildJsonObject {
-    put("x", point.x)
-    put("y", point.y)
-    put("radiusX", contact.radiusX)
-    put("radiusY", contact.radiusY)
-    put("rotationAngle", contact.rotationAngle)
-    put("force", contact.force)
-    put("id", id)
+private fun touchPoint(
+    id: Int,
+    spot: TouchSpot,
+    axes: TouchscreenInfo,
+    dipScale: Float,
+): JsonObject {
+    val contact = FingerContact.from(axes, spot.shape).toCdp(dipScale)
+    return buildJsonObject {
+        put("x", spot.at.x)
+        put("y", spot.at.y)
+        put("radiusX", contact.radiusX)
+        put("radiusY", contact.radiusY)
+        put("rotationAngle", contact.rotationAngle)
+        put("force", contact.force)
+        put("id", id)
+    }
 }
 
 private fun keyEvent(type: String, key: DomKey, modifiers: Int, withText: Boolean): JsonObject =

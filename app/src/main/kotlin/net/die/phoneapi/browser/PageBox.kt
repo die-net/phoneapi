@@ -11,6 +11,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
 import net.die.phoneapi.core.ApiException
+import net.die.phoneapi.input.HumanGesture
 import net.die.phoneapi.input.Humanizer
 import net.die.phoneapi.input.PLAIN_TAP_HOLD_MS
 import net.die.phoneapi.input.SwipeSpec
@@ -116,8 +117,8 @@ internal fun cdpTapPath(
 }
 
 /**
- * A swipe in CSS pixels. Humanized swipes run in device pixels so the bow and sub-pixel noise
- * match a hardware swipe, then scale back.
+ * A swipe in CSS pixels. Humanized swipes run in device pixels so the bow and sub-pixel noise match
+ * a hardware swipe, then scale back.
  */
 internal fun cdpSwipePath(
     from: Point,
@@ -135,6 +136,33 @@ internal fun cdpSwipePath(
             spec,
         )
     return path.map { cssPoint(it, dip) }
+}
+
+/**
+ * A gesture in CSS pixels. Humanized gestures are noised in device pixels, like a hardware gesture,
+ * then scaled back. The contact curves are fractions of the touchscreen axes.
+ */
+internal fun cdpHumanGesture(
+    pointers: List<List<TimedPoint>>,
+    metrics: JsonObject,
+    humanize: Boolean,
+    humanizer: Humanizer,
+): HumanGesture {
+    if (!humanize) return humanizer.humanGesture(pointers, humanize = false)
+    val dip = dipScale(viewport(metrics))
+    val device = pointers.map { path ->
+        path.map { point ->
+            TimedPoint((point.x * dip.x).toFloat(), (point.y * dip.y).toFloat(), point.tMs)
+        }
+    }
+    val human = humanizer.humanGesture(device, humanize = true)
+    val css =
+        human.pointers.map { path ->
+            path.map { point ->
+                TimedPoint((point.x / dip.x).toFloat(), (point.y / dip.y).toFloat(), point.tMs)
+            }
+        }
+    return human.copy(pointers = css)
 }
 
 /** CSS pixels per device pixel, from Chrome's viewport. One value is the usual dip scale. */

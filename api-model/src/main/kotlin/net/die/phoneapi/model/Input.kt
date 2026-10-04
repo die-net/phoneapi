@@ -13,7 +13,8 @@ public data class TapRequest(
     val selector: NodeSelector? = null,
     @Doc("How many times to tap. Defaults to 1.") val count: Int = 1,
     @Doc("Hold the pointer down for this many milliseconds.") val holdMs: Long? = null,
-    @Doc("Jitter the point and timing. Defaults to true.") val humanize: Boolean = true,
+    @Doc("Jitter the point, timing, and finger contact. Defaults to true.")
+    val humanize: Boolean = true,
     @Doc("Tap even when the node is covered by the keyboard or another window.")
     val force: Boolean = false,
     @Doc("Turn the screen on first. Leaves the keyguard up. Defaults to true.")
@@ -52,7 +53,8 @@ public data class SwipeRequest(
     @Doc("How long the swipe takes, in milliseconds.") val durationMs: Long = 300,
     @Doc("Keep velocity at release instead of stopping before the pointer lifts.")
     val fling: Boolean = true,
-    @Doc("Jitter the path and timing. Defaults to true.") val humanize: Boolean = true,
+    @Doc("Jitter the path, timing, and finger contact. Defaults to true.")
+    val humanize: Boolean = true,
     @Doc("Turn the screen on first. Leaves the keyguard up. Defaults to true.")
     val autoWake: Boolean = true,
 )
@@ -88,6 +90,8 @@ public data class PointerFrame(
 public data class GestureRequest(
     /** One path per pointer; times are relative to the gesture start. */
     val pointers: List<List<TimedPoint>>,
+    @Doc("Jitter the path and vary the finger contact. Defaults to true.")
+    val humanize: Boolean = true,
     @Doc("Turn the screen on first. Leaves the keyguard up. Defaults to true.")
     val autoWake: Boolean = true,
 )
