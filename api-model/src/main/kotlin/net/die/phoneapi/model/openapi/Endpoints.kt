@@ -278,7 +278,7 @@ public val phoneApiEndpoints: List<ApiEndpoint> =
             ApiMethod.POST,
             "/v1/browser/targets/{id}/tap",
             Scope.BROWSER,
-            "Tap a ref or CSS selector in a browser target.",
+            "Tap a ref or CSS selector. input touch (default) brings the tab forward; input cdp reaches a background tab.",
             serializer<BrowserTapRequest>(),
             serializer<ActionResult>(),
         ),

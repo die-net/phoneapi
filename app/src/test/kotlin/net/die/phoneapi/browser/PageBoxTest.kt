@@ -1,5 +1,6 @@
 package net.die.phoneapi.browser
 
+import kotlin.random.Random
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import net.die.phoneapi.core.ApiException
@@ -7,6 +8,7 @@ import net.die.phoneapi.core.ApiJson
 import net.die.phoneapi.model.Rect
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class PageBoxTest {
@@ -41,6 +43,31 @@ class PageBoxTest {
         // getContentQuads is already in the visual viewport. pageY is the document scroll.
         val box = screenTarget(quads(), metrics(pageY = 400.0), CONTENT)
         assertEquals(Rect(435, 1474, 647, 1541), box)
+    }
+
+    @Test
+    fun `viewport center for a cdp tap`() {
+        val point = viewportTap(quads(), metrics(pageY = 400.0), humanize = false)
+        assertEquals(206.09226f, point.x, 0.01f)
+        assertEquals(466.48216f, point.y, 0.01f)
+    }
+
+    @Test
+    fun `cdp jitter stays in the quad`() {
+        val point = viewportTap(quads(), metrics(pageY = 0.0), humanize = true, random = Random(1))
+        assertTrue(point.x in 165.62f..246.57f)
+        assertTrue(point.y in 453.68f..479.28f)
+    }
+
+    @Test
+    fun `cdp rejects an offscreen quad`() {
+        val outside =
+            ApiJson.parseToJsonElement("""[[900,900,980,900,980,960,900,960]]""").jsonArray
+        val error =
+            assertThrows(ApiException::class.java) {
+                viewportTap(outside, metrics(pageY = 0.0), humanize = false)
+            }
+        assertEquals(409, error.status)
     }
 
     private fun quads() =

@@ -95,6 +95,7 @@ scripts/phoneapi-dev papi POST /v1/browser/tabs '{"url":"https://example.com/"}'
 scripts/phoneapi-dev papi POST /v1/browser/targets/TARGET/navigate '{"url":"https://example.org/"}'
 scripts/phoneapi-dev papi GET /v1/browser/targets/TARGET/snapshot
 scripts/phoneapi-dev papi POST /v1/browser/targets/TARGET/tap '{"selector":"a"}'
+scripts/phoneapi-dev papi POST /v1/browser/targets/TARGET/tap '{"selector":"a","input":"cdp"}'
 scripts/phoneapi-dev papi POST /v1/browser/targets/TARGET/evaluate '{"expression":"document.title"}'
 ```
 

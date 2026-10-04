@@ -153,7 +153,7 @@ Target ids look like `chrome_devtools_remote~<pageId>`. Chrome must publish DevT
 | `POST` | `/v1/browser/tabs` | browser | Open tab (`OpenTabRequest`) |
 | `POST` | `/v1/browser/targets/{id}/navigate` | browser | `NavigateRequest` |
 | `GET` | `/v1/browser/targets/{id}/snapshot` | browser | Compact AX outline → `BrowserSnapshot` |
-| `POST` | `/v1/browser/targets/{id}/tap` | browser | Ref or CSS; real touch (`BrowserTapRequest`) |
+| `POST` | `/v1/browser/targets/{id}/tap` | browser | Ref or CSS. `input` `touch` (default) or `cdp` (`BrowserTapRequest`) |
 | `POST` | `/v1/browser/targets/{id}/evaluate` | browser | Isolated-world JS (`EvalRequest`) → `EvalResult` |
 | `POST` | `/v1/browser/targets/{id}/console` | browser | Collect logs for a timeout (`ConsoleRequest`) |
 
@@ -203,7 +203,7 @@ For stdio hosts (Cursor, etc.), run `phoneapi mcp` (with the helper up). It inst
 | `open_intent` | control | Start an intent |
 | `device_wake` / `device_unlock` / `device_lock` | control | Power / keyguard |
 | `browser_targets` / `browser_open` / `browser_navigate` | browser | Tab list and navigation |
-| `browser_snapshot` / `browser_tap` / `browser_eval` / `browser_console` | browser | AX outline, touch, JS, logs |
+| `browser_snapshot` / `browser_tap` / `browser_eval` / `browser_console` | browser | AX outline, tap (`input` `touch` or `cdp`), JS, logs |
 | `screenshot` | observe | PNG last resort (`scale` default 0.5) |
 | `logcat_tail` | observe | Recent lines via helper |
 
@@ -226,6 +226,7 @@ When node ids are not stable, tool descriptions say so. Raw CDP, streams, and to
 | Browser log `level` | `verbose`, `info`, `warning`, `error` |
 | Swipe `direction` | `up`, `down`, `left`, `right` |
 | Text `mode` | `auto`, `keyboard`, `keyevent`, `setText` |
+| Browser tap `input` | `touch` (default; bring the tab forward and inject a touchscreen event), `cdp` (dispatch on that target, including a background tab) |
 | Node `action` | `click`, `longClick`, `focus`, `clearFocus`, `select`, `setText`, `scrollForward`, `scrollBackward`, `expand`, `collapse`, `dismiss`, `showOnScreen`, `imeEnter`, plus other platform / app-listed names. `imeEnter` needs Android 11. |
 
 Full request and response schemas live in OpenAPI and under `api-model` (`DeviceInfo`, `UiSnapshot`, `TapRequest`, `WaitRequest`, `BrowserTarget`, `ApiError`, …).

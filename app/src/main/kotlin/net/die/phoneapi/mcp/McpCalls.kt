@@ -19,6 +19,7 @@ import net.die.phoneapi.core.checkLogTag
 import net.die.phoneapi.core.windowId
 import net.die.phoneapi.helperclient.failureMessage
 import net.die.phoneapi.model.ActionMode
+import net.die.phoneapi.model.BrowserInput
 import net.die.phoneapi.model.BrowserTapRequest
 import net.die.phoneapi.model.ConsoleRequest
 import net.die.phoneapi.model.EvalRequest
@@ -219,6 +220,7 @@ internal suspend fun browserTap(
                 selector = args.selector,
                 humanize = args.humanize,
                 autoWake = args.autoWake,
+                input = args.input,
             ),
         )
     )
@@ -372,6 +374,10 @@ internal data class BrowserTapArgs(
     val selector: String? = null,
     val humanize: Boolean = true,
     val autoWake: Boolean = true,
+    @Doc(
+        "touch brings the tab forward and injects a touchscreen event. cdp sends the tap to that target, including a background tab. Defaults to touch."
+    )
+    val input: BrowserInput = BrowserInput.TOUCH,
 )
 
 @Serializable
