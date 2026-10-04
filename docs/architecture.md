@@ -81,7 +81,7 @@ Control is raw CDP against `@chrome_devtools_remote` (and WebViews that publish 
 - **Android 11+:** the app opens Chrome’s socket through adbd (`CdpForward` / Kadb). Wireless Debugging must be available. The helper is not on this byte path.
 - **Android 10:** USB forward/reverse tunnel (`phoneapi_cdp`); the helper connects to the reverse socket and relays bytes. `phoneapi helper` sets the tunnel up.
 
-The app owns the CDP session policy (compact AX snapshots, humanized taps through the helper, isolated-world evaluate, avoid enabling Debugger/Emulation by default). Browser tap, swipe, gesture, key, and text default to bringing the tab forward and injecting a hardware event. `input=cdp` sends `Input.dispatchTouchEvent`, `Input.dispatchKeyEvent`, or `Input.insertText` to that target and leaves a background tab where it is. Streaming video/audio is for the human viewer (WebCodecs), not MCP tools.
+The app owns the CDP session policy (compact AX snapshots, humanized taps through the helper, isolated-world evaluate, avoid enabling Debugger/Emulation by default). Browser tap, swipe, gesture, key, and text default to bringing the tab forward and injecting a hardware event. `input=cdp` sends `Input.dispatchTouchEvent`, `Input.dispatchKeyEvent`, or `Input.insertText` to that target and leaves a background tab where it is. Streaming video/audio is for the human viewer (WebCodecs), not MCP tools. The page closes the video socket while it is hidden and the audio socket while playback is blocked.
 
 ## Host client
 

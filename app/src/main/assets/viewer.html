@@ -134,7 +134,8 @@ function makeDecoder() {
     return null;
   }
 }
-let video = makeDecoder();
+let video = null;
+let videoSocket = null;
 let configured = false;
 let streamWidth = 0;
 let streamHeight = 0;
@@ -183,26 +184,74 @@ function onVideo(data) {
   }));
 }
 
-if (video) {
+function stopVideo() {
+  epoch += 1;
+  const current = videoSocket;
+  videoSocket = null;
+  if (current) {
+    current.onmessage = null;
+    current.onerror = null;
+    current.onclose = null;
+    current.close();
+  }
+  if (video && video.state !== "closed") video.close();
+  video = null;
+  configured = false;
+}
+
+function startVideo() {
+  if (document.visibilityState !== "visible") return;
+  if (videoSocket) return;
+  video = makeDecoder();
+  if (!video) return;
+  configured = false;
+  status.textContent = "Connecting";
   const vs = socket("/v1/stream/video");
+  videoSocket = vs;
   vs.binaryType = "arraybuffer";
   vs.onmessage = (event) => {
+    if (videoSocket !== vs) return;
     if (typeof event.data === "string") {
       onHeader(JSON.parse(event.data));
       return;
     }
     onVideo(event.data);
   };
-  vs.onerror = () => { status.textContent = "Video socket failed"; };
+  vs.onerror = () => {
+    if (videoSocket === vs) status.textContent = "Video socket failed";
+  };
   vs.onclose = (event) => {
+    if (videoSocket !== vs) return;
+    videoSocket = null;
     const reason = event.reason ? " " + event.reason : "";
     status.textContent = "Video socket closed " + event.code + reason;
   };
 }
 
+function syncVideo() {
+  if (document.visibilityState === "visible") {
+    startVideo();
+    return;
+  }
+  stopVideo();
+  status.textContent = streamWidth ? streamWidth + "×" + streamHeight + " paused" : "Paused";
+}
+
+document.addEventListener("visibilitychange", syncVideo);
+syncVideo();
+
 let audioDecoder = null;
+let audioSocket = null;
 let audioCtx = null;
 let nextAt = 0;
+
+function audioPlayable() {
+  if (typeof AudioDecoder !== "function") return false;
+  if (!audioCtx || audioCtx.state !== "running") return false;
+  const session = navigator.audioSession;
+  if (session && session.state === "interrupted") return false;
+  return true;
+}
 
 function playAudio(data) {
   if (!audioCtx || audioCtx.state !== "running") {
@@ -240,7 +289,7 @@ function onAudio(data) {
       audioDecoder.configure({ codec, sampleRate: 48000, numberOfChannels: 2, description: payload });
     } catch (error) {
       status.textContent = "AudioDecoder failed: " + error;
-      audioDecoder = null;
+      stopAudio();
     }
     return;
   }
@@ -250,10 +299,28 @@ function onAudio(data) {
   audioDecoder.decode(new EncodedAudioChunk({ type: "key", timestamp: Number(ts), data: payload }));
 }
 
-if (typeof AudioDecoder === "function") {
+function stopAudio() {
+  const current = audioSocket;
+  audioSocket = null;
+  if (current) {
+    current.onmessage = null;
+    current.onerror = null;
+    current.onclose = null;
+    current.close();
+  }
+  if (audioDecoder && audioDecoder.state !== "closed") audioDecoder.close();
+  audioDecoder = null;
+  window.__audioCodec = undefined;
+  nextAt = 0;
+}
+
+function startAudio() {
+  if (!audioPlayable() || audioSocket) return;
   const as = socket("/v1/stream/audio");
+  audioSocket = as;
   as.binaryType = "arraybuffer";
   as.onmessage = (event) => {
+    if (audioSocket !== as) return;
     if (typeof event.data === "string") {
       window.__audioCodec = JSON.parse(event.data).codec;
       return;
@@ -261,9 +328,21 @@ if (typeof AudioDecoder === "function") {
     onAudio(event.data);
   };
   as.onclose = (event) => {
+    if (audioSocket !== as) return;
+    audioSocket = null;
     const reason = event.reason ? " " + event.reason : "";
     status.textContent = "Audio socket closed " + event.code + reason;
   };
+}
+
+function syncAudio() {
+  if (audioPlayable()) startAudio();
+  else stopAudio();
+}
+
+const audioSession = navigator.audioSession;
+if (audioSession && audioSession.addEventListener) {
+  audioSession.addEventListener("statechange", syncAudio);
 }
 
 document.body.addEventListener("pointerdown", unlockAudio, { once: true });
@@ -281,8 +360,14 @@ const MOVE_SLOP = 2;
 const MOVE_MS = 16;
 
 function unlockAudio() {
-  if (!audioCtx) audioCtx = new AudioContext();
-  audioCtx.resume();
+  if (typeof AudioContext !== "function") return;
+  if (!audioCtx || audioCtx.state === "closed") {
+    audioCtx = new AudioContext();
+    audioCtx.addEventListener("statechange", syncAudio);
+  }
+  const pending = audioCtx.resume();
+  if (pending && pending.then) pending.then(syncAudio, function () {});
+  syncAudio();
 }
 
 async function loadDisplay() {
