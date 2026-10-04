@@ -31,6 +31,7 @@ import net.die.phoneapi.model.LaunchRequest
 import net.die.phoneapi.model.NavigateRequest
 import net.die.phoneapi.model.NodeActionRequest
 import net.die.phoneapi.model.OpenTabRequest
+import net.die.phoneapi.model.OrientationRequest
 import net.die.phoneapi.model.PinStatus
 import net.die.phoneapi.model.PointerFrame
 import net.die.phoneapi.model.Scope
@@ -103,6 +104,14 @@ public val phoneApiEndpoints: List<ApiEndpoint> =
             Scope.CONTROL,
             "Lock the device.",
             response = serializer<ActionResult>(),
+        ),
+        endpoint(
+            ApiMethod.POST,
+            "/v1/device/orientation",
+            Scope.CONTROL,
+            "Turn auto-rotate on, or lock the screen to a rotation. An app can still force its own orientation.",
+            serializer<OrientationRequest>(),
+            serializer<ActionResult>(),
         ),
         endpoint(
             ApiMethod.PUT,

@@ -22,6 +22,7 @@ import net.die.phoneapi.model.IntentRequest
 import net.die.phoneapi.model.KeyRequest
 import net.die.phoneapi.model.LaunchRequest
 import net.die.phoneapi.model.NodeActionRequest
+import net.die.phoneapi.model.OrientationRequest
 import net.die.phoneapi.model.PointerFrame
 import net.die.phoneapi.model.Scope
 import net.die.phoneapi.model.SwipeRequest
@@ -73,6 +74,9 @@ interface PowerService {
     suspend fun unlock(request: UnlockRequest): ActionResult
 
     suspend fun lock(): ActionResult
+
+    /** Turns auto-rotate on, or locks the screen to a rotation. Needs the shell helper. */
+    suspend fun orientation(request: OrientationRequest): ActionResult
 
     /**
      * Called before every action. When [autoWake] is set and the screen is off, turns it on and

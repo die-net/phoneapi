@@ -34,6 +34,7 @@ import net.die.phoneapi.model.IntentRequest
 import net.die.phoneapi.model.KeyRequest
 import net.die.phoneapi.model.LaunchRequest
 import net.die.phoneapi.model.NodeActionRequest
+import net.die.phoneapi.model.OrientationRequest
 import net.die.phoneapi.model.Point
 import net.die.phoneapi.model.Scope
 import net.die.phoneapi.model.SnapshotFormat
@@ -187,6 +188,13 @@ internal suspend fun deviceUnlock(services: ServerServices): CallToolResult = ru
 
 internal suspend fun deviceLock(services: ServerServices): CallToolResult = runTool {
     jsonText(services.power.lock())
+}
+
+internal suspend fun deviceOrientation(
+    services: ServerServices,
+    request: CallToolRequest,
+): CallToolResult = runTool {
+    jsonText(services.power.orientation(request.args<OrientationRequest>()))
 }
 
 internal suspend fun browserTargets(services: ServerServices): CallToolResult = runTool {

@@ -29,6 +29,7 @@
   <button type="button" data-key="LOCK" title="Lock" aria-label="Lock"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2m-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2m3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1s3.1 1.39 3.1 3.1z"/></svg></button>
   <button type="button" data-key="NOTIFICATIONS" title="Notifications" aria-label="Notifications"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.89 2 2 2m6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1z"/></svg></button>
   <button type="button" data-key="QUICK_SETTINGS" title="Quick settings" aria-label="Quick settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17v2h6v-2zm0-12v2h10V5zm10 16v-2h8v-2h-8v-2h-2v6zM7 9v2H3v2h4v2h2V9zm14 4v-2H11v2zm-6-4h2V7h4V5h-4V3h-2z"/></svg></button>
+  <button type="button" id="orientation" title="Orientation" aria-label="Orientation"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16.48 2.52c3.27 1.55 5.61 4.72 5.97 8.48h1.5C23.44 4.84 18.29 0 12 0l-.66.03 3.81 3.81zm-6.25-.77c-.59-.59-1.54-.59-2.12 0L1.75 8.11c-.59.59-.59 1.54 0 2.12l12.02 12.02c.59.59 1.54.59 2.12 0l6.36-6.36c.59-.59.59-1.54 0-2.12L10.23 1.75zm4.6 19.44L2.81 9.17l6.36-6.36 12.02 12.02zm-7.31.29C4.25 19.94 1.91 16.76 1.55 13H.05c.5 6.16 5.66 11 11.95 11l.66-.03-3.81-3.81z"/></svg></button>
 </nav>
 <p id="status">Connecting</p>
 <script>
@@ -375,6 +376,7 @@ async function loadDisplay() {
     const response = await fetch("/v1/device");
     if (!response.ok) return;
     display = (await response.json()).display;
+    showOrientation(orientationOf(display));
   } catch (error) {
     // Frame pixels are used until the display size is known.
   }
@@ -399,7 +401,7 @@ async function sendInput(path, body) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (response.ok) return;
+  if (response.ok) return true;
   let detail = "Input HTTP " + response.status;
   try {
     const error = await response.json();
@@ -408,6 +410,41 @@ async function sendInput(path, body) {
     // A non-JSON body keeps the status code.
   }
   status.textContent = detail;
+  return false;
+}
+
+const ORIENTATIONS = ["auto", "0", "90", "180", "270"];
+let orientation = "auto";
+
+function orientationOf(info) {
+  if (!info || info.autoRotate) return "auto";
+  const degrees = String((info.rotation || 0) * 90);
+  return ORIENTATIONS.indexOf(degrees) >= 0 ? degrees : "auto";
+}
+
+function showOrientation(value) {
+  orientation = value;
+  const button = document.getElementById("orientation");
+  const label = value === "auto" ? "Auto-rotate" : value + "°";
+  button.title = label;
+  button.setAttribute("aria-label", label);
+}
+
+async function cycleOrientation() {
+  try {
+    const response = await fetch("/v1/device");
+    if (response.ok) orientation = orientationOf((await response.json()).display);
+  } catch (error) {
+    // Advance from the last label when the device read fails.
+  }
+  const index = ORIENTATIONS.indexOf(orientation);
+  const next = ORIENTATIONS[(index < 0 ? 0 : index + 1) % ORIENTATIONS.length];
+  if (!(await sendInput("/v1/device/orientation", { orientation: next }))) return;
+  showOrientation(next);
+  if (display) {
+    display.autoRotate = next === "auto";
+    if (next !== "auto") display.rotation = Number(next) / 90;
+  }
 }
 
 function connectPointer() {
@@ -547,9 +584,13 @@ document.addEventListener("compositionend", (event) => {
 document.getElementById("keys").addEventListener("pointerdown", (event) => {
   const button = event.target.closest("button");
   if (!button) return;
-  if (!button.dataset.key) return;
   event.preventDefault();
   unlockAudio();
+  if (button.id === "orientation") {
+    inputQueue = inputQueue.then(cycleOrientation).catch(() => {});
+    return;
+  }
+  if (!button.dataset.key) return;
   postInput("/v1/input/key", { key: button.dataset.key, autoWake: true });
 });
 

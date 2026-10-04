@@ -25,6 +25,7 @@ import net.die.phoneapi.input.SwipeSpec
 import net.die.phoneapi.input.TouchInput
 import net.die.phoneapi.model.ActionResult
 import net.die.phoneapi.model.DisplayInfo
+import net.die.phoneapi.model.OrientationRequest
 import net.die.phoneapi.model.PinpadKeys
 import net.die.phoneapi.model.Point
 import net.die.phoneapi.model.ScreenState
@@ -115,6 +116,14 @@ class PowerServiceImpl(
             backend = "global",
             message = if (locked) null else "The screen is still on",
         )
+    }
+
+    override suspend fun orientation(request: OrientationRequest): ActionResult = mutex.withLock {
+        if (!shell.isAvailable) throw ApiException.helperUnavailable()
+        val setting = orientationSetting(request.orientation, display().rotation)
+        setting.userRotation?.let { putSystem(USER_ROTATION, it) }
+        putSystem(ACCELEROMETER_ROTATION, setting.accelerometer)
+        return ActionResult(ok = true, backend = "settings", message = setting.message)
     }
 
     override suspend fun prepareForAction(autoWake: Boolean): Boolean {
@@ -258,8 +267,17 @@ class PowerServiceImpl(
     private fun needsUser(why: String?) =
         ApiException(409, "needs_user", why ?: NO_PIN, state = state.refresh())
 
+    private suspend fun putSystem(key: String, value: Int) {
+        val result = shell.exec(listOf("settings", "put", "system", key, value.toString()))
+        if (result.ok) return
+        val detail = result.failureMessage().ifBlank { "settings put $key failed" }
+        throw ApiException(503, "helper_error", detail)
+    }
+
     private companion object {
         const val TAG = "PhoneApiPower"
+        const val ACCELEROMETER_ROTATION = "accelerometer_rotation"
+        const val USER_ROTATION = "user_rotation"
         const val WAKE_WAIT_MS = 2_000L
         const val UNLOCK_WAIT_MS = 3_000L
         const val LOCK_WAIT_MS = 2_000L
