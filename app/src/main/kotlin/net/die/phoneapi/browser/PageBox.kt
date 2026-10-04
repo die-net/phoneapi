@@ -3,6 +3,7 @@ package net.die.phoneapi.browser
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlin.random.Random
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -10,6 +11,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
 import net.die.phoneapi.core.ApiException
+import net.die.phoneapi.model.Point
 import net.die.phoneapi.model.Rect
 
 /**
@@ -60,6 +62,32 @@ internal fun screenTarget(quads: JsonArray, metrics: JsonObject, content: Rect):
     return best ?: throw ApiException(409, "offscreen", "The node is outside the page on screen")
 }
 
+/**
+ * A point inside the largest quad that sits in the CSS viewport, the coordinate space of
+ * `Input.dispatchTouchEvent`. Quads are already viewport CSS pixels.
+ */
+internal fun viewportTap(
+    quads: JsonArray,
+    metrics: JsonObject,
+    humanize: Boolean,
+    random: Random = Random.Default,
+): Point {
+    val frame = viewport(metrics)
+    val view = CssBox(0.0, 0.0, frame.cssWidth, frame.cssHeight)
+    var best: CssBox? = null
+    var bestArea = 0.0
+    for (element in quads) {
+        val visible = cssPlaced(element as? JsonArray, view) ?: continue
+        val area = visible.width * visible.height
+        if (area > bestArea) {
+            best = visible
+            bestArea = area
+        }
+    }
+    val box = best ?: throw ApiException(409, "offscreen", "The node is outside the viewport")
+    return cssPoint(box, humanize, random)
+}
+
 private fun placed(quad: JsonArray?, content: Rect, scaleX: Double, scaleY: Double): Rect? {
     val box = quad?.let { box(it, content, scaleX, scaleY) } ?: return null
     return intersection(box, content)
@@ -82,6 +110,58 @@ private fun box(quad: JsonArray, content: Rect, scaleX: Double, scaleY: Double):
     val bottom = ys.max()
     if (right - left < MIN_EDGE || bottom - top < MIN_EDGE) return null
     return Rect(left, top, right, bottom)
+}
+
+private fun cssPlaced(quad: JsonArray?, view: CssBox): CssBox? {
+    val box = quad?.let(::cssBox) ?: return null
+    return cssIntersection(box, view)
+}
+
+private fun cssBox(quad: JsonArray): CssBox? {
+    if (quad.size != QUAD_COORDS) return null
+    val coords = quad.map { (it as? JsonPrimitive)?.doubleOrNull ?: return null }
+    val xs = (0 until QUAD_COORDS step 2).map { coords[it] }
+    val ys = (1 until QUAD_COORDS step 2).map { coords[it] }
+    val left = xs.min()
+    val top = ys.min()
+    val right = xs.max()
+    val bottom = ys.max()
+    if (right - left < MIN_CSS_EDGE || bottom - top < MIN_CSS_EDGE) return null
+    return CssBox(left, top, right, bottom)
+}
+
+private fun cssIntersection(a: CssBox, b: CssBox): CssBox? {
+    val left = max(a.left, b.left)
+    val top = max(a.top, b.top)
+    val right = min(a.right, b.right)
+    val bottom = min(a.bottom, b.bottom)
+    if (right - left < MIN_CSS_EDGE || bottom - top < MIN_CSS_EDGE) return null
+    return CssBox(left, top, right, bottom)
+}
+
+private fun cssPoint(box: CssBox, humanize: Boolean, random: Random): Point {
+    val cx = ((box.left + box.right) / 2).toFloat()
+    val cy = ((box.top + box.bottom) / 2).toFloat()
+    if (!humanize) return Point(cx, cy)
+    val halfW = (box.width * INNER_FRACTION / 2).toFloat()
+    val halfH = (box.height * INNER_FRACTION / 2).toFloat()
+    return Point(
+        cx + ((random.nextDouble() - 0.5) * 2 * halfW).toFloat(),
+        cy + ((random.nextDouble() - 0.5) * 2 * halfH).toFloat(),
+    )
+}
+
+private data class CssBox(
+    val left: Double,
+    val top: Double,
+    val right: Double,
+    val bottom: Double,
+) {
+    val width: Double
+        get() = right - left
+
+    val height: Double
+        get() = bottom - top
 }
 
 private fun intersection(a: Rect, b: Rect): Rect? {
@@ -171,4 +251,6 @@ private val TEXT_ROLES = setOf("StaticText", "InlineTextBox")
 
 private const val QUAD_COORDS = 8
 private const val MIN_EDGE = 2
+private const val MIN_CSS_EDGE = 1.0
+private const val INNER_FRACTION = 0.6
 private const val MAX_HOPS = 40

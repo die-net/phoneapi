@@ -33,6 +33,7 @@ import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.core.ApiJson
 import net.die.phoneapi.core.BrowserService
 import net.die.phoneapi.model.ActionResult
+import net.die.phoneapi.model.BrowserInput
 import net.die.phoneapi.model.BrowserSnapshot
 import net.die.phoneapi.model.BrowserTapRequest
 import net.die.phoneapi.model.BrowserTarget
@@ -41,6 +42,7 @@ import net.die.phoneapi.model.ConsoleRequest
 import net.die.phoneapi.model.ConsoleResult
 import net.die.phoneapi.model.EvalRequest
 import net.die.phoneapi.model.EvalResult
+import net.die.phoneapi.model.Point
 import net.die.phoneapi.model.Rect
 
 /**
@@ -156,24 +158,76 @@ internal class BrowserServiceImpl(
         try {
             val wanted = tapTarget(request)
             val (socket, chromeId) = parseBrowserTargetId(id)
-            val pkg = browserPackage(socketList().firstOrNull { it.name == socket }, socket)
+            val pkg =
+                if (request.input == BrowserInput.TOUCH) {
+                    browserPackage(socketList().firstOrNull { it.name == socket }, socket)
+                } else {
+                    null
+                }
             val result =
                 usePage(socket, chromeId) { cdp ->
-                    cdp.call("Page.bringToFront")
-                    delay(FRONT_SETTLE_MS)
-                    val quads = elementQuads(cdp, id, wanted)
-                    val target =
-                        screenTarget(
-                            quads,
-                            cdp.call("Page.getLayoutMetrics"),
-                            contentOnScreen(pkg),
-                        )
-                    touchAt(target, request.humanize)
+                    when (request.input) {
+                        BrowserInput.TOUCH -> touchTap(cdp, id, wanted, pkg, request.humanize)
+                        BrowserInput.CDP -> cdpTap(cdp, id, wanted, request.humanize)
+                    }
                 }
             return result.copy(woke = woke, seq = sequence())
         } finally {
             invalidateSnapshots()
         }
+    }
+
+    /** Foregrounds the tab, then injects a touchscreen event at the element's screen box. */
+    private suspend fun touchTap(
+        cdp: CdpSession,
+        id: String,
+        wanted: TapTarget,
+        pkg: String?,
+        humanize: Boolean,
+    ): ActionResult {
+        cdp.call("Page.bringToFront")
+        delay(FRONT_SETTLE_MS)
+        val quads = elementQuads(cdp, id, wanted)
+        val target = screenTarget(quads, cdp.call("Page.getLayoutMetrics"), contentOnScreen(pkg))
+        return touchAt(target, humanize)
+    }
+
+    /**
+     * Sends the tap to this page target. No `Page.bringToFront`, so a background tab stays there.
+     */
+    private suspend fun cdpTap(
+        cdp: CdpSession,
+        id: String,
+        wanted: TapTarget,
+        humanize: Boolean,
+    ): ActionResult {
+        val quads = elementQuads(cdp, id, wanted)
+        val point = viewportTap(quads, cdp.call("Page.getLayoutMetrics"), humanize)
+        dispatchTouch(cdp, point)
+        return ActionResult(ok = true, backend = "cdp", points = listOf(point))
+    }
+
+    private suspend fun dispatchTouch(cdp: CdpSession, point: Point) {
+        cdp.call(
+            "Input.dispatchTouchEvent",
+            buildJsonObject {
+                put("type", "touchStart")
+                put("touchPoints", JsonArray(listOf(touchPoint(point))))
+            },
+        )
+        cdp.call(
+            "Input.dispatchTouchEvent",
+            buildJsonObject {
+                put("type", "touchEnd")
+                put("touchPoints", JsonArray(emptyList()))
+            },
+        )
+    }
+
+    private fun touchPoint(point: Point): JsonObject = buildJsonObject {
+        put("x", point.x)
+        put("y", point.y)
+        put("id", 0)
     }
 
     override suspend fun evaluate(id: String, request: EvalRequest): EvalResult {

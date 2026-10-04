@@ -288,7 +288,7 @@ private val MCP_TOOLS: List<McpTool> =
         McpTool(
             name = "browser_tap",
             description =
-                "Tap a snapshot ref or a CSS selector in a browser target, with a real touch.",
+                "Tap a snapshot ref or a CSS selector in a browser target. input touch (default) brings the tab forward and injects a touchscreen event. input cdp sends the tap to that target, including a background tab.",
             scope = Scope.BROWSER,
             available = Capabilities::browserCdp,
             arguments = serializer<BrowserTapArgs>(),

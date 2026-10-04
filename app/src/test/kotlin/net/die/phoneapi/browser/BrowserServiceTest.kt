@@ -12,9 +12,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.model.ActionResult
+import net.die.phoneapi.model.BrowserInput
 import net.die.phoneapi.model.BrowserTapRequest
 import net.die.phoneapi.model.Rect
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -114,6 +116,47 @@ class BrowserServiceTest {
         assertTrue(result.ok)
         assertEquals("inject", result.backend)
         assertEquals(Rect(435, 1474, 647, 1541), touched)
+    }
+
+    @Test
+    @Suppress("MissingUseCall") // The service closes the socket it opens.
+    fun `cdp tap leaves the tab behind`() {
+        // id 1 is Accessibility.enable. bringToFront would take that slot and the ref lookup
+        // would fail. The last two empty results are touchStart and touchEnd.
+        val frames =
+            switched() +
+                serverTextFrame("""{"id":1,"result":{}}""") +
+                serverTextFrame(
+                    """{"id":2,"result":{"nodes":[{"nodeId":"9","role":{"value":"link"},"backendDOMNodeId":9}]}}"""
+                ) +
+                serverTextFrame("""{"id":3,"result":{}}""") +
+                serverTextFrame(quad(4)) +
+                serverTextFrame(metrics(5)) +
+                serverTextFrame("""{"id":6,"result":{}}""") +
+                serverTextFrame("""{"id":7,"result":{}}""")
+        var touched = false
+        val socket = ScriptedSocket(frames)
+        val service =
+            service(
+                frames,
+                sockets = CHROME,
+                touch = { _, _ ->
+                    touched = true
+                    ActionResult(ok = false, backend = "inject")
+                },
+                open = { socket },
+            )
+        val result = runBlocking {
+            service.tap(
+                "chrome_devtools_remote~abc",
+                BrowserTapRequest(ref = "9", humanize = false, input = BrowserInput.CDP),
+            )
+        }
+        assertTrue(result.ok)
+        assertEquals("cdp", result.backend)
+        assertFalse(touched)
+        assertEquals(206.09226f, result.points.single().x, 0.02f)
+        assertEquals(466.48216f, result.points.single().y, 0.02f)
     }
 
     @Test
