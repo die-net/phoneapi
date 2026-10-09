@@ -215,9 +215,11 @@ private val MCP_TOOLS: List<McpTool> =
         ),
         McpTool(
             name = "open_intent",
-            description = "Start an intent. data is a URI. package and component are optional.",
+            description =
+                "Start an intent. data is a URI. package and component are optional. Requires " +
+                    "the shell helper.",
             scope = Scope.CONTROL,
-            available = always,
+            available = Capabilities::appsManage,
             arguments = serializer<IntentRequest>(),
             annotations = changes,
             call = { graph, _, request -> openIntent(graph, request) },
