@@ -8,7 +8,6 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.util.Log
-import androidx.core.net.toUri
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
@@ -27,8 +26,8 @@ import net.die.phoneapi.model.LaunchRequest
 /**
  * Launching, stopping, clearing and deep-linking apps. Installing is out of scope.
  *
- * Launching goes through the platform, so it works without the helper; `stop` and `clear` are
- * privileged and need the helper's shell UID (`apps.manage` in the capability map).
+ * Launching goes through the platform, so it works without the helper; intents, `stop` and `clear`
+ * need the helper's shell UID (`apps.manage` in the capability map).
  */
 class AppsServiceImpl(
     private val context: Context,
@@ -72,21 +71,58 @@ class AppsServiceImpl(
     override suspend fun clear(packageName: String): ActionResult =
         manage(packageName, "clear", listOf("pm", "clear", packageName))
 
+    /**
+     * Android drops this app's background activity starts without an error, so intents go through
+     * the helper's shell, which is allowed to start them.
+     */
     override suspend fun intent(request: IntentRequest): ActionResult {
+        val component =
+            request.component?.let {
+                ComponentName.unflattenFromString(it)
+                    ?: throw ApiException.badRequest(
+                        "component must look like com.example/.MainActivity"
+                    )
+            }
+        shell.require()
         val woke = prepare(true)
-        val intent = buildIntent(request)
-        start(intent)
-        val packageName = request.packageName ?: intent.component?.packageName
-        val missing = packageName?.takeIf { !foreground(intent, it, wait = true) }
+        val started = parseAmStart(shell.exec(amStartArgs(request), AM_START_TIMEOUT_MS))
+        started.failure?.let { throw intentFailed(request, it, started.message.orEmpty()) }
+        val packageName =
+            request.packageName ?: component?.packageName ?: started.activityPackage
+        val missing =
+            packageName?.takeIf { !started.chooser && !awaitForeground(it) }
         invalidateSnapshots()
         return ActionResult(
-            ok = missing == null,
-            backend = "activity",
+            ok = !started.chooser && missing == null,
+            backend = "shell",
             woke = woke,
             seq = seq.value,
-            message = missing?.let { notForeground(intent, it) },
+            message =
+                when {
+                    started.chooser ->
+                        "Several apps handle ${describe(request)}, so Android is showing a " +
+                            "chooser. Name a package to pick one."
+                    missing != null ->
+                        "am start accepted ${describe(request)}, but $missing did not come to " +
+                            "the foreground."
+                    else -> started.warning
+                },
         )
     }
+
+    private fun intentFailed(
+        request: IntentRequest,
+        failure: AmFailure,
+        message: String,
+    ): ApiException =
+        when (failure) {
+            AmFailure.UNRESOLVED ->
+                ApiException(404, "not_found", "Nothing handles ${describe(request)}: $message")
+            AmFailure.DENIED ->
+                ApiException(403, "forbidden", "Android refused ${describe(request)}: $message")
+            AmFailure.OTHER ->
+                ApiException(409, "intent_failed", "am start failed for ${describe(request)}: $message")
+        }
 
     private suspend fun manage(
         packageName: String,
@@ -133,24 +169,6 @@ class AppsServiceImpl(
         return intent
     }
 
-    private fun buildIntent(request: IntentRequest): Intent {
-        val intent = Intent(request.action)
-        request.data?.let { intent.data = it.toUri() }
-        request.packageName?.let(intent::setPackage)
-        request.component?.let {
-            intent.component =
-                ComponentName.unflattenFromString(it)
-                    ?: throw ApiException.badRequest(
-                        "component must look like com.example/.MainActivity"
-                    )
-        }
-        request.categories.forEach(intent::addCategory)
-        request.extras.forEach { (key, value) -> intent.putExtra(key, value) }
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        request.flags?.let(intent::addFlags)
-        return intent
-    }
-
     private fun start(intent: Intent) {
         try {
             context.startActivity(intent)
@@ -182,7 +200,7 @@ class AppsServiceImpl(
     private suspend fun startFromShell(intent: Intent): Boolean {
         val component = intent.component?.flattenToShortString() ?: return false
         return try {
-            shell.exec(listOf("am", "start", "-n", component)).ok
+            shell.exec(listOf("am", "start", "-n", component, "-f", intent.flags.toString())).ok
         } catch (e: ApiException) {
             Log.i(TAG, "Could not start $component from the helper", e)
             false
@@ -245,6 +263,9 @@ class AppsServiceImpl(
         }
     }
 
+    private fun describe(request: IntentRequest): String =
+        request.component ?: request.packageName ?: request.data ?: request.action
+
     private fun describe(intent: Intent): String =
         intent.component?.flattenToShortString() ?: intent.`package` ?: intent.action.orEmpty()
 
@@ -254,5 +275,7 @@ class AppsServiceImpl(
     private companion object {
         const val TAG = "PhoneApi"
         const val FOREGROUND_WAIT_MS = 5_000L
+        // am start -W waits for the first frame, and a cold start can take several seconds.
+        const val AM_START_TIMEOUT_MS = 20_000L
     }
 }

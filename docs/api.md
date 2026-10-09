@@ -138,7 +138,7 @@ Authenticated errors are JSON:
 | `POST` | `/v1/apps/{pkg}/launch` | control | `LaunchRequest` |
 | `POST` | `/v1/apps/{pkg}/stop` | control | Force-stop (helper) |
 | `POST` | `/v1/apps/{pkg}/clear` | control | Clear data (helper) |
-| `POST` | `/v1/intents` | control | `IntentRequest` |
+| `POST` | `/v1/intents` | control | `IntentRequest` (helper) |
 
 ### Wait
 
@@ -210,7 +210,7 @@ For stdio hosts (Cursor, etc.), run `phoneapi mcp` (with the helper up). It inst
 | `wait_for` | observe | Same conditions as `/v1/wait` |
 | `keyboard_hide` / `keyboard_show` | control | Soft keyboard |
 | `app_launch` / `app_stop` / `app_clear` | control | Package control (`stop`/`clear` need helper) |
-| `open_intent` | control | Start an intent |
+| `open_intent` | control | Start an intent (needs helper) |
 | `device_wake` / `device_unlock` / `device_lock` | control | Power / keyguard |
 | `device_orientation` | control | Auto-rotate, or lock the screen to the current or a named rotation |
 | `browser_targets` / `browser_open` / `browser_navigate` | browser | Tab list and navigation |
