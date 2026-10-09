@@ -253,7 +253,7 @@ public val phoneApiEndpoints: List<ApiEndpoint> =
             ApiMethod.POST,
             "/v1/intents",
             Scope.CONTROL,
-            "Start an intent.",
+            "Start an intent. Requires the helper.",
             serializer<IntentRequest>(),
             serializer<ActionResult>(),
         ),
