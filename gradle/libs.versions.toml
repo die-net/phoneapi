@@ -20,7 +20,7 @@ androidx-lifecycle = "2.10.0"
 androidx-preference = "1.2.1"
 androidx-fragment = "1.9.1"
 jspecify = "1.0.0"
-slf4j = "2.0.19"
+slf4j = "2.0.20"
 
 [libraries]
 android-gradle-plugin = { module = "com.android.tools.build:gradle", version.ref = "agp" }
