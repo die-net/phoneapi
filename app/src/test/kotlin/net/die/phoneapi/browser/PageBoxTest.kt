@@ -1,10 +1,12 @@
 package net.die.phoneapi.browser
 
+import kotlin.math.roundToInt
 import kotlin.random.Random
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.core.ApiJson
+import net.die.phoneapi.input.Humanizer
 import net.die.phoneapi.model.Rect
 import net.die.phoneapi.model.SwipeDirection
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -58,6 +60,30 @@ class PageBoxTest {
         val point = viewportTap(quads(), metrics(pageY = 0.0), humanize = true, random = Random(1))
         assertTrue(point.x in 165.62f..246.57f)
         assertTrue(point.y in 453.68f..479.28f)
+    }
+
+    @Test
+    fun `cdp tap matches a hardware tap`() {
+        val frame = metrics(pageY = 0.0)
+        val path = cdpTapPath(quads(), frame, humanize = true, Humanizer(Random(7)))
+        val dipX = 1082.0 / 412.19049072265625
+        val dipY = 2056.0 / 783.2380981445312
+        val rect =
+            Rect(
+                (165.61905 * dipX).roundToInt(),
+                (453.68454 * dipY).roundToInt(),
+                (246.56548 * dipX).roundToInt(),
+                (479.27979 * dipY).roundToInt(),
+            )
+        val hardware = Humanizer(Random(7)).tap(rect)
+        assertEquals(hardware.size, path.size)
+        assertTrue(path.size >= 3)
+        assertTrue(path.last().tMs in 50L..120L)
+        path.zip(hardware).forEach { (css, device) ->
+            assertEquals(device.tMs, css.tMs)
+            assertEquals((device.x / dipX).toFloat(), css.x, 0.001f)
+            assertEquals((device.y / dipY).toFloat(), css.y, 0.001f)
+        }
     }
 
     @Test

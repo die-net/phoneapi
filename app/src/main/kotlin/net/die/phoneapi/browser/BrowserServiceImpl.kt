@@ -32,7 +32,9 @@ import kotlinx.serialization.serializer
 import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.core.ApiJson
 import net.die.phoneapi.core.BrowserService
+import net.die.phoneapi.helper.TouchscreenInfo
 import net.die.phoneapi.input.SwipeSpec
+import net.die.phoneapi.input.fallbackTouchscreen
 import net.die.phoneapi.model.ActionResult
 import net.die.phoneapi.model.BrowserGestureRequest
 import net.die.phoneapi.model.BrowserInput
@@ -76,7 +78,7 @@ internal class BrowserServiceImpl(
     private val swipeAt: suspend (Point, Point, SwipeSpec) -> ActionResult = { _, _, _ ->
         ActionResult(ok = false)
     },
-    private val gestureAt: suspend (List<List<TimedPoint>>) -> ActionResult = {
+    private val gestureAt: suspend (List<List<TimedPoint>>, Boolean) -> ActionResult = { _, _ ->
         ActionResult(ok = false)
     },
     private val pressKey: suspend (KeyRequest) -> ActionResult = { ActionResult(ok = false) },
@@ -90,6 +92,8 @@ internal class BrowserServiceImpl(
     private val devtoolsGap: (BrowserGap) -> String = { gap ->
         browserGapMessage(gap, chromeInstalled = true, usbDebugging = true)
     },
+    private val refreshHz: () -> Float = { 60f },
+    private val touchscreen: suspend () -> TouchscreenInfo = { fallbackTouchscreen() },
 ) : BrowserService {
     private val axTrees = newAxCache()
     private val pageInput: PageInput by lazy {
@@ -103,6 +107,8 @@ internal class BrowserServiceImpl(
             quads = { cdp, id, wanted -> elementQuads(cdp, id, wanted) },
             focusNode = { cdp, id, wanted -> focusParams(cdp, id, wanted) },
             target = { ref, selector -> optionalTarget(ref, selector) },
+            refreshHz = refreshHz,
+            touchscreen = touchscreen,
         )
     }
 

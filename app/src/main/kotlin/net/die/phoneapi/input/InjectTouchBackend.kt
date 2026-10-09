@@ -12,7 +12,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import net.die.phoneapi.core.ApiException
-import net.die.phoneapi.helper.AxisRange
 import net.die.phoneapi.helper.IHelper
 import net.die.phoneapi.helper.TouchscreenInfo
 import net.die.phoneapi.helperclient.HelperConnection
@@ -29,6 +28,16 @@ class InjectTouchBackend(
 ) {
     val name = "inject"
 
+    /** The touchscreen axes. CDP maps the same finger fractions through them. */
+    internal suspend fun touchscreen(): TouchscreenInfo {
+        val proxy = helper.require()
+        return try {
+            touchscreen(proxy)
+        } catch (e: RemoteException) {
+            throw ApiException.helperDropped(e)
+        }
+    }
+
     private val gestures = Mutex()
     private val screenLock = Mutex()
 
@@ -36,7 +45,13 @@ class InjectTouchBackend(
     @Volatile private var screenProxy: IHelper? = null
     @Volatile private var screen: TouchscreenInfo? = null
 
-    suspend fun perform(pointers: List<List<TimedPoint>>): Boolean = gestures.withLock {
+    suspend fun perform(pointers: List<List<TimedPoint>>): Boolean =
+        shapedPerform(pointers, emptyList())
+
+    internal suspend fun shapedPerform(
+        pointers: List<List<TimedPoint>>,
+        fingers: List<List<FingerShape>>,
+    ): Boolean = gestures.withLock {
         val proxy = helper.require()
         val device =
             try {
@@ -46,7 +61,7 @@ class InjectTouchBackend(
             }
         val samples =
             try {
-                touchTimeline(pointers)
+                touchTimeline(pointers, fingers)
             } catch (e: IllegalArgumentException) {
                 throw ApiException.badRequest(e.message ?: "Invalid gesture", e)
             }
@@ -275,13 +290,14 @@ private fun obtain(
         Array(pointers.size) { index ->
             MotionEvent.PointerCoords().apply {
                 val sample = pointers[index]
+                val contact = FingerContact.from(screen, sample.shape)
                 x = sample.x
                 y = sample.y
-                pressure = along(screen.pressure, PRESSURE_FRACTION)
-                size = along(screen.size, SIZE_FRACTION)
-                touchMajor = along(screen.touchMajor, SIZE_FRACTION)
-                touchMinor = along(screen.touchMinor, SIZE_FRACTION)
-                orientation = along(screen.orientation, CENTER_FRACTION)
+                pressure = contact.pressure
+                size = contact.size
+                touchMajor = contact.touchMajor
+                touchMinor = contact.touchMinor
+                orientation = contact.orientation
             }
         }
     // A device's source mask can include bits the input verifier does not know. On API 36 an
@@ -306,15 +322,3 @@ private fun obtain(
         0,
     )
 }
-
-/**
- * A point [fraction] of the way from min to max, so a finger is not the exact center of the range.
- */
-private fun along(range: AxisRange, fraction: Float): Float {
-    if (range.max <= range.min) return range.min
-    return range.min + (range.max - range.min) * fraction
-}
-
-private const val PRESSURE_FRACTION = 0.55f
-private const val SIZE_FRACTION = 0.08f
-private const val CENTER_FRACTION = 0.5f

@@ -11,9 +11,14 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
 import net.die.phoneapi.core.ApiException
+import net.die.phoneapi.input.HumanGesture
+import net.die.phoneapi.input.Humanizer
+import net.die.phoneapi.input.PLAIN_TAP_HOLD_MS
+import net.die.phoneapi.input.SwipeSpec
 import net.die.phoneapi.model.Point
 import net.die.phoneapi.model.Rect
 import net.die.phoneapi.model.SwipeDirection
+import net.die.phoneapi.model.TimedPoint
 
 /**
  * Maps a snapshot ref onto a screen rectangle. Letter-sized `StaticText` nodes are Chrome splitting
@@ -74,11 +79,110 @@ internal fun viewportTap(
     random: Random = Random.Default,
 ): Point {
     val frame = viewport(metrics)
+    if (humanize) {
+        val first = cdpTapPath(quads, metrics, humanize = true, Humanizer(random)).first()
+        return Point(first.x, first.y)
+    }
     val box =
         largestCss(quads, CssBox(0.0, 0.0, frame.cssWidth, frame.cssHeight))
             ?: throw ApiException(409, "offscreen", "The node is outside the viewport")
-    return cssPoint(box, humanize, random)
+    return cssPoint(box)
 }
+
+/**
+ * A tap in CSS pixels. Humanized taps are built in device pixels with [Humanizer], then scaled
+ * back, so the hold, micro-moves, and jitter match a hardware tap. An exact tap is the quad's
+ * center, held for [PLAIN_TAP_HOLD_MS].
+ */
+internal fun cdpTapPath(
+    quads: JsonArray,
+    metrics: JsonObject,
+    humanize: Boolean,
+    humanizer: Humanizer,
+): List<TimedPoint> {
+    val frame = viewport(metrics)
+    val box =
+        largestCss(quads, CssBox(0.0, 0.0, frame.cssWidth, frame.cssHeight))
+            ?: throw ApiException(409, "offscreen", "The node is outside the viewport")
+    if (!humanize) {
+        val point = cssPoint(box)
+        return listOf(
+            TimedPoint(point.x, point.y, 0),
+            TimedPoint(point.x, point.y, PLAIN_TAP_HOLD_MS),
+        )
+    }
+    val dip = dipScale(frame)
+    val rect = deviceRect(box, dip)
+    return humanizer.tap(rect, humanize = true).map { cssPoint(it, dip) }
+}
+
+/**
+ * A swipe in CSS pixels. Humanized swipes run in device pixels so the bow and sub-pixel noise match
+ * a hardware swipe, then scale back.
+ */
+internal fun cdpSwipePath(
+    from: Point,
+    to: Point,
+    spec: SwipeSpec,
+    metrics: JsonObject,
+    humanizer: Humanizer,
+): List<TimedPoint> {
+    if (!spec.humanize) return humanizer.swipe(from, to, spec)
+    val dip = dipScale(viewport(metrics))
+    val path =
+        humanizer.swipe(
+            Point((from.x * dip.x).toFloat(), (from.y * dip.y).toFloat()),
+            Point((to.x * dip.x).toFloat(), (to.y * dip.y).toFloat()),
+            spec,
+        )
+    return path.map { cssPoint(it, dip) }
+}
+
+/**
+ * A gesture in CSS pixels. Humanized gestures are noised in device pixels, like a hardware gesture,
+ * then scaled back. The contact curves are fractions of the touchscreen axes.
+ */
+internal fun cdpHumanGesture(
+    pointers: List<List<TimedPoint>>,
+    metrics: JsonObject,
+    humanize: Boolean,
+    humanizer: Humanizer,
+): HumanGesture {
+    if (!humanize) return humanizer.humanGesture(pointers, humanize = false)
+    val dip = dipScale(viewport(metrics))
+    val device = pointers.map { path ->
+        path.map { point ->
+            TimedPoint((point.x * dip.x).toFloat(), (point.y * dip.y).toFloat(), point.tMs)
+        }
+    }
+    val human = humanizer.humanGesture(device, humanize = true)
+    val css =
+        human.pointers.map { path ->
+            path.map { point ->
+                TimedPoint((point.x / dip.x).toFloat(), (point.y / dip.y).toFloat(), point.tMs)
+            }
+        }
+    return human.copy(pointers = css)
+}
+
+/** CSS pixels per device pixel, from Chrome's viewport. One value is the usual dip scale. */
+internal fun dipScale(metrics: JsonObject): Float = dipScale(viewport(metrics)).x.toFloat()
+
+private fun dipScale(frame: Viewport): Dip =
+    Dip(x = frame.deviceWidth / frame.cssWidth, y = frame.deviceHeight / frame.cssHeight)
+
+private fun deviceRect(box: CssBox, dip: Dip): Rect {
+    val left = (box.left * dip.x).roundToInt()
+    val top = (box.top * dip.y).roundToInt()
+    val right = (box.right * dip.x).roundToInt()
+    val bottom = (box.bottom * dip.y).roundToInt()
+    return Rect(left, top, max(right, left + 1), max(bottom, top + 1))
+}
+
+private fun cssPoint(point: TimedPoint, dip: Dip): TimedPoint =
+    TimedPoint((point.x / dip.x).toFloat(), (point.y / dip.y).toFloat(), point.tMs)
+
+private data class Dip(val x: Double, val y: Double)
 
 /** CSS viewport pixels of a direction swipe, across the page or inside [quads]. */
 internal fun directionSwipe(
@@ -206,16 +310,10 @@ private fun cssIntersection(a: CssBox, b: CssBox): CssBox? {
     return CssBox(left, top, right, bottom)
 }
 
-private fun cssPoint(box: CssBox, humanize: Boolean, random: Random): Point {
+private fun cssPoint(box: CssBox): Point {
     val cx = ((box.left + box.right) / 2).toFloat()
     val cy = ((box.top + box.bottom) / 2).toFloat()
-    if (!humanize) return Point(cx, cy)
-    val halfW = (box.width * INNER_FRACTION / 2).toFloat()
-    val halfH = (box.height * INNER_FRACTION / 2).toFloat()
-    return Point(
-        cx + ((random.nextDouble() - 0.5) * 2 * halfW).toFloat(),
-        cy + ((random.nextDouble() - 0.5) * 2 * halfH).toFloat(),
-    )
+    return Point(cx, cy)
 }
 
 private data class CssBox(
@@ -319,7 +417,6 @@ private val TEXT_ROLES = setOf("StaticText", "InlineTextBox")
 private const val QUAD_COORDS = 8
 private const val MIN_EDGE = 2
 private const val MIN_CSS_EDGE = 1.0
-private const val INNER_FRACTION = 0.6
 private const val PAGE_MARGIN = 0.12
 private const val MIN_DISTANCE = 0.05f
 private const val MAX_DISTANCE = 0.95f

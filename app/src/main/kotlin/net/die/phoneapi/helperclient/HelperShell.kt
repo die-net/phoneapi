@@ -33,6 +33,11 @@ class HelperShell(
     val isAvailable: Boolean
         get() = helper.isRunning
 
+    /** Throws the `503 helper_unavailable` [exec] would, before any other side effects. */
+    fun require() {
+        helper.require()
+    }
+
     /** Throws `503 helper_unavailable` when the helper isn't running, or `503 helper_error`. */
     suspend fun exec(
         argv: List<String>,

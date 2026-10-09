@@ -21,27 +21,39 @@ class TouchInput(
         count: Int = 1,
         holdMs: Long? = null,
         humanize: Boolean = true,
-    ): TouchOutcome = perform(humanizer.taps(target, count, holdMs, humanize))
+    ): TouchOutcome {
+        val strokes = humanizer.taps(target, count, holdMs, humanize)
+        val fingers = strokes.map { humanizer.finger(it.size, FingerMotion.PRESS, humanize) }
+        return perform(strokes, fingers)
+    }
 
-    suspend fun longPress(target: Rect, humanize: Boolean = true): TouchOutcome =
-        perform(
-            listOf(
-                humanizer.longPress(
-                    target,
-                    ViewConfiguration.getLongPressTimeout().toLong(),
-                    humanize,
-                )
+    suspend fun longPress(target: Rect, humanize: Boolean = true): TouchOutcome {
+        val path =
+            humanizer.longPress(
+                target,
+                ViewConfiguration.getLongPressTimeout().toLong(),
+                humanize,
             )
-        )
+        val fingers = listOf(humanizer.finger(path.size, FingerMotion.PRESS, humanize))
+        return perform(listOf(path), fingers)
+    }
 
     suspend fun swipe(from: Point, to: Point, spec: SwipeSpec): TouchOutcome {
         val rate = display().refreshRate.takeIf { it > 0f } ?: DEFAULT_RATE_HZ
-        val path = humanizer.swipe(from, to, spec.copy(sampleRateHz = rate))
-        return perform(listOf(path), withEnds = true)
+        val tuned = spec.copy(sampleRateHz = rate)
+        val path = humanizer.swipe(from, to, tuned)
+        val motion = if (tuned.fling) FingerMotion.FLING else FingerMotion.DRAG
+        val fingers = listOf(humanizer.finger(path.size, motion, tuned.humanize))
+        return perform(listOf(path), fingers, withEnds = true)
     }
 
-    suspend fun gesture(pointers: List<List<TimedPoint>>): TouchOutcome =
-        perform(pointers, withEnds = true)
+    suspend fun gesture(
+        pointers: List<List<TimedPoint>>,
+        humanize: Boolean = true,
+    ): TouchOutcome {
+        val human = humanizer.humanGesture(pointers, humanize)
+        return perform(human.pointers, human.fingers, withEnds = true)
+    }
 
     suspend fun playLive(
         first: PointerFrame,
@@ -54,6 +66,7 @@ class TouchInput(
     /** Reports where each stroke started, and also where it ended when [withEnds] is set. */
     private suspend fun perform(
         pointers: List<List<TimedPoint>>,
+        fingers: List<List<FingerShape>> = emptyList(),
         withEnds: Boolean = false,
     ): TouchOutcome {
         val d = display()
@@ -62,7 +75,7 @@ class TouchInput(
         val clamped = pointers.map { path ->
             path.map { it.copy(x = it.x.coerceIn(0f, maxX), y = it.y.coerceIn(0f, maxY)) }
         }
-        val ok = inject.perform(clamped)
+        val ok = inject.shapedPerform(clamped, fingers)
         val reported = clamped.flatMap { path ->
             if (withEnds && path.size > 1) listOf(path.first(), path.last())
             else listOf(path.first())

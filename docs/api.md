@@ -37,7 +37,7 @@ ADB `CREATE_TOKEN` (via `phoneapi pair`) grants every scope. Narrower tokens: `P
 - JSON bodies use `Content-Type: application/json`. Many `POST`s accept `{}` when all fields have defaults.
 - Boolean query flags: bare `?name`, `true`/`1`/`yes`, or `false`/`0`/`no`.
 - Closed enums (node state, swipe direction, log level, node action names, …) are case-insensitive. An unknown value is **400** `bad_request` on REST and a tool error on MCP.
-- `humanize` defaults to **true** on taps/swipes (including browser taps). Set `false` for exact points.
+- `humanize` defaults to **true** on taps, swipes, and gestures (including browser). Set `false` for exact points and a fixed contact.
 - `/v1/device.capabilities` (and MCP `device_info`) say what works right now. MCP omits tools the token or device cannot use.
 
 ### UI snapshot
@@ -138,7 +138,7 @@ Authenticated errors are JSON:
 | `POST` | `/v1/apps/{pkg}/launch` | control | `LaunchRequest` |
 | `POST` | `/v1/apps/{pkg}/stop` | control | Force-stop (helper) |
 | `POST` | `/v1/apps/{pkg}/clear` | control | Clear data (helper) |
-| `POST` | `/v1/intents` | control | `IntentRequest` |
+| `POST` | `/v1/intents` | control | `IntentRequest` (helper) |
 
 ### Wait
 
@@ -210,7 +210,7 @@ For stdio hosts (Cursor, etc.), run `phoneapi mcp` (with the helper up). It inst
 | `wait_for` | observe | Same conditions as `/v1/wait` |
 | `keyboard_hide` / `keyboard_show` | control | Soft keyboard |
 | `app_launch` / `app_stop` / `app_clear` | control | Package control (`stop`/`clear` need helper) |
-| `open_intent` | control | Start an intent |
+| `open_intent` | control | Start an intent (needs helper) |
 | `device_wake` / `device_unlock` / `device_lock` | control | Power / keyguard |
 | `device_orientation` | control | Auto-rotate, or lock the screen to the current or a named rotation |
 | `browser_targets` / `browser_open` / `browser_navigate` | browser | Tab list and navigation |

@@ -3,11 +3,12 @@ package net.die.phoneapi.browser
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
 import net.die.phoneapi.core.ApiException
+import net.die.phoneapi.helper.TouchscreenInfo
+import net.die.phoneapi.input.FingerMotion
 import net.die.phoneapi.input.Humanizer
 import net.die.phoneapi.input.SwipeSpec
+import net.die.phoneapi.input.fallbackTouchscreen
 import net.die.phoneapi.model.ActionResult
 import net.die.phoneapi.model.BrowserGestureRequest
 import net.die.phoneapi.model.BrowserInput
@@ -28,13 +29,15 @@ import net.die.phoneapi.model.TimedPoint
 internal class PageInput(
     private val touchAt: suspend (Rect, Boolean) -> ActionResult,
     private val swipeAt: suspend (Point, Point, SwipeSpec) -> ActionResult,
-    private val gestureAt: suspend (List<List<TimedPoint>>) -> ActionResult,
+    private val gestureAt: suspend (List<List<TimedPoint>>, Boolean) -> ActionResult,
     private val pressKey: suspend (KeyRequest) -> ActionResult,
     private val typeText: suspend (TextRequest) -> ActionResult,
     private val contentOnScreen: suspend (String?) -> Rect,
     private val quads: suspend (CdpSession, String, TapTarget) -> JsonArray,
     private val focusNode: suspend (CdpSession, String, TapTarget) -> JsonObject,
     private val target: (String?, String?) -> TapTarget?,
+    private val refreshHz: () -> Float = { DEFAULT_REFRESH_HZ },
+    private val touchscreen: suspend () -> TouchscreenInfo = { fallbackTouchscreen() },
 ) {
     private val paths = Humanizer()
 
@@ -75,7 +78,13 @@ internal class PageInput(
         pkg: String?,
         request: BrowserSwipeRequest,
     ): ActionResult {
-        val spec = SwipeSpec(request.durationMs, request.fling, request.humanize)
+        val spec =
+            SwipeSpec(
+                request.durationMs,
+                request.fling,
+                request.humanize,
+                sampleRateHz = refreshHz().takeIf { it > 0f } ?: DEFAULT_REFRESH_HZ,
+            )
         return when (request.input) {
             BrowserInput.TOUCH -> {
                 foreground(cdp)
@@ -89,9 +98,17 @@ internal class PageInput(
                 )
             }
             BrowserInput.CDP -> {
-                val ends = swipeEnds(cdp, id, request)
-                val path = paths.swipe(ends.first, ends.second, spec)
-                dispatchTouchPath(cdp, listOf(path))
+                val metrics = cdp.call("Page.getLayoutMetrics")
+                val ends = swipeEnds(cdp, id, request, metrics)
+                val path = cdpSwipePath(ends.first, ends.second, spec, metrics, paths)
+                val motion = if (spec.fling) FingerMotion.FLING else FingerMotion.DRAG
+                dispatchTouchPath(
+                    cdp,
+                    listOf(path),
+                    listOf(paths.finger(path.size, motion, spec.humanize)),
+                    axes(),
+                    dipScale(metrics),
+                )
                 cdpPoints(listOf(path))
             }
         }
@@ -127,11 +144,13 @@ internal class PageInput(
                             point.copy(x = screen.x, y = screen.y)
                         }
                     }
-                gestureAt(mapped)
+                gestureAt(mapped, request.humanize)
             }
             BrowserInput.CDP -> {
-                dispatchTouchPath(cdp, request.pointers)
-                cdpPoints(request.pointers)
+                val metrics = cdp.call("Page.getLayoutMetrics")
+                val human = cdpHumanGesture(request.pointers, metrics, request.humanize, paths)
+                dispatchTouchPath(cdp, human.pointers, human.fingers, axes(), dipScale(metrics))
+                cdpPoints(human.pointers)
             }
         }
 
@@ -217,33 +236,25 @@ internal class PageInput(
         humanize: Boolean,
     ): ActionResult {
         val boxes = quads(cdp, id, wanted)
-        val point = viewportTap(boxes, cdp.call("Page.getLayoutMetrics"), humanize)
-        dispatchTouch(cdp, point)
-        return ActionResult(ok = true, backend = "cdp", points = listOf(point))
+        val metrics = cdp.call("Page.getLayoutMetrics")
+        val path = cdpTapPath(boxes, metrics, humanize, paths)
+        dispatchTouchPath(
+            cdp,
+            listOf(path),
+            listOf(paths.finger(path.size, FingerMotion.PRESS, humanize)),
+            axes(),
+            dipScale(metrics),
+        )
+        val down = path.first()
+        return ActionResult(ok = true, backend = "cdp", points = listOf(Point(down.x, down.y)))
     }
 
-    private suspend fun dispatchTouch(cdp: CdpSession, point: Point) {
-        cdp.call(
-            "Input.dispatchTouchEvent",
-            buildJsonObject {
-                put("type", "touchStart")
-                put("touchPoints", JsonArray(listOf(touchPoint(point))))
-            },
-        )
-        cdp.call(
-            "Input.dispatchTouchEvent",
-            buildJsonObject {
-                put("type", "touchEnd")
-                put("touchPoints", JsonArray(emptyList()))
-            },
-        )
-    }
-
-    private fun touchPoint(point: Point): JsonObject = buildJsonObject {
-        put("x", point.x)
-        put("y", point.y)
-        put("id", 0)
-    }
+    private suspend fun axes(): TouchscreenInfo =
+        try {
+            touchscreen()
+        } catch (_: ApiException) {
+            fallbackTouchscreen()
+        }
 
     private suspend fun foreground(cdp: CdpSession) {
         cdp.call("Page.bringToFront")
@@ -261,6 +272,7 @@ internal class PageInput(
         cdp: CdpSession,
         id: String,
         request: BrowserSwipeRequest,
+        metrics: JsonObject? = null,
     ): Pair<Point, Point> {
         val from = request.from
         val to = request.to
@@ -268,7 +280,8 @@ internal class PageInput(
         val direction =
             request.direction ?: throw ApiException.badRequest("Pass from and to, or a direction")
         val boxes = target(request.ref, request.selector)?.let { quads(cdp, id, it) }
-        return directionSwipe(boxes, cdp.call("Page.getLayoutMetrics"), direction, request.distance)
+        val frame = metrics ?: cdp.call("Page.getLayoutMetrics")
+        return directionSwipe(boxes, frame, direction, request.distance)
     }
 
     private suspend fun focusField(
@@ -313,5 +326,6 @@ internal class PageInput(
         const val MAX_GESTURE_POINTS = 10_000
         const val MAX_TEXT = 10_000
         const val MAX_DELAY_MS = 5_000L
+        const val DEFAULT_REFRESH_HZ = 60f
     }
 }

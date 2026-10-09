@@ -128,10 +128,8 @@ class AppGraph(
         )
 
     val keys = InjectKeyBackend(helper, ioDispatcher)
-    val touch =
-        TouchInput(InjectTouchBackend(helper, ioDispatcher), Humanizer()) {
-            deviceInfo.display()
-        }
+    private val touchBackend = InjectTouchBackend(helper, ioDispatcher)
+    val touch = TouchInput(touchBackend, Humanizer()) { deviceInfo.display() }
     val screenshots = Screenshotter(ioDispatcher, ::helperScreenshot)
     val power: PowerService =
         PowerServiceImpl(
@@ -254,7 +252,7 @@ class AppGraph(
                 touched(outcome)
             },
             swipeAt = { from, to, spec -> touched(touch.swipe(from, to, spec)) },
-            gestureAt = { pointers -> touched(touch.gesture(pointers)) },
+            gestureAt = { pointers, humanize -> touched(touch.gesture(pointers, humanize)) },
             pressKey = { request -> input.key(request) },
             typeText = { request -> input.text(request) },
             prepare = { autoWake -> power.prepareForAction(autoWake) },
@@ -275,6 +273,8 @@ class AppGraph(
                 )
             },
             devtoolsGap = DevtoolsPreconditions(context)::explain,
+            refreshHz = { deviceInfo.display().refreshRate },
+            touchscreen = { touchBackend.touchscreen() },
         )
 
     fun start() {

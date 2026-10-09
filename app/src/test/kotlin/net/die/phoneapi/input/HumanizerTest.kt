@@ -14,6 +14,142 @@ class HumanizerTest {
     private val target = Rect(100, 200, 300, 300)
 
     @Test
+    fun `steady fallback contact`() {
+        val contact = FingerContact.fallback
+        assertEquals(0.55f, contact.pressure, 0.0001f)
+        assertEquals(0.08f, contact.size, 0.0001f)
+        assertEquals(0.08f, contact.touchMajor, 0.0001f)
+        assertEquals(0.08f, contact.touchMinor, 0.0001f)
+        assertEquals(0f, contact.orientation, 0.0001f)
+        val cdp = contact.toCdp(2.5f)
+        assertEquals(0.016f, cdp.radiusX, 0.0001f)
+        assertEquals(0.016f, cdp.radiusY, 0.0001f)
+        assertEquals(0.55f, cdp.force, 0.0001f)
+        assertEquals(0f, cdp.rotationAngle, 0.0001f)
+    }
+
+    @Test
+    fun `tap contact grows then eases`() {
+        repeat(100) { seed ->
+            val human = Humanizer(Random(seed))
+            val path = human.tap(target)
+            val finger = human.finger(path.size, FingerMotion.PRESS, humanize = true)
+            assertEquals(path.size, finger.size)
+            finger.forEach { shape ->
+                assertTrue(shape.major > shape.minor, "major=${shape.major} minor=${shape.minor}")
+                assertTrue(shape.pressure in 0.25f..0.85f, "pressure=${shape.pressure}")
+                assertTrue(shape.major in 0.035f..0.16f, "major=${shape.major}")
+                assertTrue(shape.orientation in 0.42f..0.58f)
+            }
+            val peak = finger.indices.maxBy { finger[it].pressure }
+            assertTrue(peak != 0 && peak != finger.lastIndex, "peak=$peak pressures=$finger")
+            finger.zipWithNext().forEach { (a, b) ->
+                assertTrue(abs(a.pressure - b.pressure) < 0.2f)
+                assertTrue(abs(a.orientation - b.orientation) < 0.05f)
+            }
+        }
+    }
+
+    @Test
+    fun `swipe contact stays in a band`() {
+        val from = Point(0f, 0f)
+        val to = Point(0f, 900f)
+        repeat(40) { seed ->
+            val human = Humanizer(Random(seed))
+            val path = human.swipe(from, to, SwipeSpec(fling = true))
+            val finger = human.finger(path.size, FingerMotion.FLING, humanize = true)
+            val pressures = finger.map { it.pressure }
+            assertTrue(pressures.max() - pressures.min() > 0.005f)
+            val span = pressures.max() - pressures.min()
+            assertTrue(span < 0.3f, "span=$span")
+            assertTrue(finger.all { it.major > it.minor })
+            assertTrue(pressures.last() > pressures.min())
+        }
+    }
+
+    @Test
+    fun `plain contact stays fixed`() {
+        val human = Humanizer(Random(1))
+        val path = human.tap(target, humanize = false)
+        val finger = human.finger(path.size, FingerMotion.PRESS, humanize = false)
+        assertTrue(finger.all { it == FingerShape.steady })
+        val dragged = Humanizer(Random(2)).finger(12, FingerMotion.DRAG, humanize = false)
+        assertTrue(dragged.all { it == FingerShape.steady })
+    }
+
+    @Test
+    fun `same seed, same contact`() {
+        val a = Humanizer(Random(9)).finger(6, FingerMotion.DRAG, humanize = true)
+        val b = Humanizer(Random(9)).finger(6, FingerMotion.DRAG, humanize = true)
+        assertEquals(a, b)
+    }
+
+    @Test
+    fun `plain gesture stays exact`() {
+        val path = listOf(TimedPoint(1f, 2f, 0), TimedPoint(4f, 5f, 40), TimedPoint(8f, 9f, 80))
+        val human = Humanizer(Random(1)).humanGesture(listOf(path), humanize = false)
+        assertEquals(listOf(path), human.pointers)
+        assertEquals(listOf(List(path.size) { FingerShape.steady }), human.fingers)
+    }
+
+    @Test
+    fun `gesture keeps its endpoints`() {
+        val path =
+            listOf(
+                TimedPoint(0f, 0f, 0),
+                TimedPoint(0f, 100f, 40),
+                TimedPoint(0f, 200f, 80),
+                TimedPoint(0f, 280f, 140),
+            )
+        repeat(20) { seed ->
+            val human = Humanizer(Random(seed)).humanGesture(listOf(path), humanize = true)
+            val out = human.pointers.single()
+            assertEquals(path.first().x, out.first().x)
+            assertEquals(path.first().y, out.first().y)
+            assertEquals(path.last().x, out.last().x)
+            assertEquals(path.last().y, out.last().y)
+            out.zip(path).forEach { (actual, original) ->
+                assertTrue(abs(actual.x - original.x) < 3f)
+                assertTrue(abs(actual.y - original.y) < 3f)
+                assertEquals(original.tMs, actual.tMs)
+            }
+            assertTrue(human.fingers.single().all { it.major > it.minor })
+        }
+    }
+
+    @Test
+    fun `held gesture eases its contact`() {
+        val path =
+            listOf(
+                TimedPoint(10f, 10f, 0),
+                TimedPoint(10f, 10f, 30),
+                TimedPoint(10f, 11f, 60),
+                TimedPoint(10f, 10f, 90),
+            )
+        val finger =
+            Humanizer(Random(4)).humanGesture(listOf(path), humanize = true).fingers.single()
+        val peak = finger.indices.maxBy { finger[it].pressure }
+        assertTrue(peak != 0 && peak != finger.lastIndex, "peak=$peak")
+    }
+
+    @Test
+    fun `timeline keeps sample contact`() {
+        val path = listOf(TimedPoint(1f, 2f, 0), TimedPoint(1f, 3f, 30), TimedPoint(1f, 4f, 60))
+        val shapes =
+            listOf(
+                FingerShape.steady,
+                FingerShape.steady.copy(pressure = 0.7f),
+                FingerShape.steady.copy(pressure = 0.4f),
+            )
+        val samples = touchTimeline(listOf(path), listOf(shapes))
+        assertEquals(listOf(0.55f, 0.7f, 0.4f), samples.map { it.shape.pressure })
+        assertEquals(
+            listOf(TouchPhase.DOWN, TouchPhase.MOVE, TouchPhase.UP),
+            samples.map { it.phase },
+        )
+    }
+
+    @Test
     fun `tap point and hold ranges`() {
         repeat(500) { seed ->
             val path = Humanizer(Random(seed)).tap(target)

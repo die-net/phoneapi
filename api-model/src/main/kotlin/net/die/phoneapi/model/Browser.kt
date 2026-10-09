@@ -42,6 +42,9 @@ public const val BROWSER_INPUT_DOC: String =
 public data class BrowserTapRequest(
     val ref: String? = null,
     val selector: String? = null,
+    @Doc(
+        "Jitter the point, timing, and finger contact. Defaults to true. A CDP tap matches a hardware tap."
+    )
     val humanize: Boolean = true,
     val autoWake: Boolean = true,
     @Doc(BROWSER_INPUT_DOC) val input: BrowserInput = BrowserInput.TOUCH,
@@ -66,6 +69,9 @@ public data class BrowserSwipeRequest(
     @Doc("How long the swipe takes, in milliseconds.") val durationMs: Long = 300,
     @Doc("Keep velocity at release instead of stopping before the pointer lifts.")
     val fling: Boolean = true,
+    @Doc(
+        "Jitter the path, timing, and finger contact. Defaults to true. A CDP swipe matches a hardware swipe."
+    )
     val humanize: Boolean = true,
     val autoWake: Boolean = true,
     @Doc(BROWSER_INPUT_DOC) val input: BrowserInput = BrowserInput.TOUCH,
@@ -78,6 +84,10 @@ public data class BrowserSwipeRequest(
 @Serializable
 public data class BrowserGestureRequest(
     val pointers: List<List<TimedPoint>>,
+    @Doc(
+        "Jitter the path and vary the finger contact. Defaults to true. A CDP gesture matches a hardware gesture."
+    )
+    val humanize: Boolean = true,
     val autoWake: Boolean = true,
     @Doc(BROWSER_INPUT_DOC) val input: BrowserInput = BrowserInput.TOUCH,
 )
