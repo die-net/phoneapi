@@ -20,6 +20,7 @@ import net.die.phoneapi.core.windowId
 import net.die.phoneapi.helperclient.failureMessage
 import net.die.phoneapi.model.ActionMode
 import net.die.phoneapi.model.BROWSER_INPUT_DOC
+import net.die.phoneapi.model.BROWSER_WAKE_DOC
 import net.die.phoneapi.model.BrowserGestureRequest
 import net.die.phoneapi.model.BrowserInput
 import net.die.phoneapi.model.BrowserKeyRequest
@@ -476,7 +477,7 @@ internal data class BrowserTapArgs(
     val ref: String? = null,
     val selector: String? = null,
     val humanize: Boolean = true,
-    val autoWake: Boolean = true,
+    @Doc(BROWSER_WAKE_DOC) val autoWake: Boolean = true,
     @Doc(BROWSER_INPUT_DOC) val input: BrowserInput = BrowserInput.TOUCH,
 )
 
@@ -492,7 +493,7 @@ internal data class BrowserSwipeArgs(
     val durationMs: Long = 300,
     val fling: Boolean = true,
     val humanize: Boolean = true,
-    val autoWake: Boolean = true,
+    @Doc(BROWSER_WAKE_DOC) val autoWake: Boolean = true,
     @Doc(BROWSER_INPUT_DOC) val input: BrowserInput = BrowserInput.TOUCH,
 )
 
@@ -502,7 +503,7 @@ internal data class BrowserGestureArgs(
     val pointers: List<List<TimedPoint>>,
     @Doc("Jitter the path and vary the finger contact. Defaults to true.")
     val humanize: Boolean = true,
-    val autoWake: Boolean = true,
+    @Doc(BROWSER_WAKE_DOC) val autoWake: Boolean = true,
     @Doc(BROWSER_INPUT_DOC) val input: BrowserInput = BrowserInput.TOUCH,
 )
 
@@ -512,7 +513,7 @@ internal data class BrowserKeyArgs(
     val key: String,
     val longPress: Boolean = false,
     val metaState: Int = 0,
-    val autoWake: Boolean = true,
+    @Doc(BROWSER_WAKE_DOC) val autoWake: Boolean = true,
     @Doc(BROWSER_INPUT_DOC) val input: BrowserInput = BrowserInput.TOUCH,
 )
 
@@ -527,7 +528,7 @@ internal data class BrowserTextArgs(
     val submit: Boolean = false,
     val minDelayMs: Long = 40,
     val maxDelayMs: Long = 140,
-    val autoWake: Boolean = true,
+    @Doc(BROWSER_WAKE_DOC) val autoWake: Boolean = true,
     @Doc(BROWSER_INPUT_DOC) val input: BrowserInput = BrowserInput.TOUCH,
 )
 

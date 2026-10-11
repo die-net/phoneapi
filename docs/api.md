@@ -126,7 +126,7 @@ Authenticated errors are JSON:
 | `POST` | `/v1/ime/hide` | control | Hide soft keyboard |
 | `POST` | `/v1/ime/show` | control | Focus editable + show IME (`ImeShowRequest`) |
 
-`autoWake` (default true) turns the screen on and leaves the keyguard up. Dismiss the keyguard with `POST /v1/device/unlock`.
+`autoWake` (default true) turns the screen on and leaves the keyguard up. Dismiss the keyguard with `POST /v1/device/unlock`. Browser input with `input` `cdp` ignores it and leaves the screen as it is.
 
 `/viewer` does not post a finished swipe. It streams the canvas on `WS /v1/input/pointer` so the phone moves while the finger is still down.
 
@@ -214,7 +214,7 @@ For stdio hosts (Cursor, etc.), run `phoneapi mcp` (with the helper up). It inst
 | `device_wake` / `device_unlock` / `device_lock` | control | Power / keyguard |
 | `device_orientation` | control | Auto-rotate, or lock the screen to the current or a named rotation |
 | `browser_targets` / `browser_open` / `browser_navigate` | browser | Tab list and navigation |
-| `browser_snapshot` / `browser_tap` / `browser_swipe` / `browser_gesture` | browser | AX outline and pointer input. `input` `touch` (default) or `cdp` |
+| `browser_snapshot` / `browser_tap` / `browser_swipe` / `browser_gesture` | browser | AX outline and pointer input. `input` `touch` (default) or `cdp`. `cdp` never wakes the screen |
 | `browser_key` / `browser_text` | browser | Key and text. `cdp` stays on a background tab; device keys such as HOME need `touch` |
 | `browser_eval` / `browser_console` | browser | JS and logs |
 | `screenshot` | observe | PNG last resort (`scale` default 0.5) |

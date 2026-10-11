@@ -164,6 +164,63 @@ class BrowserServiceTest {
     }
 
     @Test
+    @Suppress("MissingUseCall") // The service closes each socket it opens.
+    fun `keeps a broken tap single`() {
+        // DevTools hangs up after the selector lookup, before any touch is sent.
+        val dropped =
+            switched() +
+                serverTextFrame("""{"id":1,"result":{"root":{"nodeId":1}}}""") +
+                serverTextFrame("""{"id":2,"result":{"nodeId":4}}""")
+        var opens = 0
+        var prepared: Boolean? = null
+        val service =
+            service(
+                byteArrayOf(),
+                sockets = CHROME,
+                open = {
+                    opens++
+                    ScriptedSocket(dropped)
+                },
+                prepare = { autoWake ->
+                    prepared = autoWake
+                    false
+                },
+            )
+        val error =
+            assertThrows(ApiException::class.java) {
+                runBlocking {
+                    service.tap(
+                        "chrome_devtools_remote~abc",
+                        BrowserTapRequest(selector = "a", input = BrowserInput.CDP),
+                    )
+                }
+            }
+        assertEquals("cdp_error", error.error)
+        assertEquals(1, opens)
+        assertEquals(false, prepared)
+    }
+
+    @Test
+    @Suppress("MissingUseCall") // The service closes each socket it opens.
+    fun `retries a broken snapshot`() {
+        val dropped =
+            switched() +
+                serverTextFrame(
+                    """{"id":1,"result":{"frameTree":{"frame":{"url":"https://example.com/"}}}}"""
+                )
+        val scripts = ArrayDeque(listOf(dropped, snapshotFrames()))
+        val service =
+            service(
+                byteArrayOf(),
+                sockets = CHROME,
+                open = { ScriptedSocket(scripts.removeFirst()) },
+            )
+        val snapshot = runBlocking { service.snapshot("chrome_devtools_remote~abc") }
+        assertEquals("https://example.com/", snapshot.url)
+        assertTrue(scripts.isEmpty())
+    }
+
+    @Test
     fun `taps a css selector`() {
         val frames =
             switched() +
