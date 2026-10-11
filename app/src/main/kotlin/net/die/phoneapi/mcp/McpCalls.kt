@@ -561,7 +561,7 @@ internal data class ScaleArgs(
 @Serializable
 internal data class WaitArgs(
     @Doc(
-        "Every condition must match. Each object's type is node, window, ime, idle, screen, keyguard, or browser.*."
+        "Every condition must match. Each object's type is node, window, ime, idle, screen, keyguard, or browser.*. all and any together need at least one condition."
     )
     val all: List<WaitCondition> = emptyList(),
     @Doc("At least one condition must match. Same types as all.")

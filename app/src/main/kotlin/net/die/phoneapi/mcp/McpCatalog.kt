@@ -84,7 +84,7 @@ private val MCP_TOOLS: List<McpTool> =
         McpTool(
             name = "device_info",
             description =
-                "Manufacturer, SDK, display, lock state, helper status, and capabilities.",
+                "Model, Android version, display, helper status, capabilities, and current state: screen, keyguard, keyboard, and foregroundPackage. Cheap. Use it to check which app is in front before and after an action.",
             scope = Scope.OBSERVE,
             available = always,
             arguments = serializer<EmptyArgs>(),
@@ -93,7 +93,8 @@ private val MCP_TOOLS: List<McpTool> =
         ),
         McpTool(
             name = "ui_snapshot",
-            description = "Compact outline of the current UI. Prefer this over screenshot.",
+            description =
+                "Compact outline of the foreground app's accessibility tree. Prefer this over screenshot. Take a new one after each action. Canvas content such as maps shows little, so use screenshot there. Right after an action the tree can still be the old screen: wait_for first.",
             scope = Scope.OBSERVE,
             available = Capabilities::uiSnapshot,
             arguments = serializer<SnapshotArgs>(),
@@ -102,7 +103,8 @@ private val MCP_TOOLS: List<McpTool> =
         ),
         McpTool(
             name = "ui_find",
-            description = "Find nodes. selector matches text, id, role, and the other node fields.",
+            description =
+                "Find nodes by selector and return each match's bounds and actions. Cheaper than ui_snapshot when you know what you want. Use index when several nodes match.",
             scope = Scope.OBSERVE,
             available = Capabilities::uiSnapshot,
             arguments = serializer<FindRequest>(),
@@ -112,7 +114,7 @@ private val MCP_TOOLS: List<McpTool> =
         McpTool(
             name = "ui_act",
             description =
-                "Act on a snapshot ref. action is click, longClick, setText, scrollForward, and the other node actions. mode semantic skips real touch.",
+                "Act on a ref from the latest ui_snapshot or ui_find. action is click, longClick, setText, scrollForward, imeEnter, or a custom action listed on the node. mode semantic skips real touch.",
             scope = Scope.CONTROL,
             available = Capabilities::uiSnapshot,
             arguments = serializer<NodeActArgs>(),
@@ -121,7 +123,8 @@ private val MCP_TOOLS: List<McpTool> =
         ),
         McpTool(
             name = "tap",
-            description = "Tap a point or a node selector. Humanized by default.",
+            description =
+                "Tap a point in screen pixels, or a node selector. Prefer a selector by id, text, or desc over a ref. Humanized by default. Uses the screen.",
             scope = Scope.CONTROL,
             available = Capabilities::inputInject,
             arguments = serializer<TapRequest>(),
@@ -131,7 +134,7 @@ private val MCP_TOOLS: List<McpTool> =
         McpTool(
             name = "swipe",
             description =
-                "Swipe from/to, or inside a selector in a direction (up, down, left, right).",
+                """Swipe from one point to another, or in a direction (up, down, left, right) across the screen or inside a selector. from and to are objects such as {"x":540,"y":1800}. Uses the screen.""",
             scope = Scope.CONTROL,
             available = Capabilities::inputInject,
             arguments = serializer<SwipeRequest>(),
@@ -141,7 +144,7 @@ private val MCP_TOOLS: List<McpTool> =
         McpTool(
             name = "type_text",
             description =
-                "Type into the focused field, or into selector first. mode auto, keyboard, keyevent, or setText.",
+                "Type into the focused field, or into selector first. mode auto taps the on-screen keyboard and falls back to setText. setText is fastest for long text. clear replaces the field's text. submit presses the IME action. no_editor means no editable field has focus.",
             scope = Scope.CONTROL,
             available = Capabilities::textKeyevent,
             arguments = serializer<TextRequest>(),
@@ -150,7 +153,8 @@ private val MCP_TOOLS: List<McpTool> =
         ),
         McpTool(
             name = "press_key",
-            description = "Press BACK, HOME, ENTER, DEL, or any KEYCODE_* name.",
+            description =
+                "Press BACK, HOME, ENTER, DEL, or any KEYCODE_* name. HOME returns to the launcher. Uses the screen.",
             scope = Scope.CONTROL,
             available = Capabilities::textKeyevent,
             arguments = serializer<KeyRequest>(),
@@ -160,7 +164,7 @@ private val MCP_TOOLS: List<McpTool> =
         McpTool(
             name = "wait_for",
             description =
-                "Wait until all or any conditions match. A condition's type is node, window, ime, idle, screen, keyguard, or browser.*. Browser conditions need the browser scope.",
+                "Wait until all or any conditions match. Pass at least one. Use it after an action instead of sleeping or taking a screenshot. A condition's type is node, window, ime, idle, screen, keyguard, or browser.*. After open_intent or app_launch, wait for {type window, package} with {type node, selector {textContains}}. After browser_open, wait for browser.url and browser.settled on its target. idle is a fallback when no text is known. Browser conditions need the browser scope, and target when more than one page is open.",
             scope = Scope.OBSERVE,
             available = always,
             arguments = serializer<WaitArgs>(),
@@ -188,7 +192,8 @@ private val MCP_TOOLS: List<McpTool> =
         ),
         McpTool(
             name = "app_launch",
-            description = "Launch an app by package name.",
+            description =
+                "Launch an app by package name and bring it to the front. fresh clears its task first. wait (default true) waits for it to reach the foreground, not for its content. Uses the screen.",
             scope = Scope.CONTROL,
             available = always,
             arguments = serializer<PackageArgs>(),
@@ -197,7 +202,8 @@ private val MCP_TOOLS: List<McpTool> =
         ),
         McpTool(
             name = "app_stop",
-            description = "Force-stop an app. Requires the shell helper.",
+            description =
+                "Force-stop an app. Unsaved state in it is lost. Requires the shell helper.",
             scope = Scope.CONTROL,
             available = Capabilities::appsManage,
             arguments = serializer<PackageNameArgs>(),
@@ -206,7 +212,8 @@ private val MCP_TOOLS: List<McpTool> =
         ),
         McpTool(
             name = "app_clear",
-            description = "Clear an app's data. Requires the shell helper.",
+            description =
+                "Erase an app's data, including sign-in. Not reversible. Use only when the user asked. Requires the shell helper.",
             scope = Scope.CONTROL,
             available = Capabilities::appsManage,
             arguments = serializer<PackageNameArgs>(),
@@ -216,8 +223,7 @@ private val MCP_TOOLS: List<McpTool> =
         McpTool(
             name = "open_intent",
             description =
-                "Start an intent. data is a URI. package and component are optional. Requires " +
-                    "the shell helper.",
+                "Start an intent, such as action android.intent.action.VIEW with an https URL as data. package and component are optional. Waits for the app to reach the foreground, not for its content, so follow with wait_for. Without a package, a URI that several apps handle shows a chooser and returns ok false: name a package. Uses the screen. Requires the shell helper.",
             scope = Scope.CONTROL,
             available = Capabilities::appsManage,
             arguments = serializer<IntentRequest>(),
@@ -226,7 +232,7 @@ private val MCP_TOOLS: List<McpTool> =
         ),
         McpTool(
             name = "device_wake",
-            description = "Turn the screen on.",
+            description = "Turn the screen on. Leaves the keyguard up.",
             scope = Scope.CONTROL,
             available = always,
             arguments = serializer<EmptyArgs>(),
@@ -235,7 +241,8 @@ private val MCP_TOOLS: List<McpTool> =
         ),
         McpTool(
             name = "device_unlock",
-            description = "Dismiss the keyguard. A secure lock uses the stored PIN.",
+            description =
+                "Dismiss the keyguard. A secure lock uses the stored PIN. needs_user means there is no stored PIN, or the lock is a pattern or password.",
             scope = Scope.CONTROL,
             available = always,
             arguments = serializer<EmptyArgs>(),
@@ -244,7 +251,8 @@ private val MCP_TOOLS: List<McpTool> =
         ),
         McpTool(
             name = "device_lock",
-            description = "Lock the device.",
+            description =
+                "Turn the screen off and lock. The foreground app stays, so press HOME first for a neutral screen. Background browser work keeps running.",
             scope = Scope.CONTROL,
             available = always,
             arguments = serializer<EmptyArgs>(),
@@ -264,7 +272,7 @@ private val MCP_TOOLS: List<McpTool> =
         McpTool(
             name = "browser_targets",
             description =
-                "List Chrome tabs and debuggable WebViews. Chrome must be running with USB debugging on. Android 11+ needs PhoneAPI paired with wireless debugging. Android 10 needs the USB DevTools forward.",
+                "List Chrome tabs and debuggable WebViews with id, title, and url. Chrome updates the list itself, so a closed tab or a redirect can lag behind. Chrome must be running with USB debugging on. Android 11+ needs PhoneAPI paired with wireless debugging. Android 10 needs the USB DevTools forward.",
             scope = Scope.BROWSER,
             available = Capabilities::browserCdp,
             arguments = serializer<EmptyArgs>(),
@@ -273,7 +281,8 @@ private val MCP_TOOLS: List<McpTool> =
         ),
         McpTool(
             name = "browser_open",
-            description = "Open a tab. url must be http(s) or about:blank.",
+            description =
+                "Open a tab in the background and return its target. Does not take the screen. url must be http(s) or about:blank. A page that hands off to an installed app loads as a website in the tab. Follow with wait_for on browser.url and browser.settled.",
             scope = Scope.BROWSER,
             available = Capabilities::browserCdp,
             arguments = serializer<UrlArgs>(),
@@ -282,7 +291,8 @@ private val MCP_TOOLS: List<McpTool> =
         ),
         McpTool(
             name = "browser_navigate",
-            description = "Navigate an existing target. target is the id from browser_targets.",
+            description =
+                "Navigate an existing target to url, in the background. target is the id from browser_targets or browser_open. Follow with wait_for.",
             scope = Scope.BROWSER,
             available = Capabilities::browserCdp,
             arguments = serializer<TargetUrlArgs>(),
@@ -301,7 +311,8 @@ private val MCP_TOOLS: List<McpTool> =
         ),
         McpTool(
             name = "browser_snapshot",
-            description = "Compact outline of a browser target.",
+            description =
+                "Compact outline of a browser target. Works in the background. Heavy pages give a large outline, so browser_eval on document.body.innerText can be smaller.",
             scope = Scope.BROWSER,
             available = Capabilities::browserCdp,
             arguments = serializer<TargetArgs>(),
@@ -311,7 +322,7 @@ private val MCP_TOOLS: List<McpTool> =
         McpTool(
             name = "browser_tap",
             description =
-                "Tap a snapshot ref or a CSS selector in a browser target. input touch (default) brings the tab forward and injects a touchscreen event. input cdp sends the tap to that target, including a background tab.",
+                "Tap a snapshot ref or a CSS selector in a browser target. Default input touch brings the tab to the front and uses the screen. input cdp taps the target in the background.",
             scope = Scope.BROWSER,
             available = Capabilities::browserCdp,
             arguments = serializer<BrowserTapArgs>(),
@@ -321,7 +332,7 @@ private val MCP_TOOLS: List<McpTool> =
         McpTool(
             name = "browser_swipe",
             description =
-                "Swipe a browser target. from and to are CSS viewport pixels, or pass a direction. input touch (default) brings the tab forward and injects a touchscreen swipe. input cdp sends it to that target, including a background tab.",
+                "Swipe a browser target. from and to are CSS viewport pixels, or pass a direction. Default input touch brings the tab to the front and uses the screen. input cdp swipes the target in the background.",
             scope = Scope.BROWSER,
             available = Capabilities::browserCdp,
             arguments = serializer<BrowserSwipeArgs>(),
@@ -331,7 +342,7 @@ private val MCP_TOOLS: List<McpTool> =
         McpTool(
             name = "browser_gesture",
             description =
-                "Play pointer paths on a browser target, in CSS viewport pixels. input touch (default) or cdp.",
+                "Play pointer paths on a browser target, in CSS viewport pixels. Default input touch brings the tab to the front and uses the screen. input cdp plays them in the background.",
             scope = Scope.BROWSER,
             available = Capabilities::browserCdp,
             arguments = serializer<BrowserGestureArgs>(),
@@ -341,7 +352,7 @@ private val MCP_TOOLS: List<McpTool> =
         McpTool(
             name = "browser_key",
             description =
-                "Press a key on a browser target. input touch (default) injects a hardware key after bringing the tab forward. input cdp sends it to that target. Device keys such as HOME need input touch.",
+                "Press a key on a browser target. Default input touch brings the tab to the front and injects a hardware key. input cdp sends it to the target in the background. Device keys such as HOME need input touch.",
             scope = Scope.BROWSER,
             available = Capabilities::browserCdp,
             arguments = serializer<BrowserKeyArgs>(),
@@ -351,7 +362,7 @@ private val MCP_TOOLS: List<McpTool> =
         McpTool(
             name = "browser_text",
             description =
-                "Type into a browser target. input touch (default) uses the hardware text modes after bringing the tab forward. input cdp inserts the text, including in a background tab.",
+                "Type into a browser target. Default input touch brings the tab to the front and uses the hardware text modes. input cdp inserts the text in the background.",
             scope = Scope.BROWSER,
             available = Capabilities::browserCdp,
             arguments = serializer<BrowserTextArgs>(),
@@ -361,7 +372,7 @@ private val MCP_TOOLS: List<McpTool> =
         McpTool(
             name = "browser_eval",
             description =
-                "Evaluate JavaScript in an isolated world. A script exception is a result field.",
+                "Evaluate JavaScript in an isolated world and return the result. Works in the background. awaitPromise waits for a promise. A script exception is a result field. Not retried, so a script with side effects runs at most once.",
             scope = Scope.BROWSER,
             available = Capabilities::browserCdp,
             arguments = serializer<EvalArgs>(),
@@ -371,7 +382,7 @@ private val MCP_TOOLS: List<McpTool> =
         McpTool(
             name = "browser_console",
             description =
-                "Collect log entries for timeoutMs. Entries from before the call are not replayed.",
+                "Collect log entries for timeoutMs. Entries from before the call are not returned, so start it before the action you want to watch.",
             scope = Scope.BROWSER,
             available = Capabilities::browserCdp,
             arguments = serializer<ConsoleArgs>(),
@@ -381,7 +392,7 @@ private val MCP_TOOLS: List<McpTool> =
         McpTool(
             name = "screenshot",
             description =
-                "Last resort. PNG of the screen. Prefer ui_snapshot. scale is 0.1 to 1, default 0.5.",
+                "PNG of the screen. Prefer ui_snapshot, and use this when the tree is empty or unhelpful, such as maps and images. scale is 0.1 to 1, default 0.5. Divide image coordinates by scale to get tap coordinates.",
             scope = Scope.OBSERVE,
             available = Capabilities::screenshotHelper,
             arguments = serializer<ScaleArgs>(),
