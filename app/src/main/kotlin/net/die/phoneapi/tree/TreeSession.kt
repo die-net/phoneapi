@@ -80,7 +80,7 @@ class TreeSession(
     fun snapshot(options: SnapshotOptions): UiSnapshot {
         val body =
             ApiJson.encodeToString(
-                SnapshotCall.serializer(),
+                serializer<SnapshotCall>(),
                 SnapshotCall(options, state.refresh()),
             )
         return decode(rpc("snapshot", body))
@@ -188,7 +188,7 @@ class TreeSession(
     private fun envelope(body: String): String {
         val screen = display()
         return ApiJson.encodeToString(
-            Screened.serializer(),
+            serializer<Screened>(),
             Screened(screen.widthPx, screen.heightPx, body),
         )
     }

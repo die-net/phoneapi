@@ -16,6 +16,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.serializer
 import net.die.phoneapi.helper.ITreeClient
 import net.die.phoneapi.model.ActionResult
 import net.die.phoneapi.model.ApiException
@@ -76,7 +77,7 @@ internal class TreeHost(private val client: () -> ITreeClient?) {
     }
 
     fun call(op: String, payload: String): String {
-        val screened = json.decodeFromString(Screened.serializer(), payload)
+        val screened = json.decodeFromString(serializer<Screened>(), payload)
         screen.set(0, 0, screened.widthPx.coerceAtLeast(1), screened.heightPx.coerceAtLeast(1))
         return try {
             done(dispatch(op, screened.body.ifBlank { "{}" }))
@@ -108,22 +109,22 @@ internal class TreeHost(private val client: () -> ITreeClient?) {
     private fun read(op: String, body: String): String =
         when (op) {
             "snapshot" -> {
-                val call = json.decodeFromString(SnapshotCall.serializer(), body)
+                val call = json.decodeFromString(serializer<SnapshotCall>(), body)
                 val shot = runBlocking { snapshots.snapshot(call.options, call.summary) }
                 json.encodeToString(shot)
             }
             "find" -> {
-                val request = json.decodeFromString(FindRequest.serializer(), body)
+                val request = json.decodeFromString(serializer<FindRequest>(), body)
                 json.encodeToString(runBlocking { snapshots.find(request) })
             }
             "keyboard" -> json.encodeToString(withWindows { ImeKeyboard.scan(it) })
             "pinpad" -> json.encodeToString(withWindows { PinPad.keys(it) })
             "contentBounds" -> {
-                val call = json.decodeFromString(PackageCall.serializer(), body)
+                val call = json.decodeFromString(serializer<PackageCall>(), body)
                 json.encodeToString(withWindows { ContentFrame.find(it, call.packageName) })
             }
             "windowTitle" -> {
-                val call = json.decodeFromString(TitleCall.serializer(), body)
+                val call = json.decodeFromString(serializer<TitleCall>(), body)
                 val found = withWindows { windows ->
                     windows.any { it.title?.contains(call.text, ignoreCase = true) == true }
                 }
@@ -154,13 +155,13 @@ internal class TreeHost(private val client: () -> ITreeClient?) {
     private fun write(op: String, body: String): String =
         when (op) {
             "act" -> {
-                val call = json.decodeFromString(ActCall.serializer(), body)
+                val call = json.decodeFromString(serializer<ActCall>(), body)
                 val result = nodes.withNode(call.ref) { semantic(it, call.action, call.text) }
                 snapshots.invalidate()
                 json.encodeToString(result)
             }
             "touchTarget" -> {
-                val call = json.decodeFromString(TouchCall.serializer(), body)
+                val call = json.decodeFromString(serializer<TouchCall>(), body)
                 val rect = runBlocking {
                     nodes.withNode(call.ref) { node ->
                         targeting.touchTarget(node, session.windows(), call.force)
@@ -169,15 +170,15 @@ internal class TreeHost(private val client: () -> ITreeClient?) {
                 json.encodeToString(rect)
             }
             "global" -> {
-                val call = json.decodeFromString(GlobalCall.serializer(), body)
+                val call = json.decodeFromString(serializer<GlobalCall>(), body)
                 json.encodeToString(ActionResult(ok = session.performGlobalAction(call.action)))
             }
             "setText" -> {
-                val call = json.decodeFromString(SetTextCall.serializer(), body)
+                val call = json.decodeFromString(serializer<SetTextCall>(), body)
                 json.encodeToString(setText(call))
             }
             "focus" -> {
-                val call = json.decodeFromString(FocusCall.serializer(), body)
+                val call = json.decodeFromString(serializer<FocusCall>(), body)
                 json.encodeToString(focus(call.selector))
             }
             "selectFocused" -> json.encodeToString(selectFocused())
