@@ -276,6 +276,8 @@ private object FakeBrowser : BrowserService {
     override suspend fun navigate(id: String, url: String) =
         BrowserTarget(id = id, type = "page", url = url, socket = "s")
 
+    override suspend fun closeTab(id: String) = acted()
+
     override suspend fun snapshot(id: String) = BrowserSnapshot(id = id, compact = "page")
 
     override suspend fun tap(id: String, request: BrowserTapRequest) = acted()

@@ -155,6 +155,7 @@ Target ids look like `chrome_devtools_remote~<pageId>`. Chrome must publish DevT
 | `GET` | `/v1/browser/targets` | browser | Tabs and debuggable WebViews |
 | `POST` | `/v1/browser/tabs` | browser | Open tab (`OpenTabRequest`) |
 | `POST` | `/v1/browser/targets/{id}/navigate` | browser | `NavigateRequest` |
+| `POST` | `/v1/browser/targets/{id}/close` | browser | Close the tab without bringing it forward → `ActionResult` |
 | `GET` | `/v1/browser/targets/{id}/snapshot` | browser | Compact AX outline → `BrowserSnapshot` |
 | `POST` | `/v1/browser/targets/{id}/tap` | browser | Ref or CSS. `input` `touch` (default) or `cdp` (`BrowserTapRequest`) |
 | `POST` | `/v1/browser/targets/{id}/swipe` | browser | CSS pixels or a direction. `input` `touch` or `cdp` (`BrowserSwipeRequest`) |
@@ -213,7 +214,7 @@ For stdio hosts (Cursor, etc.), run `phoneapi mcp` (with the helper up). It inst
 | `open_intent` | control | Start an intent (needs helper) |
 | `device_wake` / `device_unlock` / `device_lock` | control | Power / keyguard |
 | `device_orientation` | control | Auto-rotate, or lock the screen to the current or a named rotation |
-| `browser_targets` / `browser_open` / `browser_navigate` | browser | Tab list and navigation |
+| `browser_targets` / `browser_open` / `browser_navigate` / `browser_close` | browser | Tab list, navigation, and closing a tab |
 | `browser_snapshot` / `browser_tap` / `browser_swipe` / `browser_gesture` | browser | AX outline and pointer input. `input` `touch` (default) or `cdp`. `cdp` never wakes the screen |
 | `browser_key` / `browser_text` | browser | Key and text. `cdp` stays on a background tab; device keys such as HOME need `touch` |
 | `browser_eval` / `browser_console` | browser | JS and logs |

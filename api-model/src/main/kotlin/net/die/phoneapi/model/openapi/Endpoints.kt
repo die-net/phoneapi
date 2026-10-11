@@ -289,6 +289,13 @@ public val phoneApiEndpoints: List<ApiEndpoint> =
             serializer<BrowserTarget>(),
         ),
         endpoint(
+            ApiMethod.POST,
+            "/v1/browser/targets/{id}/close",
+            Scope.BROWSER,
+            "Close a browser tab without bringing it forward.",
+            response = serializer<ActionResult>(),
+        ),
+        endpoint(
             ApiMethod.GET,
             "/v1/browser/targets/{id}/snapshot",
             Scope.BROWSER,
