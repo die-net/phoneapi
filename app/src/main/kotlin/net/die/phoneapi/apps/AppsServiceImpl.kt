@@ -87,10 +87,8 @@ class AppsServiceImpl(
         val woke = prepare(true)
         val started = parseAmStart(shell.exec(amStartArgs(request), AM_START_TIMEOUT_MS))
         started.failure?.let { throw intentFailed(request, it, started.message.orEmpty()) }
-        val packageName =
-            request.packageName ?: component?.packageName ?: started.activityPackage
-        val missing =
-            packageName?.takeIf { !started.chooser && !awaitForeground(it) }
+        val packageName = request.packageName ?: component?.packageName ?: started.activityPackage
+        val missing = packageName?.takeIf { !started.chooser && !awaitForeground(it) }
         invalidateSnapshots()
         return ActionResult(
             ok = !started.chooser && missing == null,
@@ -121,7 +119,11 @@ class AppsServiceImpl(
             AmFailure.DENIED ->
                 ApiException(403, "forbidden", "Android refused ${describe(request)}: $message")
             AmFailure.OTHER ->
-                ApiException(409, "intent_failed", "am start failed for ${describe(request)}: $message")
+                ApiException(
+                    409,
+                    "intent_failed",
+                    "am start failed for ${describe(request)}: $message",
+                )
         }
 
     private suspend fun manage(
