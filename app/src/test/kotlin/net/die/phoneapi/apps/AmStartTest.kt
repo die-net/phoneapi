@@ -46,7 +46,8 @@ class AmStartTest {
 
     @Test
     fun `leaves out what was not given`() {
-        val request = IntentRequest(action = "android.intent.action.MAIN", component = "com.x/.Main")
+        val request =
+            IntentRequest(action = "android.intent.action.MAIN", component = "com.x/.Main")
         assertEquals(
             listOf("am", "start", "-W", "-a", "android.intent.action.MAIN", "-n", "com.x/.Main"),
             amStartArgs(request),
