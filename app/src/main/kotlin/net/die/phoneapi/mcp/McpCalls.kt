@@ -217,6 +217,13 @@ internal suspend fun browserNavigate(
     jsonText(services.browser.navigate(args.target, args.url))
 }
 
+internal suspend fun browserClose(
+    services: ServerServices,
+    request: CallToolRequest,
+): CallToolResult = runTool {
+    jsonText(services.browser.closeTab(request.args<TargetArgs>().target))
+}
+
 internal suspend fun browserSnapshot(
     services: ServerServices,
     request: CallToolRequest,

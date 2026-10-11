@@ -194,6 +194,17 @@ internal class BrowserServiceImpl(
         return BrowserTarget(id = id, type = "page", url = pageUrl, socket = socket)
     }
 
+    override suspend fun closeTab(id: String): ActionResult {
+        val (socket, chromeId) = parseBrowserTargetId(id)
+        val closed =
+            useCdp(socket, "/devtools/browser") { cdp ->
+                cdp.call("Target.closeTarget", buildJsonObject { put("targetId", chromeId) })
+            }
+        axTrees.remove(id)
+        val ok = closed.decodeCdp<ClosedTarget>()?.success != false
+        return ActionResult(ok = ok, backend = "cdp", seq = sequence())
+    }
+
     override suspend fun tap(id: String, request: BrowserTapRequest): ActionResult {
         lateinit var wanted: TapTarget
         return act(id, request.autoWake, request.input, before = { wanted = tapTarget(request) }) {
@@ -707,6 +718,8 @@ internal class BrowserServiceImpl(
     )
 
     @Serializable private data class CreatedTarget(val targetId: String? = null)
+
+    @Serializable private data class ClosedTarget(val success: Boolean? = null)
 
     @Serializable private data class NavigateResult(val errorText: String? = null)
 

@@ -221,6 +221,18 @@ class BrowserServiceTest {
     }
 
     @Test
+    fun `closes a tab`() {
+        val service =
+            service(
+                switched() + serverTextFrame("""{"id":1,"result":{"success":true}}"""),
+                sockets = CHROME,
+            )
+        val result = runBlocking { service.closeTab("chrome_devtools_remote~abc") }
+        assertTrue(result.ok)
+        assertEquals("cdp", result.backend)
+    }
+
+    @Test
     fun `taps a css selector`() {
         val frames =
             switched() +

@@ -99,6 +99,7 @@ scripts/phoneapi-dev papi POST /v1/browser/targets/TARGET/tap '{"selector":"a","
 scripts/phoneapi-dev papi POST /v1/browser/targets/TARGET/swipe '{"direction":"up","input":"cdp"}'
 scripts/phoneapi-dev papi POST /v1/browser/targets/TARGET/text '{"text":"hello","input":"cdp"}'
 scripts/phoneapi-dev papi POST /v1/browser/targets/TARGET/evaluate '{"expression":"document.title"}'
+scripts/phoneapi-dev papi POST /v1/browser/targets/TARGET/close
 ```
 
 Full route reference: [api.md](api.md).

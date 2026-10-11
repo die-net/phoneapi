@@ -113,6 +113,9 @@ interface BrowserService {
 
     suspend fun navigate(id: String, url: String): BrowserTarget
 
+    /** Closes a tab over DevTools, without bringing it forward. */
+    suspend fun closeTab(id: String): ActionResult
+
     suspend fun snapshot(id: String): BrowserSnapshot
 
     suspend fun tap(id: String, request: BrowserTapRequest): ActionResult

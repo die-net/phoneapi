@@ -42,6 +42,9 @@ fun Route.browserRoutes(services: ServerServices) {
                 services.browser.navigate(call.targetId(), call.receive<NavigateRequest>().url)
             )
         }
+        post("/v1/browser/targets/{id}/close") {
+            call.respond(services.browser.closeTab(call.targetId()))
+        }
         get("/v1/browser/targets/{id}/snapshot") {
             call.respond(services.browser.snapshot(call.targetId()))
         }

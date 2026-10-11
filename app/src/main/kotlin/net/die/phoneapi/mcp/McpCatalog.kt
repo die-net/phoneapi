@@ -290,6 +290,16 @@ private val MCP_TOOLS: List<McpTool> =
             call = { graph, _, request -> browserNavigate(graph, request) },
         ),
         McpTool(
+            name = "browser_close",
+            description =
+                "Close a tab by target id, in the background. Works after a redirect, where window.close() does not.",
+            scope = Scope.BROWSER,
+            available = Capabilities::browserCdp,
+            arguments = serializer<TargetArgs>(),
+            annotations = changes,
+            call = { graph, _, request -> browserClose(graph, request) },
+        ),
+        McpTool(
             name = "browser_snapshot",
             description = "Compact outline of a browser target.",
             scope = Scope.BROWSER,
