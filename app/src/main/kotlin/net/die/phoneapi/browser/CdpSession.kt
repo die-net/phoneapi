@@ -39,6 +39,8 @@ internal class CdpSession(
     private val pending = HashMap<Int, CompletableDeferred<JsonObject>>()
     private val early = HashMap<Int, Result<JsonObject>>()
     private val gate = Any()
+    // Set once the reader stops, so a later command fails instead of waiting for its timeout.
+    private var closedBy: IOException? = null
     private val nextId = AtomicInteger(0)
     private val eventsFlow =
         MutableSharedFlow<CdpEvent>(
@@ -88,6 +90,7 @@ internal class CdpSession(
         val ready =
             synchronized(gate) {
                 early.remove(id)
+                    ?: closedBy?.let { Result.failure(IOException(it.message, it)) }
                     ?: run {
                         pending[id] = deferred
                         null
@@ -151,6 +154,7 @@ internal class CdpSession(
     private fun failAll(error: IOException) {
         val waiting =
             synchronized(gate) {
+                closedBy = error
                 val values = pending.values.toList()
                 pending.clear()
                 values

@@ -32,7 +32,10 @@ public enum class BrowserInput {
 }
 
 public const val BROWSER_INPUT_DOC: String =
-    "touch brings the tab forward and uses a hardware event. cdp sends it to that target, including a background tab. Defaults to touch."
+    "touch brings the tab to the front and uses the screen. cdp sends it to that target, including a background tab, without the screen. Defaults to touch."
+
+public const val BROWSER_WAKE_DOC: String =
+    "Turn the screen on first when input is touch. input cdp never wakes it. Defaults to true."
 
 /**
  * Tap a browser target. Pass a snapshot [ref] (the id in square brackets) or a CSS [selector], not
@@ -46,7 +49,7 @@ public data class BrowserTapRequest(
         "Jitter the point, timing, and finger contact. Defaults to true. A CDP tap matches a hardware tap."
     )
     val humanize: Boolean = true,
-    val autoWake: Boolean = true,
+    @Doc(BROWSER_WAKE_DOC) val autoWake: Boolean = true,
     @Doc(BROWSER_INPUT_DOC) val input: BrowserInput = BrowserInput.TOUCH,
 )
 
@@ -73,7 +76,7 @@ public data class BrowserSwipeRequest(
         "Jitter the path, timing, and finger contact. Defaults to true. A CDP swipe matches a hardware swipe."
     )
     val humanize: Boolean = true,
-    val autoWake: Boolean = true,
+    @Doc(BROWSER_WAKE_DOC) val autoWake: Boolean = true,
     @Doc(BROWSER_INPUT_DOC) val input: BrowserInput = BrowserInput.TOUCH,
 )
 
@@ -88,7 +91,7 @@ public data class BrowserGestureRequest(
         "Jitter the path and vary the finger contact. Defaults to true. A CDP gesture matches a hardware gesture."
     )
     val humanize: Boolean = true,
-    val autoWake: Boolean = true,
+    @Doc(BROWSER_WAKE_DOC) val autoWake: Boolean = true,
     @Doc(BROWSER_INPUT_DOC) val input: BrowserInput = BrowserInput.TOUCH,
 )
 
@@ -98,7 +101,7 @@ public data class BrowserKeyRequest(
     val key: String,
     val longPress: Boolean = false,
     val metaState: Int = 0,
-    val autoWake: Boolean = true,
+    @Doc(BROWSER_WAKE_DOC) val autoWake: Boolean = true,
     @Doc(BROWSER_INPUT_DOC) val input: BrowserInput = BrowserInput.TOUCH,
 )
 
@@ -117,7 +120,7 @@ public data class BrowserTextRequest(
     @Doc("Press Enter afterwards.") val submit: Boolean = false,
     val minDelayMs: Long = 40,
     val maxDelayMs: Long = 140,
-    val autoWake: Boolean = true,
+    @Doc(BROWSER_WAKE_DOC) val autoWake: Boolean = true,
     @Doc(BROWSER_INPUT_DOC) val input: BrowserInput = BrowserInput.TOUCH,
 )
 

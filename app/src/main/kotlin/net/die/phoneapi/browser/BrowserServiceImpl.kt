@@ -184,7 +184,7 @@ internal class BrowserServiceImpl(
         val pageUrl = webUrl(url)
         val (socket, chromeId) = parseBrowserTargetId(id)
         axTrees.remove(id)
-        usePage(socket, chromeId) { cdp ->
+        usePage(socket, chromeId, repeatable = true) { cdp ->
             val error =
                 cdp.call("Page.navigate", buildJsonObject { put("url", pageUrl) })
                     .decodeCdp<NavigateResult>()
@@ -255,7 +255,8 @@ internal class BrowserServiceImpl(
         before: () -> Unit = {},
         block: suspend (CdpSession, String?) -> ActionResult,
     ): ActionResult {
-        val woke = prepare(autoWake)
+        // A cdp event reaches the tab with the screen off, so only touch input wakes it.
+        val woke = prepare(autoWake && input == BrowserInput.TOUCH)
         try {
             before()
             val (socket, chromeId) = parseBrowserTargetId(id)
@@ -295,7 +296,7 @@ internal class BrowserServiceImpl(
 
     override suspend fun snapshot(id: String): BrowserSnapshot {
         val (socket, chromeId) = parseBrowserTargetId(id)
-        return usePage(socket, chromeId) { cdp ->
+        return usePage(socket, chromeId, repeatable = true) { cdp ->
             val loaded = cdp.call("Page.getFrameTree").decodeCdp<FrameTreeResult>()
             val url = loaded?.frameTree?.frame?.url
             cdp.call("Accessibility.enable")
@@ -349,17 +350,27 @@ internal class BrowserServiceImpl(
             )
         }
 
+    /**
+     * Runs [block] on a page, retrying a server error. Once [block] has started, only a
+     * [repeatable] block is retried, so a tap, text, or script never runs twice.
+     */
     private suspend fun <T> usePage(
         socket: String,
         chromeId: String,
+        repeatable: Boolean = false,
         block: suspend (CdpSession) -> T,
     ): T {
         var last: ApiException? = null
         repeat(PAGE_ATTEMPTS) { attempt ->
+            var started = false
             try {
-                return useCdp(socket, "/devtools/page/$chromeId", block)
+                return useCdp(socket, "/devtools/page/$chromeId") { cdp ->
+                    started = true
+                    block(cdp)
+                }
             } catch (e: ApiException) {
                 if (e.status < HTTP_SERVER_ERROR || e.error == "helper_unavailable") throw e
+                if (started && !repeatable) throw e
                 last = e
                 if (attempt < PAGE_ATTEMPTS - 1) delay(PAGE_RETRY_MS)
             }
