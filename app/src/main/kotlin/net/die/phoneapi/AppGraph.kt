@@ -18,6 +18,7 @@ import net.die.phoneapi.browser.DevtoolsSocket
 import net.die.phoneapi.browser.HelperCdpPipes
 import net.die.phoneapi.browser.USB_DEVTOOLS_SOCKET
 import net.die.phoneapi.browser.UsbDevtools
+import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.core.AppsService
 import net.die.phoneapi.core.BrowserService
 import net.die.phoneapi.core.DeviceInfoProvider
@@ -44,6 +45,7 @@ import net.die.phoneapi.input.TouchInput
 import net.die.phoneapi.input.TouchOutcome
 import net.die.phoneapi.model.ActionResult
 import net.die.phoneapi.model.HelperStatus
+import net.die.phoneapi.model.ScreenState
 import net.die.phoneapi.power.PinStore
 import net.die.phoneapi.power.PowerServiceImpl
 import net.die.phoneapi.server.ApiServer
@@ -240,6 +242,22 @@ class AppGraph(
             message = if (outcome.ok) null else "The system cancelled the gesture",
         )
 
+    /**
+     * Screen on, keyguard down, and [pkg] has a window with content showing. Asks the helper's
+     * window list rather than foregroundPackage, which only updates while UiAutomation is up.
+     */
+    private fun appOnScreen(pkg: String): Boolean {
+        val now = state.refresh()
+        if (now.screen != ScreenState.ON || now.keyguard.locked) return false
+        return try {
+            tree.contentBounds(pkg)
+            true
+        } catch (e: ApiException) {
+            if (e.error != "content_unavailable") throw e
+            false
+        }
+    }
+
     @Suppress("MissingUseCall")
     private fun browserService(): BrowserService =
         BrowserServiceImpl(
@@ -272,6 +290,7 @@ class AppGraph(
                     )
                 )
             },
+            onScreen = { pkg -> appOnScreen(pkg) },
             devtoolsGap = DevtoolsPreconditions(context)::explain,
             refreshHz = { deviceInfo.display().refreshRate },
             touchscreen = { touchBackend.touchscreen() },

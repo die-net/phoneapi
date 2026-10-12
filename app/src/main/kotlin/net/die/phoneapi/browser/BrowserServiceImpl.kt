@@ -89,6 +89,7 @@ internal class BrowserServiceImpl(
     private val sequence: () -> Long = { 0L },
     private val invalidateSnapshots: () -> Unit = {},
     private val showPackage: suspend (String) -> Unit = {},
+    private val onScreen: suspend (String) -> Boolean = { true },
     private val devtoolsGap: (BrowserGap) -> String = { gap ->
         browserGapMessage(gap, chromeInstalled = true, usbDebugging = true)
     },
@@ -207,24 +208,36 @@ internal class BrowserServiceImpl(
 
     override suspend fun tap(id: String, request: BrowserTapRequest): ActionResult {
         lateinit var wanted: TapTarget
-        return act(id, request.autoWake, request.input, before = { wanted = tapTarget(request) }) {
-            cdp,
-            pkg ->
+        return act(
+            id,
+            request.autoWake,
+            request.input,
+            pointer = true,
+            before = { wanted = tapTarget(request) },
+        ) { cdp, pkg ->
             pageInput.tap(cdp, id, wanted, pkg, request)
         }
     }
 
     override suspend fun swipe(id: String, request: BrowserSwipeRequest): ActionResult =
-        act(id, request.autoWake, request.input, before = { pageInput.checkSwipe(request) }) {
-            cdp,
-            pkg ->
+        act(
+            id,
+            request.autoWake,
+            request.input,
+            pointer = true,
+            before = { pageInput.checkSwipe(request) },
+        ) { cdp, pkg ->
             pageInput.swipe(cdp, id, pkg, request)
         }
 
     override suspend fun gesture(id: String, request: BrowserGestureRequest): ActionResult =
-        act(id, request.autoWake, request.input, before = { pageInput.checkGesture(request) }) {
-            cdp,
-            pkg ->
+        act(
+            id,
+            request.autoWake,
+            request.input,
+            pointer = true,
+            before = { pageInput.checkGesture(request) },
+        ) { cdp, pkg ->
             pageInput.gesture(cdp, pkg, request)
         }
 
@@ -263,6 +276,7 @@ internal class BrowserServiceImpl(
         id: String,
         autoWake: Boolean,
         input: BrowserInput,
+        pointer: Boolean = false,
         before: () -> Unit = {},
         block: suspend (CdpSession, String?) -> ActionResult,
     ): ActionResult {
@@ -272,11 +286,12 @@ internal class BrowserServiceImpl(
             before()
             val (socket, chromeId) = parseBrowserTargetId(id)
             val pkg =
-                if (input == BrowserInput.TOUCH) {
-                    browserPackage(socketList().firstOrNull { it.name == socket }, socket)
-                } else {
+                if (input == BrowserInput.CDP_MOUSE) {
                     null
+                } else {
+                    browserPackage(socketList().firstOrNull { it.name == socket }, socket)
                 }
+            if (pointer && input == BrowserInput.CDP) requireOnScreen(pkg)
             val result = usePage(socket, chromeId) { cdp -> block(cdp, pkg) }
             return result.copy(woke = woke, seq = sequence())
         } finally {
@@ -609,6 +624,20 @@ internal class BrowserServiceImpl(
         }
     }
 
+    /**
+     * Chrome holds a touch for a hidden tab and plays it once Chrome shows, so a cdp touch is
+     * refused up front rather than left to land later.
+     */
+    private suspend fun requireOnScreen(pkg: String?) {
+        if (pkg == null || onScreen(pkg)) return
+        throw ApiException(
+            409,
+            "not_visible",
+            "$pkg is not on screen, and Chrome only takes cdp touch input while it is. " +
+                "Use input touch, input cdp-mouse for a tap, or browser_eval.",
+        )
+    }
+
     private fun browserPackage(socket: HelperSocket?, name: String): String? =
         socket?.packageName ?: if (name == CHROME_SOCKET) "com.android.chrome" else null
 
@@ -623,28 +652,7 @@ internal class BrowserServiceImpl(
     private suspend fun <T> useSocket(
         name: String,
         block: suspend (InputStream, OutputStream) -> T,
-    ): T =
-        withContext(io) {
-            open(name).use { socket ->
-                try {
-                    block(socket.input, socket.output)
-                } catch (e: SocketTimeoutException) {
-                    throw ApiException(
-                        503,
-                        "cdp_timeout",
-                        e.message ?: "DevTools did not answer in time",
-                        cause = e,
-                    )
-                } catch (e: IOException) {
-                    throw ApiException(
-                        502,
-                        "cdp_error",
-                        e.message?.takeIf { it.isNotBlank() } ?: DEVTOOLS_CLOSED,
-                        cause = e,
-                    )
-                }
-            }
-        }
+    ): T = withContext(io) { open(name).use { socket -> socket.withStreams(block) } }
 
     private suspend fun socketList(): List<HelperSocket> =
         withContext(io) {

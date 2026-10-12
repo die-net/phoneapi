@@ -24,7 +24,8 @@ import net.die.phoneapi.model.TimedPoint
 
 /**
  * Pointer, key, and text for one page. `touch` is a hardware event after the tab is in front. `cdp`
- * stays on that target, including a background tab.
+ * stays on that target, including a background tab, but Chrome only takes its touch events while
+ * Chrome is on screen. `cdp-mouse` taps with a mouse click, which also reaches a hidden Chrome.
  */
 internal class PageInput(
     private val touchAt: suspend (Rect, Boolean) -> ActionResult,
@@ -51,9 +52,11 @@ internal class PageInput(
         when (request.input) {
             BrowserInput.TOUCH -> touchTap(cdp, id, wanted, pkg, request.humanize)
             BrowserInput.CDP -> cdpTap(cdp, id, wanted, request.humanize)
+            BrowserInput.CDP_MOUSE -> mouseTap(cdp, id, wanted, request.humanize)
         }
 
     fun checkSwipe(request: BrowserSwipeRequest) {
+        if (request.input == BrowserInput.CDP_MOUSE) throw mouseOnlyTaps("swipe")
         if (request.durationMs !in MIN_SWIPE_MS..MAX_SWIPE_MS) {
             throw ApiException.badRequest("durationMs must be $MIN_SWIPE_MS..$MAX_SWIPE_MS")
         }
@@ -97,6 +100,7 @@ internal class PageInput(
                     spec,
                 )
             }
+            BrowserInput.CDP_MOUSE -> throw mouseOnlyTaps("swipe")
             BrowserInput.CDP -> {
                 val metrics = cdp.call("Page.getLayoutMetrics")
                 val ends = swipeEnds(cdp, id, request, metrics)
@@ -115,6 +119,7 @@ internal class PageInput(
     }
 
     fun checkGesture(request: BrowserGestureRequest) {
+        if (request.input == BrowserInput.CDP_MOUSE) throw mouseOnlyTaps("gesture")
         val pointers = request.pointers
         if (pointers.isEmpty() || pointers.any { it.isEmpty() }) {
             throw ApiException.badRequest("Each pointer needs at least one point")
@@ -146,6 +151,7 @@ internal class PageInput(
                     }
                 gestureAt(mapped, request.humanize)
             }
+            BrowserInput.CDP_MOUSE -> throw mouseOnlyTaps("gesture")
             BrowserInput.CDP -> {
                 val metrics = cdp.call("Page.getLayoutMetrics")
                 val human = cdpHumanGesture(request.pointers, metrics, request.humanize, paths)
@@ -156,7 +162,11 @@ internal class PageInput(
 
     /** Resolves a CDP key before the socket opens. Device keys stay on `input=touch`. */
     fun prepareKey(request: BrowserKeyRequest): DomKey? =
-        if (request.input == BrowserInput.CDP) domKey(request.key, request.metaState) else null
+        when (request.input) {
+            BrowserInput.TOUCH -> null
+            BrowserInput.CDP -> domKey(request.key, request.metaState)
+            BrowserInput.CDP_MOUSE -> throw mouseOnlyTaps("key")
+        }
 
     suspend fun key(cdp: CdpSession, request: BrowserKeyRequest, pageKey: DomKey?): ActionResult =
         when (request.input) {
@@ -180,9 +190,11 @@ internal class PageInput(
                 )
                 ActionResult(ok = true, backend = "cdp")
             }
+            BrowserInput.CDP_MOUSE -> throw mouseOnlyTaps("key")
         }
 
     fun prepareText(request: BrowserTextRequest): TapTarget? {
+        if (request.input == BrowserInput.CDP_MOUSE) throw mouseOnlyTaps("text")
         checkText(request)
         return target(request.ref, request.selector)
     }
@@ -213,6 +225,7 @@ internal class PageInput(
                 dispatchInsertText(cdp, request.text, request.clear, request.submit)
                 ActionResult(ok = true, backend = "cdp")
             }
+            BrowserInput.CDP_MOUSE -> throw mouseOnlyTaps("text")
         }
     }
 
@@ -248,6 +261,29 @@ internal class PageInput(
         val down = path.first()
         return ActionResult(ok = true, backend = "cdp", points = listOf(Point(down.x, down.y)))
     }
+
+    private suspend fun mouseTap(
+        cdp: CdpSession,
+        id: String,
+        wanted: TapTarget,
+        humanize: Boolean,
+    ): ActionResult {
+        val boxes = quads(cdp, id, wanted)
+        val path = cdpTapPath(boxes, cdp.call("Page.getLayoutMetrics"), humanize, paths)
+        dispatchMouseClick(cdp, path)
+        val down = path.first()
+        return ActionResult(
+            ok = true,
+            backend = "cdp-mouse",
+            points = listOf(Point(down.x, down.y)),
+        )
+    }
+
+    private fun mouseOnlyTaps(what: String): ApiException =
+        ApiException.badRequest(
+            "input cdp-mouse only taps. For a $what, use input cdp with Chrome on screen, " +
+                "input touch, or browser_eval."
+        )
 
     private suspend fun axes(): TouchscreenInfo =
         try {
@@ -301,7 +337,8 @@ internal class PageInput(
                     throw ApiException(409, "gesture_cancelled", "The system cancelled the touch")
                 }
             }
-            BrowserInput.CDP -> cdp.call("DOM.focus", focusNode(cdp, id, focus))
+            BrowserInput.CDP,
+            BrowserInput.CDP_MOUSE -> cdp.call("DOM.focus", focusNode(cdp, id, focus))
         }
     }
 

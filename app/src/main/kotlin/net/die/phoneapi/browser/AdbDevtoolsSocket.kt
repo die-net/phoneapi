@@ -24,11 +24,13 @@ internal class AdbDevtoolsSocket(
     dispatcher: CoroutineDispatcher,
 ) : DevtoolsSocket {
     private val closed = AtomicBoolean(false)
+    private val expired = AtomicBoolean(false)
     private val watchdog = CoroutineScope(SupervisorJob() + dispatcher)
     private val watchdogJob: Job? =
         if (readTimeoutMs > 0) {
             watchdog.launch {
                 delay(readTimeoutMs)
+                expired.set(true)
                 closePipe()
             }
         } else {
@@ -37,6 +39,8 @@ internal class AdbDevtoolsSocket(
 
     override val input: InputStream = inputStream
     override val output: OutputStream = outputStream
+    override val timedOut: Boolean
+        get() = expired.get()
 
     override fun close() {
         watchdogJob?.cancel()

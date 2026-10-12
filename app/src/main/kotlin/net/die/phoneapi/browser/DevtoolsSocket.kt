@@ -8,4 +8,8 @@ import java.io.OutputStream
 internal interface DevtoolsSocket : Closeable {
     val input: InputStream
     val output: OutputStream
+
+    /** True once a read timeout, rather than the peer, closed the socket. */
+    val timedOut: Boolean
+        get() = false
 }
