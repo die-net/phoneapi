@@ -155,7 +155,7 @@ Target ids look like `chrome_devtools_remote~<pageId>`. Chrome must publish DevT
 | Method | Path | Scope | Summary |
 | --- | --- | --- | --- |
 | `GET` | `/v1/browser/targets` | browser | Tabs and debuggable WebViews |
-| `POST` | `/v1/browser/tabs` | browser | Open tab (`OpenTabRequest`) |
+| `POST` | `/v1/browser/tabs` | browser | Open tab (`OpenTabRequest`). `tookScreen` is true when Chrome was on screen and switched to it |
 | `POST` | `/v1/browser/targets/{id}/navigate` | browser | `NavigateRequest` |
 | `POST` | `/v1/browser/targets/{id}/close` | browser | Close the tab without bringing it forward → `ActionResult` |
 | `GET` | `/v1/browser/targets/{id}/snapshot` | browser | Compact AX outline → `BrowserSnapshot` |

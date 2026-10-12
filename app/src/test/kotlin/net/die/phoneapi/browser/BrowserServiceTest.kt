@@ -49,6 +49,19 @@ class BrowserServiceTest {
         val target = runBlocking { service.openTab("https://example.com/") }
         assertEquals("chrome_devtools_remote~abc", target.id)
         assertEquals("https://example.com/", target.url)
+        assertEquals(true, target.tookScreen)
+    }
+
+    @Test
+    fun `opens a tab behind`() {
+        val service =
+            service(
+                switched() + serverTextFrame("""{"id":1,"result":{"targetId":"abc"}}"""),
+                sockets = CHROME,
+                onScreen = { false },
+            )
+        val target = runBlocking { service.openTab("https://example.com/") }
+        assertEquals(false, target.tookScreen)
     }
 
     @Test

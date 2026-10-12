@@ -282,7 +282,7 @@ private val MCP_TOOLS: List<McpTool> =
         McpTool(
             name = "browser_open",
             description =
-                "Open a tab and return its target. With Chrome hidden, the tab opens in the background and the screen is untouched. With Chrome on screen, Chrome switches to the new tab. url must be http(s) or about:blank. A page that hands off to an installed app loads as a website in the tab. Follow with wait_for on browser.url and browser.settled.",
+                "Open a tab and return its target. With Chrome hidden, the tab opens in the background and the screen is untouched. With Chrome on screen, Chrome switches to the new tab, and the result has tookScreen true. url must be http(s) or about:blank. A page that hands off to an installed app loads as a website in the tab. Follow with wait_for on browser.url and browser.settled.",
             scope = Scope.BROWSER,
             available = Capabilities::browserCdp,
             arguments = serializer<UrlArgs>(),
