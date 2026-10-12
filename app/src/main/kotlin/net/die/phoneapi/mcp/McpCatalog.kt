@@ -84,7 +84,7 @@ private val MCP_TOOLS: List<McpTool> =
         McpTool(
             name = "device_info",
             description =
-                "Model, Android version, display, helper status, capabilities, and current state: screen, keyguard, keyboard, and foregroundPackage. Cheap. Use it to check which app is in front before and after an action.",
+                "Model, Android version, display, helper status, capabilities, and current state: screen, keyguard, keyboard, and foregroundPackage. Cheap. foregroundPackage only updates while the helper is watching the screen, as during wait_for or right after ui_snapshot, so it can be missing or stale. To know what is in front, take a ui_snapshot or wait_for a window condition.",
             scope = Scope.OBSERVE,
             available = always,
             arguments = serializer<EmptyArgs>(),
@@ -282,7 +282,7 @@ private val MCP_TOOLS: List<McpTool> =
         McpTool(
             name = "browser_open",
             description =
-                "Open a tab in the background and return its target. Does not take the screen. url must be http(s) or about:blank. A page that hands off to an installed app loads as a website in the tab. Follow with wait_for on browser.url and browser.settled.",
+                "Open a tab and return its target. With Chrome hidden, the tab opens in the background and the screen is untouched. With Chrome on screen, Chrome switches to the new tab. url must be http(s) or about:blank. A page that hands off to an installed app loads as a website in the tab. Follow with wait_for on browser.url and browser.settled.",
             scope = Scope.BROWSER,
             available = Capabilities::browserCdp,
             arguments = serializer<UrlArgs>(),
