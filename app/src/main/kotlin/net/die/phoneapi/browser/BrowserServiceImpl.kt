@@ -164,6 +164,9 @@ internal class BrowserServiceImpl(
                     "browser_unavailable",
                     devtoolsGap(BrowserGap.CHROME),
                 )
+        // Chrome on Android ignores createTarget's background flag and switches to a new tab
+        // while it is on screen, so say whether this call took the screen.
+        val tookScreen = browserPackage(chrome, chrome.name)?.let { onScreen(it) } == true
         val created =
             useCdp(chrome.name, "/devtools/browser") { cdp ->
                 cdp.call("Target.createTarget", buildJsonObject { put("url", pageUrl) })
@@ -178,6 +181,7 @@ internal class BrowserServiceImpl(
             socket = chrome.name,
             pid = chrome.pid,
             packageName = chrome.packageName,
+            tookScreen = tookScreen,
         )
     }
 
