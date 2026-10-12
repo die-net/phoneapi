@@ -40,6 +40,20 @@ internal suspend fun dispatchTouchPath(
     }
 }
 
+/**
+ * A left click with `Input.dispatchMouseEvent`: pressed at the path's first point, held for the
+ * path's duration, and released at its last point. Chrome delivers these to a hidden tab, where it
+ * holds touch events. There is no mouseMoved first: a hidden Chrome delivers it but never answers.
+ */
+internal suspend fun dispatchMouseClick(cdp: CdpSession, path: List<TimedPoint>) {
+    val down = path.first()
+    val up = path.last()
+    cdp.call("Input.dispatchMouseEvent", mouseEvent("mousePressed", down, pressed = true))
+    val hold = up.tMs - down.tMs
+    if (hold > 0) delay(hold)
+    cdp.call("Input.dispatchMouseEvent", mouseEvent("mouseReleased", up, pressed = false))
+}
+
 /** `Input.insertText`, with an optional select-all clear and Enter. */
 internal suspend fun dispatchInsertText(
     cdp: CdpSession,
@@ -140,6 +154,17 @@ private fun touchPoint(
         put("id", id)
     }
 }
+
+private fun mouseEvent(type: String, at: TimedPoint, pressed: Boolean): JsonObject =
+    buildJsonObject {
+        put("type", type)
+        put("x", at.x)
+        put("y", at.y)
+        put("button", "left")
+        put("buttons", if (pressed) 1 else 0)
+        put("clickCount", 1)
+        put("pointerType", "mouse")
+    }
 
 private fun keyEvent(type: String, key: DomKey, modifiers: Int, withText: Boolean): JsonObject =
     buildJsonObject {

@@ -543,6 +543,7 @@ class BrowserServiceTest {
         prepare: suspend (Boolean) -> Boolean = { false },
         sequence: () -> Long = { 0L },
         invalidate: () -> Unit = {},
+        onScreen: (String) -> Boolean = { true },
     ) =
         BrowserServiceImpl(
             io = Dispatchers.IO,
@@ -559,9 +560,13 @@ class BrowserServiceTest {
             prepare = prepare,
             sequence = sequence,
             invalidateSnapshots = invalidate,
+            onScreen = onScreen,
         )
 
-    private class ScriptedSocket(response: ByteArray) : DevtoolsSocket {
+    internal class ScriptedSocket(
+        response: ByteArray,
+        override val timedOut: Boolean = false,
+    ) : DevtoolsSocket {
         override val input: InputStream = ByteArrayInputStream(response)
         override val output: OutputStream = ByteArrayOutputStream()
 
@@ -640,7 +645,7 @@ class BrowserServiceTest {
     internal fun metrics(id: Int) =
         """{"id":$id,"result":{"cssVisualViewport":{"pageX":0,"pageY":0,"clientWidth":412.19049072265625,"clientHeight":783.2380981445312},"visualViewport":{"clientWidth":1082,"clientHeight":2056}}}"""
 
-    private fun quad(id: Int) =
+    internal fun quad(id: Int) =
         """{"id":$id,"result":{"quads":[[165.619049,453.68454,246.56548,453.68454,246.56548,479.27979,165.61905,479.27979]]}}"""
 
     internal companion object {

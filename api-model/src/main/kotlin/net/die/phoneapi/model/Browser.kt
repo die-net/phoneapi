@@ -27,15 +27,23 @@ public data class BrowserTarget(
 public enum class BrowserInput {
     /** Bring the tab forward and inject a hardware event. */
     @SerialName("touch") TOUCH,
-    /** Dispatch the input on that target. The tab can stay in the background. */
+    /**
+     * Touch events over DevTools, on that target. The tab can stay in the background, but Chrome
+     * holds touch input until it is on screen, so this needs Chrome in front with the screen on.
+     */
     @SerialName("cdp") CDP,
+    /**
+     * A mouse click over DevTools. Reaches a background tab with Chrome hidden and the screen off,
+     * but the page sees a mouse rather than a finger. Taps only.
+     */
+    @SerialName("cdp-mouse") CDP_MOUSE,
 }
 
 public const val BROWSER_INPUT_DOC: String =
-    "touch brings the tab to the front and uses the screen. cdp sends it to that target, including a background tab, without the screen. Defaults to touch."
+    "touch brings the tab to the front and uses the screen. cdp sends touch events to that target, even a background tab, but only while Chrome is on screen. cdp-mouse taps with a mouse click, which works with Chrome hidden and the screen off, but the page sees a mouse, not a finger. Defaults to touch."
 
 public const val BROWSER_WAKE_DOC: String =
-    "Turn the screen on first when input is touch. input cdp never wakes it. Defaults to true."
+    "Turn the screen on first when input is touch. cdp and cdp-mouse never wake it. Defaults to true."
 
 /**
  * Tap a browser target. Pass a snapshot [ref] (the id in square brackets) or a CSS [selector], not
