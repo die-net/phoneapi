@@ -1,0 +1,248 @@
+#!/usr/bin/env node
+// chrome-input-check checks the Chrome DevTools behavior that PhoneAPI's browser input relies on,
+// straight against Chrome on the attached phone, so a Chrome update that changes it shows up.
+// It opens its own tabs, closes them, and puts the screen and foreground app back afterwards.
+//
+// Usage: scripts/chrome-input-check [--hidden-only]
+//   --hidden-only  Skip the checks that wake the screen and bring Chrome to the front.
+// Needs adb and Node 22 or later. Exits 0 when Chrome behaves as expected, 1 when it does not,
+// and 2 when the run could not finish.
+
+import { execFileSync } from 'node:child_process';
+
+const ANSWER_MS = 3_000;
+const DEADLINE_MS = 120_000;
+const hiddenOnly = process.argv.includes('--hidden-only');
+
+// The behavior PhoneAPI was written against (Chrome 155, Android 11).
+const EXPECTED = [
+  ['touch while Chrome is hidden', 'no answer, not delivered'],
+  ['mouse click while Chrome is hidden', 'answered, delivered'],
+  ['mouseMoved while Chrome is hidden', 'no answer'],
+  ['mouse wheel while Chrome is hidden', 'no answer'],
+  ['Target.closeTarget', 'tab gone within 5s'],
+  ['held touch after its session closes', 'dropped'],
+  ['new tab while Chrome shows', 'Chrome switches to it'],
+  ['touch on the tab Chrome shows', 'answered, delivered'],
+  ['touch on a background tab while Chrome shows', 'no answer, not delivered'],
+  ['mouse click on a background tab while Chrome shows', 'answered, delivered'],
+];
+
+const SETUP = `
+  document.body.innerHTML = '<button id=b style="width:200px;height:120px;margin:40px">go</button>';
+  document.body.style.height = '5000px';
+  window.hits = [];
+  for (const t of ['touchstart', 'pointerdown', 'pointermove', 'click', 'wheel'])
+    document.addEventListener(t, (e) => hits.push(t), true);
+  'ready'`;
+const AT = { x: 140, y: 100 };
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function adb(...args) {
+  return execFileSync('adb', args, {
+    encoding: 'utf8',
+    timeout: 10_000,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  }).trim();
+}
+
+function phone() {
+  const power = adb('shell', 'dumpsys', 'power');
+  const activities = adb('shell', 'dumpsys', 'activity', 'activities');
+  return {
+    awake: !/mWakefulness=Asleep/.test(power),
+    resumed: (activities.match(/ResumedActivity: ActivityRecord\{\S+ \S+ (\S+)/) ?? [])[1] ?? '',
+  };
+}
+
+async function until(check, ms, what) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    if (await check()) return;
+    await sleep(250);
+  }
+  throw new Error(`Timed out waiting for ${what}`);
+}
+
+/** One DevTools WebSocket. call() resolves to the reply, or { timedOut: true } after ms. */
+async function connect(port, path) {
+  const ws = new WebSocket(`ws://127.0.0.1:${port}${path}`);
+  const waiting = new Map();
+  let id = 0;
+  ws.onmessage = (e) => {
+    const m = JSON.parse(e.data);
+    waiting.get(m.id)?.(m);
+    waiting.delete(m.id);
+  };
+  await Promise.race([
+    new Promise((resolve, reject) => {
+      ws.onopen = resolve;
+      ws.onerror = () => reject(new Error(`Could not open ${path}`));
+    }),
+    sleep(ANSWER_MS).then(() => Promise.reject(new Error(`Timed out opening ${path}`))),
+  ]);
+  return {
+    call(method, params = {}, ms = ANSWER_MS) {
+      const n = ++id;
+      ws.send(JSON.stringify({ id: n, method, params }));
+      return Promise.race([
+        new Promise((resolve) => waiting.set(n, resolve)),
+        sleep(ms).then(() => ({ timedOut: true })),
+      ]);
+    },
+    close: () => ws.close(),
+  };
+}
+
+const answered = (reply) => (reply.timedOut ? 'no answer' : reply.error ? 'error' : 'answered');
+
+async function main(port, observed) {
+  const json = async (path) =>
+    (await fetch(`http://127.0.0.1:${port}${path}`, { signal: AbortSignal.timeout(ANSWER_MS) })).json();
+  const version = await json('/json/version');
+  console.log(`${version.Browser} on Android ${adb('shell', 'getprop', 'ro.build.version.release')}`);
+  const browser = await connect(port, new URL(version.webSocketDebuggerUrl).pathname);
+  const opened = new Set();
+
+  async function newPage() {
+    const reply = await browser.call('Target.createTarget', { url: 'about:blank' });
+    if (!reply.result) throw new Error(`Target.createTarget: ${JSON.stringify(reply)}`);
+    const id = reply.result.targetId;
+    opened.add(id);
+    const page = await connect(port, `/devtools/page/${id}`);
+    await page.call('Runtime.evaluate', { expression: SETUP });
+    return { id, page };
+  }
+  const hits = async (page) =>
+    (await page.call('Runtime.evaluate', { expression: 'hits.join(" ")', returnByValue: true }))
+      .result?.result?.value ?? '';
+  const touch = (page) =>
+    page.call('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [AT] });
+  const mouse = (page, type, buttons) =>
+    page.call('Input.dispatchMouseEvent', { type, ...AT, button: 'left', buttons, clickCount: 1 });
+  const closeAll = async () => {
+    for (const id of opened) await browser.call('Target.closeTarget', { targetId: id });
+    opened.clear();
+  };
+
+  try {
+    adb('shell', 'input', 'keyevent', 'KEYCODE_SLEEP');
+    await until(() => !phone().awake, 5_000, 'the screen to turn off');
+
+    let { page, id } = await newPage();
+    const touched = answered(await touch(page));
+    observed.set(EXPECTED[0][0], `${touched}, ${(await hits(page)).includes('touchstart') ? 'delivered' : 'not delivered'}`);
+    page.close();
+
+    ({ page } = await newPage());
+    const pressed = answered(await mouse(page, 'mousePressed', 1));
+    const released = answered(await mouse(page, 'mouseReleased', 0));
+    const clicked = (await hits(page)).includes('click');
+    observed.set(EXPECTED[1][0], `${pressed === released ? pressed : `${pressed}/${released}`}, ${clicked ? 'delivered' : 'not delivered'}`);
+    observed.set(EXPECTED[2][0], answered(await page.call('Input.dispatchMouseEvent', { type: 'mouseMoved', ...AT })));
+    observed.set(EXPECTED[3][0], answered(await page.call('Input.dispatchMouseEvent', { type: 'mouseWheel', ...AT, deltaX: 0, deltaY: 300 })));
+    page.close();
+
+    ({ id } = await newPage());
+    await browser.call('Target.closeTarget', { targetId: id });
+    opened.delete(id);
+    let gone = true;
+    await until(async () => !(await json('/json/list')).some((t) => t.id === id), 5_000, 'the tab to close')
+      .catch(() => (gone = false));
+    observed.set(EXPECTED[4][0], gone ? 'tab gone within 5s' : 'still listed after 5s');
+    await closeAll();
+
+    if (hiddenOnly) return;
+
+    // Leave a touch held while Chrome is hidden, close its session, then show the tab.
+    ({ page, id } = await newPage());
+    await touch(page);
+    page.close();
+    adb('shell', 'input', 'keyevent', 'KEYCODE_WAKEUP');
+    await until(() => phone().awake, 5_000, 'the screen to turn on');
+    if (/isKeyguardShowing=true/.test(adb('shell', 'dumpsys', 'window'))) {
+      console.log('The keyguard is up, so the checks that need Chrome on screen are skipped.');
+      return;
+    }
+    adb('shell', 'monkey', '-p', 'com.android.chrome', '-c', 'android.intent.category.LAUNCHER', '1');
+    await until(() => phone().resumed.startsWith('com.android.chrome/'), 5_000, 'Chrome to come to the front');
+    await browser.call('Target.activateTarget', { targetId: id });
+    await sleep(1_500);
+    const again = await connect(port, `/devtools/page/${id}`);
+    observed.set(EXPECTED[5][0], (await hits(again)).includes('touchstart') ? 'played once shown' : 'dropped');
+    again.close();
+
+    // The newest tab is in front, so the first one is a background tab in a visible Chrome.
+    const first = await newPage();
+    const second = await newPage();
+    const firstState = await first.page.call('Runtime.evaluate', { expression: 'document.visibilityState', returnByValue: true });
+    observed.set(EXPECTED[6][0], firstState.result?.result?.value === 'hidden' ? 'Chrome switches to it' : 'stays behind');
+    for (const [check, { page }] of [[EXPECTED[7][0], second], [EXPECTED[8][0], first]]) {
+      const reply = answered(await touch(page));
+      await page.call('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      observed.set(check, `${reply}, ${(await hits(page)).includes('touchstart') ? 'delivered' : 'not delivered'}`);
+    }
+    // A held touch on the first tab must not count as the click below, so start a fresh session.
+    first.page.close();
+    const behind = await connect(port, `/devtools/page/${first.id}`);
+    await behind.call('Runtime.evaluate', { expression: 'hits.length = 0' });
+    const down = answered(await mouse(behind, 'mousePressed', 1));
+    const up = answered(await mouse(behind, 'mouseReleased', 0));
+    const landed = (await hits(behind)).includes('click');
+    observed.set(EXPECTED[9][0], `${down === up ? down : `${down}/${up}`}, ${landed ? 'delivered' : 'not delivered'}`);
+    behind.close();
+    second.page.close();
+  } finally {
+    await closeAll().catch(() => {});
+    browser.close();
+  }
+}
+
+if (typeof WebSocket === 'undefined') {
+  console.error('chrome-input-check needs Node 22 or later for its built-in WebSocket.');
+  process.exit(2);
+}
+
+const before = phone();
+const port = adb('forward', 'tcp:0', 'localabstract:chrome_devtools_remote');
+let restored = false;
+function restore() {
+  if (restored) return;
+  restored = true;
+  try {
+    const now = phone();
+    if (now.resumed !== before.resumed && !before.resumed.startsWith('com.android.chrome/')) {
+      adb('shell', 'input', 'keyevent', 'KEYCODE_HOME');
+    }
+    if (!before.awake && phone().awake) adb('shell', 'input', 'keyevent', 'KEYCODE_SLEEP');
+    if (before.awake && !phone().awake) adb('shell', 'input', 'keyevent', 'KEYCODE_WAKEUP');
+  } finally {
+    adb('forward', '--remove', `tcp:${port}`);
+  }
+}
+const deadline = setTimeout(() => {
+  console.error(`Gave up after ${DEADLINE_MS / 1000}s.`);
+  restore();
+  process.exit(2);
+}, DEADLINE_MS);
+
+const observed = new Map();
+let code = 0;
+try {
+  await main(port, observed);
+} catch (e) {
+  console.error(e.message);
+  code = 2;
+} finally {
+  clearTimeout(deadline);
+  restore();
+}
+
+for (const [check, expected] of EXPECTED) {
+  if (!observed.has(check)) continue;
+  const got = observed.get(check);
+  if (got !== expected && code === 0) code = 1;
+  console.log(`${got === expected ? 'ok  ' : 'DIFF'} ${check}: ${got}${got === expected ? '' : ` (expected ${expected})`}`);
+}
+process.exit(code);
