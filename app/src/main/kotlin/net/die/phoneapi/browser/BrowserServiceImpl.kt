@@ -89,7 +89,7 @@ internal class BrowserServiceImpl(
     private val sequence: () -> Long = { 0L },
     private val invalidateSnapshots: () -> Unit = {},
     private val showPackage: suspend (String) -> Unit = {},
-    private val onScreen: suspend (String) -> Boolean = { true },
+    private val inFront: suspend (String) -> Boolean = { true },
     private val devtoolsGap: (BrowserGap) -> String = { gap ->
         browserGapMessage(gap, chromeInstalled = true, usbDebugging = true)
     },
@@ -165,8 +165,8 @@ internal class BrowserServiceImpl(
                     devtoolsGap(BrowserGap.CHROME),
                 )
         // Chrome on Android ignores createTarget's background flag and switches to a new tab
-        // while it is on screen, so say whether this call took the screen.
-        val tookScreen = browserPackage(chrome, chrome.name)?.let { onScreen(it) } == true
+        // while it is in front, so say whether this call took the screen.
+        val tookScreen = browserPackage(chrome, chrome.name)?.let { inFront(it) } == true
         val created =
             useCdp(chrome.name, "/devtools/browser") { cdp ->
                 cdp.call("Target.createTarget", buildJsonObject { put("url", pageUrl) })
@@ -296,7 +296,11 @@ internal class BrowserServiceImpl(
                     browserPackage(socketList().firstOrNull { it.name == socket }, socket)
                 }
             if (pointer && input == BrowserInput.CDP) requireOnScreen(pkg)
-            val result = usePage(socket, chromeId) { cdp -> block(cdp, pkg) }
+            val result =
+                usePage(socket, chromeId) { cdp ->
+                    if (pointer && input == BrowserInput.CDP) requireShowing(cdp)
+                    block(cdp, pkg)
+                }
             return result.copy(woke = woke, seq = sequence())
         } finally {
             invalidateSnapshots()
@@ -522,56 +526,6 @@ internal class BrowserServiceImpl(
         return selector
     }
 
-    private suspend fun evaluateIn(
-        cdp: CdpSession,
-        expression: String,
-        awaitPromise: Boolean,
-    ): EvalResult {
-        val loaded = cdp.call("Page.getFrameTree").decodeCdp<FrameTreeResult>()
-        val frameId =
-            loaded?.frameTree?.frame?.id
-                ?: throw ApiException(502, "cdp_error", "Chrome did not return a frame")
-        val contextId =
-            cdp.call(
-                    "Page.createIsolatedWorld",
-                    buildJsonObject {
-                        put("frameId", frameId)
-                        put("worldName", ISOLATED_WORLD)
-                    },
-                )
-                .decodeCdp<WorldResult>()
-                ?.executionContextId
-                ?: throw ApiException(502, "cdp_error", "Chrome did not return an isolated world")
-        return evalResult(
-            cdp.call(
-                "Runtime.evaluate",
-                buildJsonObject {
-                    put("expression", expression)
-                    put("contextId", contextId)
-                    put("returnByValue", true)
-                    put("awaitPromise", awaitPromise)
-                },
-            )
-        )
-    }
-
-    private fun evalResult(payload: JsonObject): EvalResult {
-        val parsed = payload.decodeCdp<EvalPayload>() ?: return EvalResult()
-        val details = parsed.exceptionDetails
-        if (details != null) return EvalResult(exception = exceptionMessage(details))
-        val remote = parsed.result ?: return EvalResult()
-        return EvalResult(type = remote.type, value = remote.value)
-    }
-
-    private fun exceptionMessage(details: ExceptionText): String {
-        val description = details.exception?.description
-        val described = description?.lineSequence()?.firstOrNull()?.trim()
-        if (!described.isNullOrEmpty()) return described
-        val value = details.exception?.value
-        if (value is JsonPrimitive && value.isString) return value.content
-        return details.text ?: "exception"
-    }
-
     private suspend fun collectLogs(session: CdpSession, timeoutMs: Long): ConsoleResult {
         val entries = Collections.synchronizedList(mutableListOf<ConsoleEntry>())
         coroutineScope {
@@ -630,15 +584,31 @@ internal class BrowserServiceImpl(
 
     /**
      * Chrome holds a touch for a hidden tab and plays it once Chrome shows, so a cdp touch is
-     * refused up front rather than left to land later.
+     * refused up front rather than left to land later. [requireShowing] covers a background tab
+     * while Chrome is on screen.
      */
     private suspend fun requireOnScreen(pkg: String?) {
-        if (pkg == null || onScreen(pkg)) return
+        if (pkg == null || inFront(pkg)) return
         throw ApiException(
             409,
             "not_visible",
             "$pkg is not on screen, and Chrome only takes cdp touch input while it is. " +
                 "Use input touch, input cdp-mouse for a tap, or browser_eval.",
+        )
+    }
+
+    /**
+     * With Chrome on screen, only the tab it is showing takes touch. The others report hidden.
+     * While Chrome itself is hidden every tab reports visible, which [requireOnScreen] catches.
+     */
+    private suspend fun requireShowing(cdp: CdpSession) {
+        val state = evaluateIn(cdp, "document.visibilityState", awaitPromise = false).value
+        if ((state as? JsonPrimitive)?.contentOrNull == "visible") return
+        throw ApiException(
+            409,
+            "not_visible",
+            "This tab is not the one Chrome is showing, and Chrome only takes cdp touch input " +
+                "there. Use input touch, which brings the tab forward, or input cdp-mouse for a tap.",
         )
     }
 
@@ -741,29 +711,6 @@ internal class BrowserServiceImpl(
 
     @Serializable private data class QueryResult(val nodeId: Int = 0)
 
-    @Serializable private data class WorldResult(val executionContextId: Int? = null)
-
-    @Serializable
-    private data class EvalPayload(
-        val result: RemoteObject? = null,
-        val exceptionDetails: ExceptionText? = null,
-    )
-
-    @Serializable
-    private data class RemoteObject(val type: String? = null, val value: JsonElement? = null)
-
-    @Serializable
-    private data class ExceptionText(
-        val text: String? = null,
-        val exception: ExceptionObject? = null,
-    )
-
-    @Serializable
-    private data class ExceptionObject(
-        val description: String? = null,
-        val value: JsonElement? = null,
-    )
-
     @Serializable private data class QuadResult(val quads: List<JsonElement> = emptyList())
 
     @Serializable private data class LogAdded(val entry: LogLine? = null)
@@ -797,7 +744,6 @@ internal class BrowserServiceImpl(
         const val MAX_EXPRESSION = 20_000
         const val MAX_CONSOLE_MS = 5_000L
         const val TARGET_LIST_MS = MAX_CONSOLE_MS
-        const val ISOLATED_WORLD = "phoneapi"
         const val PAGE_ATTEMPTS = 4
         const val PAGE_RETRY_MS = 200L
         const val APPEAR_MS = 500L

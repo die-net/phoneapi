@@ -128,7 +128,7 @@ Authenticated errors are JSON:
 
 `autoWake` (default true) turns the screen on and leaves the keyguard up. Dismiss the keyguard with `POST /v1/device/unlock`. Browser input with `input` `cdp` or `cdp-mouse` ignores it and leaves the screen as it is.
 
-Browser pointer input has three `input` modes. `touch` brings the tab to the front and injects a hardware touch. `cdp` sends touch events over DevTools to that target, which can be a background tab, but Chrome only takes them while it is on screen, so `cdp` fails with `not_visible` otherwise. `cdp-mouse` taps with a DevTools mouse click, which reaches a tab with Chrome hidden and the screen off; the page sees a mouse rather than a finger. Keys and text with `cdp` work with Chrome hidden. All of these are trusted input. A click or scroll made from `evaluate` is not (`isTrusted` is false), which bot detection can see, and with Chrome hidden there is no trusted way to scroll: Chrome holds wheel and scroll input as it does touch.
+Browser pointer input has three `input` modes. `touch` brings the tab to the front and injects a hardware touch. `cdp` sends touch events over DevTools without bringing the tab forward, but Chrome only takes them on the tab it is showing, with Chrome on screen, so `cdp` fails with `not_visible` otherwise. `cdp-mouse` taps with a DevTools mouse click, which reaches a background tab even with Chrome hidden and the screen off; the page sees a mouse rather than a finger. Keys and text with `cdp` work with Chrome hidden. All of these are trusted input. A click or scroll made from `evaluate` is not (`isTrusted` is false), which bot detection can see, and with Chrome hidden there is no trusted way to scroll: Chrome holds wheel and scroll input as it does touch.
 
 `/viewer` does not post a finished swipe. It streams the canvas on `WS /v1/input/pointer` so the phone moves while the finger is still down.
 
@@ -243,7 +243,7 @@ When node ids are not stable, tool descriptions say so. Raw CDP, streams, and to
 | Swipe `direction` | `up`, `down`, `left`, `right` |
 | Screen `orientation` | `auto`, `lock`, `0`, `90`, `180`, `270`. `0` is the device's natural orientation. `display.autoRotate` reports the system setting; `display.rotation` is the current quarter-turn (`0`–`3`). An app can still force its own orientation. |
 | Text `mode` | `auto`, `keyboard`, `keyevent`, `setText` |
-| Browser `input` | `touch` (default; bring the tab forward and inject a hardware event), `cdp` (dispatch on that target, including a background tab). Swipe and gesture coordinates are CSS viewport pixels. |
+| Browser `input` | `touch` (default; bring the tab forward and inject a hardware event), `cdp` (dispatch over DevTools; touch needs the tab showing in Chrome on screen, keys and text reach a background tab), `cdp-mouse` (a mouse click that reaches a background tab, taps only). Swipe and gesture coordinates are CSS viewport pixels. |
 | Node `action` | `click`, `longClick`, `focus`, `clearFocus`, `select`, `setText`, `scrollForward`, `scrollBackward`, `expand`, `collapse`, `dismiss`, `showOnScreen`, `imeEnter`, plus other platform / app-listed names. `imeEnter` needs Android 11. |
 
 Full request and response schemas live in OpenAPI and under `api-model` (`DeviceInfo`, `UiSnapshot`, `TapRequest`, `WaitRequest`, `BrowserTarget`, `ApiError`, …).

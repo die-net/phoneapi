@@ -58,7 +58,7 @@ class BrowserServiceTest {
             service(
                 switched() + serverTextFrame("""{"id":1,"result":{"targetId":"abc"}}"""),
                 sockets = CHROME,
-                onScreen = { false },
+                inFront = { false },
             )
         val target = runBlocking { service.openTab("https://example.com/") }
         assertEquals(false, target.tookScreen)
@@ -138,19 +138,21 @@ class BrowserServiceTest {
     @Test
     @Suppress("MissingUseCall") // The service closes the socket it opens.
     fun `cdp tap leaves the tab behind`() {
-        // id 1 is Accessibility.enable. bringToFront would take that slot and the ref lookup
-        // would fail. The last two empty results are touchStart and touchEnd.
+        // ids 1-3 read visibilityState. id 4 is Accessibility.enable: bringToFront would take that
+        // slot and the ref lookup would fail. The last two empty results are touchStart and
+        // touchEnd.
         val frames =
             switched() +
-                serverTextFrame("""{"id":1,"result":{}}""") +
+                showing() +
+                serverTextFrame("""{"id":4,"result":{}}""") +
                 serverTextFrame(
-                    """{"id":2,"result":{"nodes":[{"nodeId":"9","role":{"value":"link"},"backendDOMNodeId":9}]}}"""
+                    """{"id":5,"result":{"nodes":[{"nodeId":"9","role":{"value":"link"},"backendDOMNodeId":9}]}}"""
                 ) +
-                serverTextFrame("""{"id":3,"result":{}}""") +
-                serverTextFrame(quad(4)) +
-                serverTextFrame(metrics(5)) +
                 serverTextFrame("""{"id":6,"result":{}}""") +
-                serverTextFrame("""{"id":7,"result":{}}""")
+                serverTextFrame(quad(7)) +
+                serverTextFrame(metrics(8)) +
+                serverTextFrame("""{"id":9,"result":{}}""") +
+                serverTextFrame("""{"id":10,"result":{}}""")
         var touched = false
         val socket = ScriptedSocket(frames)
         val service =
@@ -182,8 +184,9 @@ class BrowserServiceTest {
         // DevTools hangs up after the selector lookup, before any touch is sent.
         val dropped =
             switched() +
-                serverTextFrame("""{"id":1,"result":{"root":{"nodeId":1}}}""") +
-                serverTextFrame("""{"id":2,"result":{"nodeId":4}}""")
+                showing() +
+                serverTextFrame("""{"id":4,"result":{"root":{"nodeId":1}}}""") +
+                serverTextFrame("""{"id":5,"result":{"nodeId":4}}""")
         var opens = 0
         var prepared: Boolean? = null
         val service =
@@ -556,7 +559,7 @@ class BrowserServiceTest {
         prepare: suspend (Boolean) -> Boolean = { false },
         sequence: () -> Long = { 0L },
         invalidate: () -> Unit = {},
-        onScreen: (String) -> Boolean = { true },
+        inFront: suspend (String) -> Boolean = { true },
     ) =
         BrowserServiceImpl(
             io = Dispatchers.IO,
@@ -573,7 +576,7 @@ class BrowserServiceTest {
             prepare = prepare,
             sequence = sequence,
             invalidateSnapshots = invalidate,
-            onScreen = onScreen,
+            inFront = inFront,
         )
 
     internal class ScriptedSocket(
@@ -654,6 +657,12 @@ class BrowserServiceTest {
         out.write(payload)
         return out.toByteArray()
     }
+
+    /** Replies to the visibilityState read before a cdp touch: frame, world, and "visible". */
+    internal fun showing(state: String = "visible"): ByteArray =
+        serverTextFrame("""{"id":1,"result":{"frameTree":{"frame":{"id":"F"}}}}""") +
+            serverTextFrame("""{"id":2,"result":{"executionContextId":7}}""") +
+            serverTextFrame("""{"id":3,"result":{"result":{"type":"string","value":"$state"}}}""")
 
     internal fun metrics(id: Int) =
         """{"id":$id,"result":{"cssVisualViewport":{"pageX":0,"pageY":0,"clientWidth":412.19049072265625,"clientHeight":783.2380981445312},"visualViewport":{"clientWidth":1082,"clientHeight":2056}}}"""

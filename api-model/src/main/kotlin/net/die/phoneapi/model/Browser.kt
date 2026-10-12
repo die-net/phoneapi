@@ -32,19 +32,20 @@ public enum class BrowserInput {
     /** Bring the tab forward and inject a hardware event. */
     @SerialName("touch") TOUCH,
     /**
-     * Touch events over DevTools, on that target. The tab can stay in the background, but Chrome
-     * holds touch input until it is on screen, so this needs Chrome in front with the screen on.
+     * Touch events over DevTools, without bringing the tab forward. Chrome holds touch input for
+     * any tab it is not showing, so this needs the tab showing in Chrome, on screen. Keys and text
+     * reach a background tab.
      */
     @SerialName("cdp") CDP,
     /**
-     * A mouse click over DevTools. Reaches a background tab with Chrome hidden and the screen off,
-     * but the page sees a mouse rather than a finger. Taps only.
+     * A mouse click over DevTools. Reaches a background tab, even with Chrome hidden and the screen
+     * off, but the page sees a mouse rather than a finger. Taps only.
      */
     @SerialName("cdp-mouse") CDP_MOUSE,
 }
 
 public const val BROWSER_INPUT_DOC: String =
-    "touch brings the tab to the front and uses the screen. cdp sends touch events to that target, even a background tab, but only while Chrome is on screen. cdp-mouse taps with a mouse click, which works with Chrome hidden and the screen off, but the page sees a mouse, not a finger. Defaults to touch."
+    "touch brings the tab to the front and uses the screen. cdp sends touch events over DevTools without bringing the tab forward, but only to the tab Chrome is showing, on screen. Keys and text with cdp reach a background tab. cdp-mouse taps with a mouse click, which reaches a background tab even with Chrome hidden and the screen off, but the page sees a mouse, not a finger. Defaults to touch."
 
 public const val BROWSER_WAKE_DOC: String =
     "Turn the screen on first when input is touch. cdp and cdp-mouse never wake it. Defaults to true."
