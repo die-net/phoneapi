@@ -128,7 +128,7 @@ Authenticated errors are JSON:
 
 `autoWake` (default true) turns the screen on and leaves the keyguard up. Dismiss the keyguard with `POST /v1/device/unlock`. Browser input with `input` `cdp` or `cdp-mouse` ignores it and leaves the screen as it is.
 
-Browser pointer input has three `input` modes. `touch` brings the tab to the front and injects a hardware touch. `cdp` sends touch events over DevTools to that target, which can be a background tab, but Chrome only takes them while it is on screen, so `cdp` fails with `not_visible` otherwise. `cdp-mouse` taps with a DevTools mouse click, which reaches a tab with Chrome hidden and the screen off; the page sees a mouse rather than a finger. Keys and text with `cdp` work with Chrome hidden.
+Browser pointer input has three `input` modes. `touch` brings the tab to the front and injects a hardware touch. `cdp` sends touch events over DevTools to that target, which can be a background tab, but Chrome only takes them while it is on screen, so `cdp` fails with `not_visible` otherwise. `cdp-mouse` taps with a DevTools mouse click, which reaches a tab with Chrome hidden and the screen off; the page sees a mouse rather than a finger. Keys and text with `cdp` work with Chrome hidden. All of these are trusted input. A click or scroll made from `evaluate` is not (`isTrusted` is false), which bot detection can see, and with Chrome hidden there is no trusted way to scroll: Chrome holds wheel and scroll input as it does touch.
 
 `/viewer` does not post a finished swipe. It streams the canvas on `WS /v1/input/pointer` so the phone moves while the finger is still down.
 
