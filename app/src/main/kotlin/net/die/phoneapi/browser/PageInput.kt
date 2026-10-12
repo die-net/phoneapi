@@ -24,8 +24,9 @@ import net.die.phoneapi.model.TimedPoint
 
 /**
  * Pointer, key, and text for one page. `touch` is a hardware event after the tab is in front. `cdp`
- * stays on that target, including a background tab, but Chrome only takes its touch events while
- * Chrome is on screen. `cdp-mouse` taps with a mouse click, which also reaches a hidden Chrome.
+ * stays on that target: keys and text reach a background tab, but Chrome only takes touch on the
+ * tab it is showing, on screen. `cdp-mouse` taps with a mouse click, which reaches a background tab
+ * even with Chrome hidden.
  */
 internal class PageInput(
     private val touchAt: suspend (Rect, Boolean) -> ActionResult,

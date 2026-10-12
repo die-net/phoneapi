@@ -11,6 +11,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.withContext
 import net.die.phoneapi.apps.AppsServiceImpl
+import net.die.phoneapi.apps.RESUMED_ACTIVITY_ARGS
+import net.die.phoneapi.apps.resumedPackage
 import net.die.phoneapi.browser.BrowserServiceImpl
 import net.die.phoneapi.browser.CdpForward
 import net.die.phoneapi.browser.DevtoolsPreconditions
@@ -18,7 +20,6 @@ import net.die.phoneapi.browser.DevtoolsSocket
 import net.die.phoneapi.browser.HelperCdpPipes
 import net.die.phoneapi.browser.USB_DEVTOOLS_SOCKET
 import net.die.phoneapi.browser.UsbDevtools
-import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.core.AppsService
 import net.die.phoneapi.core.BrowserService
 import net.die.phoneapi.core.DeviceInfoProvider
@@ -243,19 +244,14 @@ class AppGraph(
         )
 
     /**
-     * Screen on, keyguard down, and [pkg] has a window with content showing. Asks the helper's
-     * window list rather than foregroundPackage, which only updates while UiAutomation is up.
+     * Screen on, keyguard down, and [pkg]'s activity is resumed, even with no web content showing,
+     * such as Chrome's start screen. Asks the helper's shell, since foregroundPackage can be stale.
      */
-    private fun appOnScreen(pkg: String): Boolean {
+    private suspend fun appInFront(pkg: String): Boolean {
         val now = state.refresh()
         if (now.screen != ScreenState.ON || now.keyguard.locked) return false
-        return try {
-            tree.contentBounds(pkg)
-            true
-        } catch (e: ApiException) {
-            if (e.error != "content_unavailable") throw e
-            false
-        }
+        val activities = shell.exec(RESUMED_ACTIVITY_ARGS)
+        return activities.ok && resumedPackage(activities.stdout) == pkg
     }
 
     @Suppress("MissingUseCall")
@@ -290,7 +286,7 @@ class AppGraph(
                     )
                 )
             },
-            onScreen = { pkg -> appOnScreen(pkg) },
+            inFront = { pkg -> appInFront(pkg) },
             devtoolsGap = DevtoolsPreconditions(context)::explain,
             refreshHz = { deviceInfo.display().refreshRate },
             touchscreen = { touchBackend.touchscreen() },

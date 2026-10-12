@@ -32,7 +32,7 @@ class BrowserInputModeTest {
                     opens++
                     BrowserServiceTest.ScriptedSocket(byteArrayOf())
                 },
-                onScreen = { pkg ->
+                inFront = { pkg ->
                     asked = pkg
                     false
                 },
@@ -49,6 +49,25 @@ class BrowserInputModeTest {
         assertEquals("not_visible", error.error)
         assertEquals("com.android.chrome", asked)
         assertEquals(0, opens)
+    }
+
+    @Test
+    fun `cdp tap needs the tab showing`() {
+        val service =
+            harness.service(
+                harness.switched() + harness.showing("hidden"),
+                sockets = BrowserServiceTest.CHROME,
+            )
+        val error =
+            assertThrows(ApiException::class.java) {
+                runBlocking {
+                    service.tap(
+                        "chrome_devtools_remote~abc",
+                        BrowserTapRequest(selector = "a", input = BrowserInput.CDP),
+                    )
+                }
+            }
+        assertEquals("not_visible", error.error)
     }
 
     @Test
@@ -73,7 +92,7 @@ class BrowserInputModeTest {
                     touched = true
                     ActionResult(ok = false)
                 },
-                onScreen = { false },
+                inFront = { false },
             )
         val result = runBlocking {
             service.tap(

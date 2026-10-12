@@ -322,7 +322,7 @@ private val MCP_TOOLS: List<McpTool> =
         McpTool(
             name = "browser_tap",
             description =
-                "Tap a snapshot ref or a CSS selector in a browser target. Default input touch brings the tab to the front and uses the screen. input cdp sends touch events to the target, even a background tab, but needs Chrome on screen. input cdp-mouse clicks with a mouse, which works with Chrome hidden and the screen off, but the page sees a mouse rather than a finger. All three are trusted input, unlike a click from browser_eval.",
+                "Tap a snapshot ref or a CSS selector in a browser target. Default input touch brings the tab to the front and uses the screen. input cdp sends touch events over DevTools without bringing the tab forward, but Chrome only takes them on the tab it is showing, with Chrome on screen. input cdp-mouse clicks with a mouse, which works with Chrome hidden and the screen off, but the page sees a mouse rather than a finger. All three are trusted input, unlike a click from browser_eval.",
             scope = Scope.BROWSER,
             available = Capabilities::browserCdp,
             arguments = serializer<BrowserTapArgs>(),
@@ -332,7 +332,7 @@ private val MCP_TOOLS: List<McpTool> =
         McpTool(
             name = "browser_swipe",
             description =
-                "Swipe a browser target. from and to are CSS viewport pixels, or pass a direction. Default input touch brings the tab to the front and uses the screen. input cdp swipes the target, even a background tab, but needs Chrome on screen. With Chrome hidden there is no trusted way to scroll, since Chrome holds wheel and scroll input too. Scrolling from browser_eval works but is untrusted.",
+                "Swipe a browser target. from and to are CSS viewport pixels, or pass a direction. Default input touch brings the tab to the front and uses the screen. input cdp swipes over DevTools without bringing the tab forward, but only on the tab Chrome is showing, with Chrome on screen. With Chrome hidden there is no trusted way to scroll, since Chrome holds wheel and scroll input too. Scrolling from browser_eval works but is untrusted.",
             scope = Scope.BROWSER,
             available = Capabilities::browserCdp,
             arguments = serializer<BrowserSwipeArgs>(),
@@ -342,7 +342,7 @@ private val MCP_TOOLS: List<McpTool> =
         McpTool(
             name = "browser_gesture",
             description =
-                "Play pointer paths on a browser target, in CSS viewport pixels. Default input touch brings the tab to the front and uses the screen. input cdp plays them on the target, even a background tab, but needs Chrome on screen.",
+                "Play pointer paths on a browser target, in CSS viewport pixels. Default input touch brings the tab to the front and uses the screen. input cdp plays them over DevTools without bringing the tab forward, but only on the tab Chrome is showing, with Chrome on screen.",
             scope = Scope.BROWSER,
             available = Capabilities::browserCdp,
             arguments = serializer<BrowserGestureArgs>(),

@@ -24,10 +24,11 @@ class PageInputTest {
     fun `cdp swipe stays in the back`() {
         val frames =
             harness.switched() +
-                harness.serverTextFrame(harness.metrics(1)) +
-                harness.serverTextFrame("""{"id":2,"result":{}}""") +
-                harness.serverTextFrame("""{"id":3,"result":{}}""") +
-                harness.serverTextFrame("""{"id":4,"result":{}}""")
+                harness.showing() +
+                harness.serverTextFrame(harness.metrics(4)) +
+                harness.serverTextFrame("""{"id":5,"result":{}}""") +
+                harness.serverTextFrame("""{"id":6,"result":{}}""") +
+                harness.serverTextFrame("""{"id":7,"result":{}}""")
         var swiped = false
         val service =
             harness.service(
