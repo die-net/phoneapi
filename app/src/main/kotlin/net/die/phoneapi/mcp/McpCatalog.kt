@@ -322,7 +322,7 @@ private val MCP_TOOLS: List<McpTool> =
         McpTool(
             name = "browser_tap",
             description =
-                "Tap a snapshot ref or a CSS selector in a browser target. Default input touch brings the tab to the front and uses the screen. input cdp sends touch events to the target, even a background tab, but needs Chrome on screen. input cdp-mouse clicks with a mouse, which works with Chrome hidden and the screen off, but the page sees a mouse rather than a finger.",
+                "Tap a snapshot ref or a CSS selector in a browser target. Default input touch brings the tab to the front and uses the screen. input cdp sends touch events to the target, even a background tab, but needs Chrome on screen. input cdp-mouse clicks with a mouse, which works with Chrome hidden and the screen off, but the page sees a mouse rather than a finger. All three are trusted input, unlike a click from browser_eval.",
             scope = Scope.BROWSER,
             available = Capabilities::browserCdp,
             arguments = serializer<BrowserTapArgs>(),
@@ -332,7 +332,7 @@ private val MCP_TOOLS: List<McpTool> =
         McpTool(
             name = "browser_swipe",
             description =
-                "Swipe a browser target. from and to are CSS viewport pixels, or pass a direction. Default input touch brings the tab to the front and uses the screen. input cdp swipes the target, even a background tab, but needs Chrome on screen. With Chrome hidden, scroll with browser_eval instead.",
+                "Swipe a browser target. from and to are CSS viewport pixels, or pass a direction. Default input touch brings the tab to the front and uses the screen. input cdp swipes the target, even a background tab, but needs Chrome on screen. With Chrome hidden there is no trusted way to scroll, since Chrome holds wheel and scroll input too. Scrolling from browser_eval works but is untrusted.",
             scope = Scope.BROWSER,
             available = Capabilities::browserCdp,
             arguments = serializer<BrowserSwipeArgs>(),
@@ -372,7 +372,7 @@ private val MCP_TOOLS: List<McpTool> =
         McpTool(
             name = "browser_eval",
             description =
-                "Evaluate JavaScript in an isolated world and return the result. Works in the background. awaitPromise waits for a promise. A script exception is a result field. Not retried, so a script with side effects runs at most once.",
+                "Evaluate JavaScript in an isolated world and return the result. Works in the background. awaitPromise waits for a promise. A script exception is a result field. Not retried, so a script with side effects runs at most once. Clicks and scrolls made from a script are untrusted (isTrusted false), which bot detection can see, so click with browser_tap instead.",
             scope = Scope.BROWSER,
             available = Capabilities::browserCdp,
             arguments = serializer<EvalArgs>(),
