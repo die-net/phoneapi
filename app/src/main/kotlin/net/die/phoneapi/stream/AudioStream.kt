@@ -71,7 +71,9 @@ internal class AudioStream(
                 }
             session.send(Frame.Text(header))
             config?.let { session.send(Frame.Binary(true, it)) }
-            for (frame in channel) session.send(Frame.Binary(true, frame))
+            sendUntilClientLeaves(session) {
+                for (frame in channel) session.send(Frame.Binary(true, frame))
+            }
         } finally {
             if (attached) withContext(NonCancellable) { detach(channel) }
             channel.close()
@@ -230,7 +232,6 @@ internal class AudioStream(
             return
         }
         emit(packFrame(FRAME_DELTA, info.presentationTimeUs, data))
-        lease.renew()
     }
 
     private fun readOutput(codec: MediaCodec, index: Int, info: MediaCodec.BufferInfo): ByteArray? {

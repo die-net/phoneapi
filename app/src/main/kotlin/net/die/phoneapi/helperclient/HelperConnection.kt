@@ -3,6 +3,7 @@ package net.die.phoneapi.helperclient
 import android.os.IBinder
 import android.os.RemoteException
 import android.util.Log
+import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -36,7 +37,14 @@ class HelperConnection(private val bus: EventBus, private val idleStatus: Helper
     /** Runs after a helper binder is accepted. */
     @Volatile var onReady: ((IHelper) -> Unit)? = null
 
+    private val deathListeners = CopyOnWriteArrayList<() -> Unit>()
+
     private val deathRecipient = IBinder.DeathRecipient { onHelperDied() }
+
+    /** Adds a callback that runs when the helper process dies, before [onDied]. */
+    fun addDeathListener(listener: () -> Unit) {
+        deathListeners += listener
+    }
 
     private fun onHelperDied() {
         synchronized(this) {
@@ -45,6 +53,7 @@ class HelperConnection(private val bus: EventBus, private val idleStatus: Helper
         }
         Log.w(TAG, "Helper died")
         setStatus(idleStatus)
+        deathListeners.forEach { it() }
         onDied?.invoke()
     }
 

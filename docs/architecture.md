@@ -132,6 +132,8 @@ The helper calls into framework internals that apps are not supposed to use. On 
 
 Video encoding also uses `MediaFormat.KEY_LOW_LATENCY` where the codec claims support; that key is not equally real on every device.
 
+The mirror only draws when the screen changes, and some encoders ignore `KEY_REPEAT_PREVIOUS_FRAME_AFTER`, so a still screen can send nothing at all. The mirror therefore draws into a `SurfaceTexture`, and a GLES relay copies each frame onto the encoder's input surface. The relay redraws the last frame when a viewer joins, so the requested key frame has input, and after a second without a new one.
+
 ### Other odd corners
 
 - **Custom Ktor engine.** CIO only binds filesystem Unix sockets. `AbstractHttpEngine` accepts Android abstract `LocalServerSocket` connections and feeds them into CIO’s pipeline, including a reflective call into an internal `CIOApplicationCall` release method (`@InternalAPI`).
