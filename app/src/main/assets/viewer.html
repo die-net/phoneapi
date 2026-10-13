@@ -111,6 +111,15 @@ function reportDecoder(error) {
     : "VideoDecoder is missing. This browser has no WebCodecs.";
 }
 
+// The phone sends at least one frame a second, even from a still screen, so a longer gap with
+// no picture means the stream is stuck and is worth reopening.
+const STALL_MS = 5000;
+const RETRY_MIN_MS = 1000;
+const RETRY_MAX_MS = 10000;
+let lastPicture = 0;
+let retryMs = RETRY_MIN_MS;
+let retryTimer = 0;
+
 let epoch = 0;
 function makeDecoder() {
   if (typeof VideoDecoder !== "function") {
@@ -126,6 +135,8 @@ function makeDecoder() {
         if (canvas.height !== frame.displayHeight) canvas.height = frame.displayHeight;
         ctx.drawImage(frame, 0, 0);
         frame.close();
+        lastPicture = performance.now();
+        retryMs = RETRY_MIN_MS;
         status.textContent = canvas.width + "×" + canvas.height;
       },
       error(e) { if (mine === epoch) status.textContent = String(e); }
@@ -138,6 +149,7 @@ function makeDecoder() {
 let video = null;
 let videoSocket = null;
 let configured = false;
+let needKey = true;
 let streamWidth = 0;
 let streamHeight = 0;
 
@@ -153,6 +165,7 @@ function configureVideo(payload) {
     return;
   }
   configured = true;
+  needKey = true;
 }
 
 function onHeader(info) {
@@ -174,6 +187,9 @@ function onVideo(data) {
   if (type === 1) { configureVideo(payload); return; }
   if (!configured) configureVideo(payload);
   if (!video || !configured || video.state !== "configured") return;
+  // A decoder rejects delta frames until it has seen a key frame.
+  if (type === 2) needKey = false;
+  else if (needKey) return;
   const nals = startCodes(payload);
   if (!nals.length) return;
   let ts = 0n;
@@ -187,6 +203,8 @@ function onVideo(data) {
 
 function stopVideo() {
   epoch += 1;
+  clearTimeout(retryTimer);
+  retryTimer = 0;
   const current = videoSocket;
   videoSocket = null;
   if (current) {
@@ -206,6 +224,7 @@ function startVideo() {
   video = makeDecoder();
   if (!video) return;
   configured = false;
+  lastPicture = performance.now();
   status.textContent = "Connecting";
   const vs = socket("/v1/stream/video");
   videoSocket = vs;
@@ -224,10 +243,30 @@ function startVideo() {
   vs.onclose = (event) => {
     if (videoSocket !== vs) return;
     videoSocket = null;
+    stopVideo();
     const reason = event.reason ? " " + event.reason : "";
-    status.textContent = "Video socket closed " + event.code + reason;
+    status.textContent = "Video socket closed " + event.code + reason + ". Retrying.";
+    retryVideo();
   };
 }
+
+function retryVideo() {
+  if (retryTimer || document.visibilityState !== "visible") return;
+  const wait = retryMs;
+  retryMs = Math.min(retryMs * 2, RETRY_MAX_MS);
+  retryTimer = setTimeout(() => {
+    retryTimer = 0;
+    startVideo();
+  }, wait);
+}
+
+setInterval(() => {
+  if (!videoSocket || document.visibilityState !== "visible") return;
+  if (performance.now() - lastPicture < STALL_MS) return;
+  stopVideo();
+  status.textContent = "No picture for " + STALL_MS / 1000 + " s. Reconnecting.";
+  retryVideo();
+}, 1000);
 
 function syncVideo() {
   if (document.visibilityState === "visible") {

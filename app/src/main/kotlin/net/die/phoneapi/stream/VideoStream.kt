@@ -40,8 +40,11 @@ import net.die.phoneapi.model.DisplayInfo
 data class VideoSpec(val maxSize: Int, val fps: Int, val bitRate: Int)
 
 /**
- * One H.264 encoder shared by every video viewer. The helper mirrors the display onto the encoder's
- * input surface. A joining client receives the parameter sets and a new keyframe.
+ * One H.264 encoder shared by every video viewer. The helper mirrors the display into a
+ * [FrameRelay], which draws onto the encoder's input surface and redraws the last frame on demand.
+ * A joining client receives the parameter sets and a new keyframe, even on a still screen.
+ *
+ * If the helper dies, the mirror dies with it, so every viewer is closed and can reconnect.
  *
  * When the display size changes, the encoder and mirror are rebuilt and each viewer receives
  * another [videoHeader] text frame, then a codec-config frame and a keyframe. Binary frames stay
@@ -65,6 +68,8 @@ internal class VideoStream(
 
     @Volatile private var configFrame: ByteArray? = null
 
+    @Volatile private var relay: FrameRelay? = null
+
     private var headerJson: String = ""
     private var spsPps: ByteArray? = null
     private var activeSpec: VideoSpec? = null
@@ -85,6 +90,10 @@ internal class VideoStream(
             }
         }
 
+    init {
+        helper.addDeathListener { scope.launch { failPipeline(HELPER_STOPPED) } }
+    }
+
     suspend fun serve(session: DefaultWebSocketServerSession, spec: VideoSpec) {
         val viewer = Viewer()
         lease.opened()
@@ -94,17 +103,16 @@ internal class VideoStream(
                 gate.withLock {
                     subscribers.add(viewer)
                     attached = true
-                    if (subscribers.size == 1) withContext(io) { startEncoder(spec) }
+                    // A failed encoder is gone while its closing viewers are still detaching.
+                    if (codec == null) withContext(io) { startEncoder(spec) }
                     headerJson to configFrame
                 }
             session.send(Frame.Text(header))
             config?.let { session.send(Frame.Binary(true, it)) }
             requestSync()
-            sendFrames(session, viewer)
-            if (viewer.failed) {
-                session.close(
-                    CloseReason(CloseReason.Codes.INTERNAL_ERROR, "The video encoder stopped")
-                )
+            sendUntilClientLeaves(session) { sendFrames(session, viewer) }
+            viewer.failure?.let {
+                session.close(CloseReason(CloseReason.Codes.INTERNAL_ERROR, it))
             }
         } finally {
             if (attached) withContext(NonCancellable) { detach(viewer) }
@@ -177,12 +185,12 @@ internal class VideoStream(
             beginEncoder(spec, width, height)
         } catch (e: CancellationException) {
             stopEncoder()
-            closeViewers()
+            closeViewers(ENCODER_STOPPED)
             throw e
         } catch (e: ApiException) {
             Log.w(TAG, "reconfigure", e)
             stopEncoder()
-            closeViewers()
+            closeViewers(ENCODER_STOPPED)
             return
         }
         requestSync()
@@ -203,8 +211,10 @@ internal class VideoStream(
             encoder.start()
             running = true
             codec = encoder
+            val frames = FrameRelay(surface, width, height)
+            relay = frames
             val started =
-                helper.require().startMirror(surface, width, height, Display.DEFAULT_DISPLAY)
+                helper.require().startMirror(frames.input, width, height, Display.DEFAULT_DISPLAY)
             if (!started) {
                 throw ApiException.unavailable(
                     "stream_error",
@@ -306,7 +316,16 @@ internal class VideoStream(
         gate.withLock {
             if (codec !== owner) return@withLock
             withContext(io) { stopEncoder() }
-            closeViewers()
+            closeViewers(ENCODER_STOPPED)
+        }
+    }
+
+    private suspend fun failPipeline(reason: String) {
+        gate.withLock {
+            if (codec == null) return@withLock
+            Log.w(TAG, reason)
+            withContext(io) { stopEncoder() }
+            closeViewers(reason)
         }
     }
 
@@ -328,7 +347,6 @@ internal class VideoStream(
         val payload = if (key) withParameterSets(annex) else annex
         val type = if (key) FRAME_KEY else FRAME_DELTA
         emitFrame(packFrame(type, info.presentationTimeUs, payload))
-        lease.renew()
     }
 
     private fun readOutput(codec: MediaCodec, index: Int, info: MediaCodec.BufferInfo): ByteArray? {
@@ -381,6 +399,8 @@ internal class VideoStream(
         } catch (e: IllegalStateException) {
             Log.w(TAG, "sync frame", e)
         }
+        // The request waits for the next input frame, which a still screen never sends.
+        relay?.redraw()
     }
 
     private fun emitFrame(frame: ByteArray) {
@@ -400,9 +420,9 @@ internal class VideoStream(
         while (skipped.isSuccess) skipped = frames.tryReceive()
     }
 
-    private fun closeViewers() {
+    private fun closeViewers(reason: String) {
         for (viewer in subscribers) {
-            viewer.failed = true
+            viewer.failure = reason
             viewer.close()
         }
     }
@@ -431,6 +451,7 @@ internal class VideoStream(
         configFrame = null
         spsPps = null
         stopMirrorQuietly()
+        releaseRelay()
         releaseCodec(encoder)
     }
 
@@ -441,7 +462,14 @@ internal class VideoStream(
         configFrame = null
         spsPps = null
         stopMirrorQuietly()
+        releaseRelay()
         if (current != null) releaseCodec(current)
+    }
+
+    /** The relay draws onto the codec's surface, so it has to stop before the codec does. */
+    private fun releaseRelay() {
+        relay?.release()
+        relay = null
     }
 
     private fun stopEncoder() {
@@ -501,7 +529,8 @@ internal class VideoStream(
         val frames = Channel<ByteArray>(CHANNEL_CAP, BufferOverflow.DROP_OLDEST)
         val headers = Channel<String>(Channel.CONFLATED)
 
-        @Volatile var failed = false
+        /** Why the stream closed this viewer, sent as the close reason. */
+        @Volatile var failure: String? = null
 
         fun close() {
             frames.close()
@@ -514,5 +543,7 @@ internal class VideoStream(
         const val CHANNEL_CAP = 4
         const val REPEAT_US = 100_000
         const val DISPLAY_POLL_MS = 400L
+        const val ENCODER_STOPPED = "The video encoder stopped"
+        const val HELPER_STOPPED = "The shell helper stopped"
     }
 }
