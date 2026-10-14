@@ -51,6 +51,8 @@ ADB `CREATE_TOKEN` (via `phoneapi pair`) grants every scope. Narrower tokens: `P
 | `maxDepth` | — | Truncate tree depth |
 | `maxNodes` | — | Most node lines in the compact outline |
 | `maxChars` | — | Most characters of compact outline, cut at a line |
+| `textOnly` | `false` | Leave positions, resource ids, states, and actions out of the compact outline |
+| `redact` | `false` | Mask password and one-time-code fields and card numbers; `redacted` counts them. MCP `ui_snapshot` defaults to `true` |
 | `includeInvisible` | `false` | |
 | `all` | `false` | All windows, not only actionable |
 | `autoWake` | `true` | Wake before capture |

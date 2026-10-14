@@ -21,7 +21,7 @@ import net.die.phoneapi.server.scoped
 
 /**
  * `GET
- * /v1/ui/snapshot?format=compact|json|both&window=&maxDepth=&maxNodes=&maxChars=&includeInvisible=&all=`,
+ * /v1/ui/snapshot?format=compact|json|both&window=&maxDepth=&maxNodes=&maxChars=&textOnly=&redact=&includeInvisible=&all=`,
  * `POST /v1/ui/find`, `POST /v1/ui/nodes/{ref}/action` and `GET /v1/screenshot?scale=`.
  */
 fun Route.uiRoutes(services: ServerServices) {
@@ -35,6 +35,8 @@ fun Route.uiRoutes(services: ServerServices) {
                     maxDepth = q.int("maxDepth"),
                     maxNodes = q.int("maxNodes"),
                     maxChars = q.int("maxChars"),
+                    textOnly = q.flag("textOnly", default = false),
+                    redact = q.flag("redact", default = false),
                     includeInvisible = q.flag("includeInvisible", default = false),
                     allWindows = q.flag("all", default = false),
                     autoWake = q.flag("autoWake", default = true),

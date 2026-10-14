@@ -53,6 +53,8 @@ class SnapshotEngine(
                 autoWake = true,
                 maxNodes = null,
                 maxChars = null,
+                textOnly = false,
+                redact = false,
             )
         val built =
             withContext(io) {
@@ -65,19 +67,30 @@ class SnapshotEngine(
                     } ?: build(windows(), key, seq).also { cache = it }
                 }
             }
+        val redactor = Redactor()
+        val shown = if (options.redact) redactor.windows(built.windows) else built.windows
         val compact =
             if (options.format == SnapshotFormat.JSON) null
-            else
+            else {
+                val header = CompactFormatter.header(built.seq, summary)
                 CompactFormatter.format(
-                    CompactFormatter.header(built.seq, summary),
-                    built.windows,
-                    OutlineLimits(options.maxNodes, options.maxChars),
+                    if (redactor.count > 0) "$header redacted=${redactor.count}" else header,
+                    shown,
+                    OutlineLimits(options.maxNodes, options.maxChars, options.textOnly),
                     built.cut,
                 )
+            }
         val windows =
-            if (options.format == SnapshotFormat.COMPACT) built.windows.map { it.copy(root = null) }
-            else built.windows
-        return UiSnapshot(built.seq, System.currentTimeMillis(), summary, windows, compact)
+            if (options.format == SnapshotFormat.COMPACT) shown.map { it.copy(root = null) }
+            else shown
+        return UiSnapshot(
+            built.seq,
+            System.currentTimeMillis(),
+            summary,
+            windows,
+            compact,
+            redacted = redactor.count,
+        )
     }
 
     suspend fun find(request: FindRequest): FindResult {
