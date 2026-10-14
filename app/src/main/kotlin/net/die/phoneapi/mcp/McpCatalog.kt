@@ -94,7 +94,7 @@ private val MCP_TOOLS: List<McpTool> =
         McpTool(
             name = "ui_snapshot",
             description =
-                "Compact outline of the visible nodes on screen. Covers app windows, plus system windows such as dialogs and the notification shade when they are focused or large. The keyboard is listed without its contents. maxNodes and maxChars cap the output. When anything is left out, the first line ends with truncated and the next lines say how much. Prefer this over screenshot. Take a new one after each action. Canvas content such as maps shows little, so use screenshot there. Right after an action the tree can still be the old screen: wait_for first.",
+                "Compact outline of the visible nodes on screen. Covers app windows, plus system windows such as dialogs and the notification shade when they are focused or large. The keyboard is listed without its contents. maxNodes and maxChars cap the output. When anything is left out, the first line ends with truncated and the next lines say how much. textOnly drops positions, ids, states, and actions. Password and one-time-code fields and card numbers are masked unless redact is false. Prefer this over screenshot. Take a new one after each action. Canvas content such as maps shows little, so use screenshot there. Right after an action the tree can still be the old screen: wait_for first.",
             scope = Scope.OBSERVE,
             available = Capabilities::uiSnapshot,
             arguments = serializer<SnapshotArgs>(),

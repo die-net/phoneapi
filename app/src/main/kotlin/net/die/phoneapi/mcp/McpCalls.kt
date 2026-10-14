@@ -70,6 +70,8 @@ internal suspend fun uiSnapshot(
                 maxDepth = args.maxDepth,
                 maxNodes = args.maxNodes,
                 maxChars = args.maxChars,
+                textOnly = args.textOnly,
+                redact = args.redact,
                 includeInvisible = args.includeInvisible,
                 allWindows = args.all,
                 autoWake = args.autoWake,
@@ -454,6 +456,12 @@ internal data class SnapshotArgs(
     val maxNodes: Int? = null,
     @Doc("Most characters of outline to show, cut at a line. Cuts are reported like maxNodes.")
     val maxChars: Int? = null,
+    @Doc("Leave out positions, resource ids, states, and actions, for reading rather than acting.")
+    val textOnly: Boolean = false,
+    @Doc(
+        "Mask the text of password and one-time-code fields, and anything that looks like a card number. The first line then counts them as redacted=N. Defaults to true. A screenshot still shows them."
+    )
+    val redact: Boolean = true,
     @Doc("Also include nodes that are off screen or hidden.") val includeInvisible: Boolean = false,
     @Doc("Include every window, such as the status bar and the keyboard's contents.")
     val all: Boolean = false,

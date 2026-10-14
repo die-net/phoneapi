@@ -52,6 +52,8 @@ public data class UiSnapshot(
     val windows: List<UiWindow>,
     /** Token-efficient outline, present when `format=compact`. */
     val compact: String? = null,
+    /** How many secrets were masked when `redact` was set. */
+    val redacted: Int = 0,
 )
 
 @Serializable
@@ -70,6 +72,13 @@ public data class SnapshotOptions(
     val maxNodes: Int? = null,
     /** Most characters of compact outline below its header, cut at a line. */
     val maxChars: Int? = null,
+    /** Leave positions, resource ids, states, and actions out of the compact outline. */
+    val textOnly: Boolean = false,
+    /**
+     * Mask the text of password and one-time-code fields, and card numbers, and count them in
+     * [UiSnapshot.redacted].
+     */
+    val redact: Boolean = false,
     val includeInvisible: Boolean = false,
     /** Include every window, not just the ones that are interesting to act on. */
     val allWindows: Boolean = false,

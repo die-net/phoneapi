@@ -80,8 +80,15 @@ object UiStates {
     val INTERACTIVE: Set<String> = setOf(CLICKABLE, LONG_CLICKABLE, CHECKABLE, EDITABLE, SCROLLABLE)
 }
 
-/** Caps on how much of an outline is returned. Null means no cap. */
-data class OutlineLimits(val maxNodes: Int? = null, val maxChars: Int? = null)
+/**
+ * Caps on how much of an outline is returned, where null means no cap. [textOnly] leaves out
+ * positions, resource ids, states, and actions.
+ */
+data class OutlineLimits(
+    val maxNodes: Int? = null,
+    val maxChars: Int? = null,
+    val textOnly: Boolean = false,
+)
 
 /**
  * Why reading the tree stopped short: nodes below [maxDepth] were skipped, or reading stopped at
@@ -156,7 +163,7 @@ object CompactFormatter {
                     lines += OutlineLine("  (keys omitted; pass all=true)", node = false)
                 }
             } else {
-                emit(root, depth = 1, absorbed = HashSet(), out = lines)
+                emit(root, depth = 1, absorbed = HashSet(), out = lines, limits.textOnly)
             }
         }
         val kept = keep(lines, limits)
@@ -206,14 +213,20 @@ object CompactFormatter {
         depth: Int,
         absorbed: MutableSet<String>,
         out: MutableList<OutlineLine>,
+        textOnly: Boolean,
     ) {
         val printed = node.ref !in absorbed && isMeaningful(node)
-        if (printed) out += OutlineLine(line(node, depth, absorbed), node = true)
+        if (printed) out += OutlineLine(line(node, depth, absorbed, textOnly), node = true)
         val childDepth = if (printed) depth + 1 else depth
-        for (child in node.children) emit(child, childDepth, absorbed, out)
+        for (child in node.children) emit(child, childDepth, absorbed, out, textOnly)
     }
 
-    private fun line(node: UiNode, depth: Int, absorbed: MutableSet<String>): String = buildString {
+    private fun line(
+        node: UiNode,
+        depth: Int,
+        absorbed: MutableSet<String>,
+        textOnly: Boolean,
+    ): String = buildString {
         repeat(depth) { append("  ") }
         append('[').append(node.ref).append("] ").append(node.role)
         val text = node.text?.takeIf { it.isNotBlank() }
@@ -240,6 +253,11 @@ object CompactFormatter {
         node.hint
             ?.takeIf { it.isNotBlank() && it != text }
             ?.let { append(" hint:").append(quote(it)) }
+        if (!textOnly) appendDetails(node)
+    }
+
+    /** The resource id, center, states, and extra actions, which textOnly leaves out. */
+    private fun StringBuilder.appendDetails(node: UiNode) {
         node.id?.let { append(" #").append(it) }
         append(" (")
             .append(centerX(node.bounds))

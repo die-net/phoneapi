@@ -140,6 +140,21 @@ class CompactFormatterTest {
     }
 
     @Test
+    fun `text only drops the rest`() {
+        val sw =
+            node(
+                "e5",
+                role = "switch",
+                text = "Wi-Fi",
+                id = "toggle",
+                states = listOf("clickable", "checkable"),
+                actions = listOf("click", "expand"),
+            )
+        val out = CompactFormatter.format("#", listOf(window(sw)), OutlineLimits(textOnly = true))
+        assertEquals("""  [e5] switch "Wi-Fi"""", out.lines()[2])
+    }
+
+    @Test
     fun `quote escapes and clips`() {
         assertEquals(""""say \"hi\""""", CompactFormatter.quote("""say "hi""""))
         assertEquals(""""a\nb"""", CompactFormatter.quote("a\nb"))
