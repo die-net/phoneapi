@@ -3,6 +3,7 @@ package net.die.phoneapi.browser
 import kotlinx.serialization.json.jsonObject
 import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.core.ApiJson
+import net.die.phoneapi.model.BrowserSnapshotOptions
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
@@ -45,6 +46,31 @@ class AxFormatTest {
                 )
                 .joinToString("\n"),
             text.compact,
+        )
+    }
+
+    @Test
+    fun `counts the nodes it leaves out`() {
+        val tree =
+            ApiJson.parseToJsonElement(
+                    """{"nodes":[{"nodeId":"1","role":{"value":"list"},"childIds":["2","3","4"]},{"nodeId":"2","role":{"value":"link"},"name":{"value":"One"}},{"nodeId":"3","role":{"value":"link"},"name":{"value":"Two"}},{"nodeId":"4","role":{"value":"link"},"name":{"value":"Three"}}]}"""
+                )
+                .jsonObject
+        val text = formatAxTree(tree, options = BrowserSnapshotOptions(maxNodes = 2))
+        assertEquals(
+            listOf(
+                    "# truncated",
+                    "# showing 2 of 4 nodes; raise maxNodes or maxChars for more",
+                    """[1] list""",
+                    """  [2] link "One"""",
+                )
+                .joinToString("\n"),
+            text.compact,
+        )
+        val byChars = formatAxTree(tree, options = BrowserSnapshotOptions(maxChars = 30))
+        assertEquals(
+            "# showing 2 of 4 nodes; raise maxNodes or maxChars for more",
+            byChars.compact.lines()[1],
         )
     }
 

@@ -112,6 +112,34 @@ class CompactFormatterTest {
     }
 
     @Test
+    fun `reports what it leaves out`() {
+        val texts = (1..3).map { node("e$it", role = "text", text = "Line $it") }
+        val win = window(node("e0", children = texts))
+        val out =
+            CompactFormatter.format(
+                "# h",
+                listOf(win),
+                OutlineLimits(maxNodes = 1),
+                TreeCut(maxDepth = 4),
+            )
+        assertEquals(
+            listOf(
+                "# h truncated",
+                "# showing 1 of 3 nodes; raise maxNodes or maxChars for more",
+                "# nodes below maxDepth 4 left out",
+                CompactFormatter.windowLine(win),
+                """  [e1] text "Line 1" (540,630)""",
+                "",
+            ),
+            out.lines(),
+        )
+        assertEquals(
+            listOf("# h", CompactFormatter.windowLine(win)),
+            CompactFormatter.format("# h", listOf(win)).lines().take(2),
+        )
+    }
+
+    @Test
     fun `quote escapes and clips`() {
         assertEquals(""""say \"hi\""""", CompactFormatter.quote("""say "hi""""))
         assertEquals(""""a\nb"""", CompactFormatter.quote("a\nb"))

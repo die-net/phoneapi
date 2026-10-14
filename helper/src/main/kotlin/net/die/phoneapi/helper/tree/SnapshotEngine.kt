@@ -35,7 +35,7 @@ class SnapshotEngine(
         val seq: Long,
         val atMs: Long,
         val windows: List<UiWindow>,
-        val truncated: Boolean,
+        val cut: TreeCut,
     )
 
     private val mutex = Mutex()
@@ -47,7 +47,13 @@ class SnapshotEngine(
     }
 
     suspend fun snapshot(options: SnapshotOptions, summary: DeviceStateSummary): UiSnapshot {
-        val key = options.copy(format = SnapshotFormat.COMPACT, autoWake = true)
+        val key =
+            options.copy(
+                format = SnapshotFormat.COMPACT,
+                autoWake = true,
+                maxNodes = null,
+                maxChars = null,
+            )
         val built =
             withContext(io) {
                 mutex.withLock {
@@ -63,8 +69,10 @@ class SnapshotEngine(
             if (options.format == SnapshotFormat.JSON) null
             else
                 CompactFormatter.format(
-                    CompactFormatter.header(built.seq, summary, built.truncated),
+                    CompactFormatter.header(built.seq, summary),
                     built.windows,
+                    OutlineLimits(options.maxNodes, options.maxChars),
+                    built.cut,
                 )
         val windows =
             if (options.format == SnapshotFormat.COMPACT) built.windows.map { it.copy(root = null) }
@@ -128,7 +136,12 @@ class SnapshotEngine(
                 "snapshot: ${traversal.count} nodes, ${out.size} windows in " +
                     "${SystemClock.uptimeMillis() - started} ms",
             )
-            return Built(options, seq, SystemClock.uptimeMillis(), out, traversal.truncated)
+            val cut =
+                TreeCut(
+                    maxDepth = options.maxDepth.takeIf { traversal.depthCut },
+                    nodeCap = MAX_NODES.takeIf { traversal.capped },
+                )
+            return Built(options, seq, SystemClock.uptimeMillis(), out, cut)
         } finally {
             NodeCompat.recycleAll(windows)
         }
@@ -249,7 +262,10 @@ class SnapshotEngine(
         var count = 0
             private set
 
-        var truncated = false
+        var depthCut = false
+            private set
+
+        var capped = false
             private set
 
         fun window(w: AccessibilityWindowInfo, includeTree: Boolean): UiWindow {
@@ -279,7 +295,7 @@ class SnapshotEngine(
                 return null
             }
             if (count >= MAX_NODES) {
-                truncated = true
+                capped = true
                 NodeCompat.recycle(n)
                 return null
             }
@@ -288,7 +304,7 @@ class SnapshotEngine(
             val maxDepth = options.maxDepth
             val children =
                 if (maxDepth != null && depth >= maxDepth) {
-                    if (n.childCount > 0) truncated = true
+                    if (n.childCount > 0) depthCut = true
                     emptyList()
                 } else {
                     (0 until n.childCount).mapNotNull { i ->

@@ -94,7 +94,7 @@ private val MCP_TOOLS: List<McpTool> =
         McpTool(
             name = "ui_snapshot",
             description =
-                "Compact outline of the visible nodes on screen. Covers app windows, plus system windows such as dialogs and the notification shade when they are focused or large. The keyboard is listed without its contents. Stops at 5,000 nodes or at maxDepth, and then the first line ends with truncated. Prefer this over screenshot. Take a new one after each action. Canvas content such as maps shows little, so use screenshot there. Right after an action the tree can still be the old screen: wait_for first.",
+                "Compact outline of the visible nodes on screen. Covers app windows, plus system windows such as dialogs and the notification shade when they are focused or large. The keyboard is listed without its contents. maxNodes and maxChars cap the output. When anything is left out, the first line ends with truncated and the next lines say how much. Prefer this over screenshot. Take a new one after each action. Canvas content such as maps shows little, so use screenshot there. Right after an action the tree can still be the old screen: wait_for first.",
             scope = Scope.OBSERVE,
             available = Capabilities::uiSnapshot,
             arguments = serializer<SnapshotArgs>(),
@@ -312,10 +312,10 @@ private val MCP_TOOLS: List<McpTool> =
         McpTool(
             name = "browser_snapshot",
             description =
-                "Compact outline of a browser target's accessibility tree, with refs for browser_tap. Works in the background. Stops at 400 lines or 40 levels deep, and then the first line ends with truncated. Links show their text, not their URL. To read a page's text, browser_eval on document.body.innerText is usually smaller.",
+                "Compact outline of a browser target's accessibility tree, with refs for browser_tap. Works in the background. Shows up to maxNodes lines (default 400) and 40 levels. When anything is left out, the first line ends with truncated and the next lines say how much. Links show their text, not their URL. To read a page's text, browser_eval on document.body.innerText is usually smaller.",
             scope = Scope.BROWSER,
             available = Capabilities::browserCdp,
-            arguments = serializer<TargetArgs>(),
+            arguments = serializer<BrowserSnapshotArgs>(),
             annotations = readOnly,
             call = { graph, _, request -> browserSnapshot(graph, request) },
         ),

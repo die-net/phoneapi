@@ -6,6 +6,7 @@ import net.die.phoneapi.model.AppInfo
 import net.die.phoneapi.model.BrowserGestureRequest
 import net.die.phoneapi.model.BrowserKeyRequest
 import net.die.phoneapi.model.BrowserSnapshot
+import net.die.phoneapi.model.BrowserSnapshotOptions
 import net.die.phoneapi.model.BrowserSwipeRequest
 import net.die.phoneapi.model.BrowserTapRequest
 import net.die.phoneapi.model.BrowserTarget
@@ -116,7 +117,10 @@ interface BrowserService {
     /** Closes a tab over DevTools, without bringing it forward. */
     suspend fun closeTab(id: String): ActionResult
 
-    suspend fun snapshot(id: String): BrowserSnapshot
+    suspend fun snapshot(
+        id: String,
+        options: BrowserSnapshotOptions = BrowserSnapshotOptions(),
+    ): BrowserSnapshot
 
     suspend fun tap(id: String, request: BrowserTapRequest): ActionResult
 

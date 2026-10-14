@@ -1,6 +1,7 @@
 package net.die.phoneapi.tree
 
 import kotlinx.coroutines.flow.StateFlow
+import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.core.SnapshotOptions
 import net.die.phoneapi.core.UiService
 import net.die.phoneapi.helper.tree.ActionNames
@@ -20,6 +21,9 @@ class HelperUiService(
     private val seq: StateFlow<Long>,
 ) : UiService {
     override suspend fun snapshot(options: SnapshotOptions): UiSnapshot {
+        if ((options.maxNodes ?: 1) < 1 || (options.maxChars ?: 1) < 1) {
+            throw ApiException.badRequest("maxNodes and maxChars must be at least 1")
+        }
         prepare(options.autoWake)
         return tree.snapshot(options)
     }

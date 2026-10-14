@@ -23,6 +23,7 @@ import net.die.phoneapi.model.AppInfo
 import net.die.phoneapi.model.BrowserGestureRequest
 import net.die.phoneapi.model.BrowserKeyRequest
 import net.die.phoneapi.model.BrowserSnapshot
+import net.die.phoneapi.model.BrowserSnapshotOptions
 import net.die.phoneapi.model.BrowserSwipeRequest
 import net.die.phoneapi.model.BrowserTapRequest
 import net.die.phoneapi.model.BrowserTarget
@@ -278,7 +279,8 @@ private object FakeBrowser : BrowserService {
 
     override suspend fun closeTab(id: String) = acted()
 
-    override suspend fun snapshot(id: String) = BrowserSnapshot(id = id, compact = "page")
+    override suspend fun snapshot(id: String, options: BrowserSnapshotOptions) =
+        BrowserSnapshot(id = id, compact = "page")
 
     override suspend fun tap(id: String, request: BrowserTapRequest) = acted()
 

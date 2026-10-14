@@ -18,6 +18,7 @@ import net.die.phoneapi.browser.DEVTOOLS_CLOSED
 import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.model.BrowserGestureRequest
 import net.die.phoneapi.model.BrowserKeyRequest
+import net.die.phoneapi.model.BrowserSnapshotOptions
 import net.die.phoneapi.model.BrowserSwipeRequest
 import net.die.phoneapi.model.BrowserTapRequest
 import net.die.phoneapi.model.BrowserTextRequest
@@ -46,7 +47,13 @@ fun Route.browserRoutes(services: ServerServices) {
             call.respond(services.browser.closeTab(call.targetId()))
         }
         get("/v1/browser/targets/{id}/snapshot") {
-            call.respond(services.browser.snapshot(call.targetId()))
+            val q = call.request.queryParameters
+            val options =
+                BrowserSnapshotOptions(
+                    maxNodes = q.int("maxNodes") ?: BrowserSnapshotOptions().maxNodes,
+                    maxChars = q.int("maxChars"),
+                )
+            call.respond(services.browser.snapshot(call.targetId(), options))
         }
         post("/v1/browser/targets/{id}/tap") {
             call.respond(services.browser.tap(call.targetId(), call.receive<BrowserTapRequest>()))

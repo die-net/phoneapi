@@ -20,8 +20,9 @@ import net.die.phoneapi.server.ServerServices
 import net.die.phoneapi.server.scoped
 
 /**
- * `GET /v1/ui/snapshot?format=compact|json|both&window=&maxDepth=&includeInvisible=&all=`, `POST
- * /v1/ui/find`, `POST /v1/ui/nodes/{ref}/action` and `GET /v1/screenshot?scale=`.
+ * `GET
+ * /v1/ui/snapshot?format=compact|json|both&window=&maxDepth=&maxNodes=&maxChars=&includeInvisible=&all=`,
+ * `POST /v1/ui/find`, `POST /v1/ui/nodes/{ref}/action` and `GET /v1/screenshot?scale=`.
  */
 fun Route.uiRoutes(services: ServerServices) {
     scoped(Scope.OBSERVE) {
@@ -32,6 +33,8 @@ fun Route.uiRoutes(services: ServerServices) {
                     format = q["format"]?.let(::parseFormat) ?: SnapshotFormat.COMPACT,
                     windowId = q["window"]?.let(::windowId),
                     maxDepth = q.int("maxDepth"),
+                    maxNodes = q.int("maxNodes"),
+                    maxChars = q.int("maxChars"),
                     includeInvisible = q.flag("includeInvisible", default = false),
                     allWindows = q.flag("all", default = false),
                     autoWake = q.flag("autoWake", default = true),

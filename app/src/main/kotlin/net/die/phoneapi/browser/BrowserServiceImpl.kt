@@ -40,6 +40,7 @@ import net.die.phoneapi.model.BrowserGestureRequest
 import net.die.phoneapi.model.BrowserInput
 import net.die.phoneapi.model.BrowserKeyRequest
 import net.die.phoneapi.model.BrowserSnapshot
+import net.die.phoneapi.model.BrowserSnapshotOptions
 import net.die.phoneapi.model.BrowserSwipeRequest
 import net.die.phoneapi.model.BrowserTapRequest
 import net.die.phoneapi.model.BrowserTarget
@@ -328,7 +329,12 @@ internal class BrowserServiceImpl(
         }
     }
 
-    override suspend fun snapshot(id: String): BrowserSnapshot {
+    override suspend fun snapshot(id: String, options: BrowserSnapshotOptions): BrowserSnapshot {
+        if (options.maxNodes !in 1..MAX_SNAPSHOT_NODES || (options.maxChars ?: 1) < 1) {
+            throw ApiException.badRequest(
+                "maxNodes must be 1 to $MAX_SNAPSHOT_NODES, and maxChars at least 1"
+            )
+        }
         val (socket, chromeId) = parseBrowserTargetId(id)
         return usePage(socket, chromeId, repeatable = true) { cdp ->
             val loaded = cdp.call("Page.getFrameTree").decodeCdp<FrameTreeResult>()
@@ -336,7 +342,7 @@ internal class BrowserServiceImpl(
             cdp.call("Accessibility.enable")
             val tree = cdp.call("Accessibility.getFullAXTree")
             axTrees.put(id, tree)
-            val text = formatAxTree(tree, url)
+            val text = formatAxTree(tree, url, options)
             BrowserSnapshot(id = id, url = url, title = text.title, compact = text.compact)
         }
     }
@@ -743,6 +749,7 @@ internal class BrowserServiceImpl(
         const val MAX_SELECTOR = 1_000
         const val MAX_EXPRESSION = 20_000
         const val MAX_CONSOLE_MS = 5_000L
+        const val MAX_SNAPSHOT_NODES = 5_000
         const val TARGET_LIST_MS = MAX_CONSOLE_MS
         const val PAGE_ATTEMPTS = 4
         const val PAGE_RETRY_MS = 200L
