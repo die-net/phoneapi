@@ -94,7 +94,7 @@ private val MCP_TOOLS: List<McpTool> =
         McpTool(
             name = "ui_snapshot",
             description =
-                "Compact outline of the foreground app's accessibility tree. Prefer this over screenshot. Take a new one after each action. Canvas content such as maps shows little, so use screenshot there. Right after an action the tree can still be the old screen: wait_for first.",
+                "Compact outline of the visible nodes on screen. Covers app windows, plus system windows such as dialogs and the notification shade when they are focused or large. The keyboard is listed without its contents. Stops at 5,000 nodes or at maxDepth, and then the first line ends with truncated. Prefer this over screenshot. Take a new one after each action. Canvas content such as maps shows little, so use screenshot there. Right after an action the tree can still be the old screen: wait_for first.",
             scope = Scope.OBSERVE,
             available = Capabilities::uiSnapshot,
             arguments = serializer<SnapshotArgs>(),
@@ -312,7 +312,7 @@ private val MCP_TOOLS: List<McpTool> =
         McpTool(
             name = "browser_snapshot",
             description =
-                "Compact outline of a browser target. Works in the background. Heavy pages give a large outline, so browser_eval on document.body.innerText can be smaller.",
+                "Compact outline of a browser target's accessibility tree, with refs for browser_tap. Works in the background. Stops at 400 lines or 40 levels deep, and then the first line ends with truncated. Links show their text, not their URL. To read a page's text, browser_eval on document.body.innerText is usually smaller.",
             scope = Scope.BROWSER,
             available = Capabilities::browserCdp,
             arguments = serializer<TargetArgs>(),
@@ -360,9 +360,9 @@ private val MCP_TOOLS: List<McpTool> =
             call = { graph, _, request -> browserKey(graph, request) },
         ),
         McpTool(
-            name = "browser_text",
+            name = "browser_type",
             description =
-                "Type into a browser target. Default input touch brings the tab to the front and uses the hardware text modes. input cdp inserts the text in the background.",
+                "Type text into a field in a browser target. ref or selector focuses the field first. Default input touch brings the tab to the front and uses the hardware text modes. input cdp inserts the text in the background.",
             scope = Scope.BROWSER,
             available = Capabilities::browserCdp,
             arguments = serializer<BrowserTextArgs>(),
