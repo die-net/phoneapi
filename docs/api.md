@@ -218,7 +218,7 @@ For stdio hosts (Cursor, etc.), run `phoneapi mcp` (with the helper up). It inst
 | `device_orientation` | control | Auto-rotate, or lock the screen to the current or a named rotation |
 | `browser_targets` / `browser_open` / `browser_navigate` / `browser_close` | browser | Tab list, navigation, and closing a tab |
 | `browser_snapshot` / `browser_tap` / `browser_swipe` / `browser_gesture` | browser | AX outline and pointer input. `input` `touch` (default), `cdp`, or `cdp-mouse` (tap only) |
-| `browser_key` / `browser_text` | browser | Key and text. `cdp` stays on a background tab; device keys such as HOME need `touch` |
+| `browser_key` / `browser_type` | browser | Key presses and typing. `cdp` stays on a background tab; device keys such as HOME need `touch` |
 | `browser_eval` / `browser_console` | browser | JS and logs |
 | `screenshot` | observe | PNG last resort (`scale` default 0.5) |
 | `logcat_tail` | observe | Recent lines via helper |

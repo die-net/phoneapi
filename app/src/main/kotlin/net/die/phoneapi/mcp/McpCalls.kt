@@ -441,10 +441,13 @@ private inline fun <reified T> CallToolRequest.args(): T {
 
 @Serializable
 internal data class SnapshotArgs(
-    @Doc("Window id, such as 3 or w3. Defaults to the active window.") val window: String? = null,
+    @Doc("Show only this window, such as 3 or w3. Omit it for the default set of windows.")
+    val window: String? = null,
+    @Doc("Stop this many levels down. Leaving nodes out marks the outline truncated.")
     val maxDepth: Int? = null,
-    val includeInvisible: Boolean = false,
-    @Doc("Include system windows.") val all: Boolean = false,
+    @Doc("Also include nodes that are off screen or hidden.") val includeInvisible: Boolean = false,
+    @Doc("Include every window, such as the status bar and the keyboard's contents.")
+    val all: Boolean = false,
     val autoWake: Boolean = true,
 )
 
