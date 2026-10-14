@@ -414,7 +414,7 @@ private fun tailLines(stdout: String, lines: Int): String =
         .takeLast(lines)
         .joinToString("\n")
 
-private suspend fun runTool(block: suspend () -> String): CallToolResult =
+internal suspend fun runTool(block: suspend () -> String): CallToolResult =
     try {
         toolOk(block())
     } catch (e: CancellationException) {
@@ -439,7 +439,7 @@ private fun toolError(error: ApiException): String {
 internal inline fun <reified T> jsonText(value: T): String =
     ApiJson.encodeToString(serializer<T>(), value)
 
-private inline fun <reified T> CallToolRequest.args(): T {
+internal inline fun <reified T> CallToolRequest.args(): T {
     val arguments = this.arguments ?: JsonObject(emptyMap())
     return ApiJson.decodeFromJsonElement(serializer<T>(), arguments)
 }

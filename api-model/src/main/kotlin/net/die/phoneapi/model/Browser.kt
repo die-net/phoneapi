@@ -173,3 +173,142 @@ public data class BrowserSnapshot(
     val title: String? = null,
     val compact: String,
 )
+
+/** Which part of a page browser reads and finds work over. */
+@Serializable
+public enum class ReadScope {
+    /** The main content, as Readability finds it, without navigation, footers, and ads. */
+    @SerialName("article") ARTICLE,
+    /** All visible text on the page. */
+    @SerialName("page") PAGE,
+}
+
+@Serializable
+public enum class ReadFormat {
+    @SerialName("markdown") MARKDOWN,
+    @SerialName("text") TEXT,
+}
+
+public const val READ_SCOPE_DOC: String =
+    "article (default) is the main content, without navigation, footers, and ads, and falls back to page when no article is found. page is all visible text."
+
+public const val READ_SELECTOR_DOC: String =
+    "CSS selector for one element to read instead of scope, such as a table or an article body."
+
+public const val READ_FORMAT_DOC: String =
+    "markdown (default) or text. Offsets depend on the format, so use the same one for reading and finding."
+
+/**
+ * Read a browser target's text. Offsets count characters of the rendered content, so a
+ * [BrowserFindResult] offset can be passed here with the same scope, selector, and format.
+ */
+@Serializable
+public data class BrowserReadRequest(
+    @Doc(READ_SCOPE_DOC) val scope: ReadScope = ReadScope.ARTICLE,
+    @Doc(READ_SELECTOR_DOC) val selector: String? = null,
+    @Doc(READ_FORMAT_DOC) val format: ReadFormat = ReadFormat.MARKDOWN,
+    @Doc(
+        "Return headings with their offsets, and counts of links, tables, and forms, instead of the content."
+    )
+    val outline: Boolean = false,
+    @Doc("Character offset to start at, such as nextOffset or a match's offset.")
+    val offset: Int = 0,
+    @Doc("Most characters to return, 1 to 100000. Defaults to 8000. Cut at a line or a space.")
+    val maxChars: Int = 8_000,
+)
+
+/** A heading in rendered content, at the offset its line starts. */
+@Serializable public data class PageHeading(val level: Int, val text: String, val offset: Int)
+
+@Serializable
+public data class BrowserReadResult(
+    val title: String? = null,
+    @Doc("The page URL now, after redirects.") val url: String? = null,
+    @Doc("When the page says it was published, from its metadata.") val published: String? = null,
+    @Doc("document.readyState: loading, interactive, or complete.") val readyState: String? = null,
+    @Doc("HTTP status of the page's main document, when Chrome reports one.")
+    val status: Int? = null,
+    @Doc(
+        "Why the page looks like a block rather than content: captcha, challenge page, or http 401, 403, or 429."
+    )
+    val blocked: String? = null,
+    @Doc(
+        "The page has under 200 characters of visible text, so it may still be loading or need scripts."
+    )
+    val sparse: Boolean = false,
+    @Doc("What was read: article, page (also when no article was found), or selector.")
+    val extracted: String,
+    @Doc("Changes when the rendered content changes, so offsets from another call still apply.")
+    val version: String,
+    @Doc("Length of the whole rendered content.") val totalChars: Int,
+    val offset: Int,
+    val returnedChars: Int,
+    @Doc("Where the next read starts. Absent at the end.") val nextOffset: Int? = null,
+    @Doc("True when content before offset or after this slice was not returned.")
+    val truncated: Boolean,
+    @Doc("The page has more text than reading takes, so the end is missing.")
+    val clipped: Boolean = false,
+    val content: String? = null,
+    @Doc("Set when outline was requested.") val headings: List<PageHeading>? = null,
+    @Doc("Links on the whole page.") val links: Int = 0,
+    @Doc("Tables on the whole page.") val tables: Int = 0,
+    @Doc("Forms on the whole page.") val forms: Int = 0,
+)
+
+/** What [BrowserFindRequest] looks for. */
+@Serializable
+public enum class FindKind {
+    @SerialName("text") TEXT,
+    @SerialName("links") LINKS,
+}
+
+/**
+ * Search a browser target's rendered content. Offsets match [BrowserReadRequest] with the same
+ * scope, selector, and format.
+ */
+@Serializable
+public data class BrowserFindRequest(
+    @Doc("text (default) finds query in the content. links lists links in the content.")
+    val kind: FindKind = FindKind.TEXT,
+    @Doc("For text, what to find, ignoring case. Required. For links, text the link must contain.")
+    val query: String? = null,
+    @Doc("Treat query as a regular expression, in Java syntax, ignoring case.")
+    val regex: Boolean = false,
+    @Doc("For links, a string the URL must contain, ignoring case.")
+    val hrefContains: String? = null,
+    @Doc(READ_SCOPE_DOC) val scope: ReadScope = ReadScope.ARTICLE,
+    @Doc(READ_SELECTOR_DOC) val selector: String? = null,
+    @Doc(READ_FORMAT_DOC) val format: ReadFormat = ReadFormat.MARKDOWN,
+    @Doc("Characters of context on each side of a text match, 0 to 2000. Defaults to 150.")
+    val contextChars: Int = 150,
+    @Doc("Most results, 1 to 200. Defaults to 10.") val limit: Int = 10,
+)
+
+@Serializable
+public data class TextMatch(
+    val offset: Int,
+    @Doc("The nearest heading before the match.") val heading: String? = null,
+    val before: String,
+    val match: String,
+    val after: String,
+)
+
+@Serializable
+public data class PageLink(
+    val text: String,
+    val href: String,
+    @Doc("Where the link text starts in the rendered content.") val offset: Int,
+    @Doc("Same scheme, host, and port as the page.") val sameOrigin: Boolean,
+)
+
+@Serializable
+public data class BrowserFindResult(
+    val title: String? = null,
+    val url: String? = null,
+    val extracted: String,
+    val version: String,
+    val totalChars: Int,
+    @Doc("How many results there are in all. Only the first limit are returned.") val total: Int,
+    val matches: List<TextMatch>? = null,
+    val links: List<PageLink>? = null,
+)

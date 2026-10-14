@@ -121,3 +121,5 @@ done by a human, most of the code was written by Opus 5.5 and Grok 4.7.
 Copyright 2026 Aaron Hopkins and contributors. All rights reserved.
 
 Licensed under the [Apache License, Version 2.0](LICENSE).
+
+`app/src/main/assets/readability/` is Mozilla's [Readability.js](https://github.com/mozilla/readability) 0.6.0, under the Apache License 2.0; see its `LICENSE.md`.

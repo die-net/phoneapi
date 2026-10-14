@@ -3,8 +3,12 @@ package net.die.phoneapi.core
 import kotlinx.coroutines.channels.ReceiveChannel
 import net.die.phoneapi.model.ActionResult
 import net.die.phoneapi.model.AppInfo
+import net.die.phoneapi.model.BrowserFindRequest
+import net.die.phoneapi.model.BrowserFindResult
 import net.die.phoneapi.model.BrowserGestureRequest
 import net.die.phoneapi.model.BrowserKeyRequest
+import net.die.phoneapi.model.BrowserReadRequest
+import net.die.phoneapi.model.BrowserReadResult
 import net.die.phoneapi.model.BrowserSnapshot
 import net.die.phoneapi.model.BrowserSnapshotOptions
 import net.die.phoneapi.model.BrowserSwipeRequest
@@ -121,6 +125,12 @@ interface BrowserService {
         id: String,
         options: BrowserSnapshotOptions = BrowserSnapshotOptions(),
     ): BrowserSnapshot
+
+    /** Reads a target's content, or its outline. */
+    suspend fun read(id: String, request: BrowserReadRequest): BrowserReadResult
+
+    /** Finds text or links in a target's content, at the offsets [read] uses. */
+    suspend fun find(id: String, request: BrowserFindRequest): BrowserFindResult
 
     suspend fun tap(id: String, request: BrowserTapRequest): ActionResult
 

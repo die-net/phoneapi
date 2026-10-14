@@ -161,6 +161,8 @@ Target ids look like `chrome_devtools_remote~<pageId>`. Chrome must publish DevT
 | `POST` | `/v1/browser/targets/{id}/navigate` | browser | `NavigateRequest` |
 | `POST` | `/v1/browser/targets/{id}/close` | browser | Close the tab without bringing it forward → `ActionResult` |
 | `GET` | `/v1/browser/targets/{id}/snapshot` | browser | Compact AX outline → `BrowserSnapshot`. `maxNodes` (default 400, up to 5000) and `maxChars` cap it; cuts are reported as for the UI snapshot |
+| `POST` | `/v1/browser/targets/{id}/read` | browser | `BrowserReadRequest` → `BrowserReadResult`: the page's text as markdown or plain text, a slice at a time, or its outline |
+| `POST` | `/v1/browser/targets/{id}/find` | browser | `BrowserFindRequest` → `BrowserFindResult`: text matches or links, at the offsets `read` uses |
 | `POST` | `/v1/browser/targets/{id}/tap` | browser | Ref or CSS. `input` `touch` (default), `cdp`, or `cdp-mouse` (`BrowserTapRequest`) |
 | `POST` | `/v1/browser/targets/{id}/swipe` | browser | CSS pixels or a direction. `input` `touch` or `cdp` (`BrowserSwipeRequest`) |
 | `POST` | `/v1/browser/targets/{id}/gesture` | browser | Pointer paths in CSS pixels. `input` `touch` or `cdp` (`BrowserGestureRequest`) |
@@ -221,6 +223,8 @@ For stdio hosts (Cursor, etc.), run `phoneapi mcp` (with the helper up). It inst
 | `browser_targets` / `browser_open` / `browser_navigate` / `browser_close` | browser | Tab list, navigation, and closing a tab |
 | `browser_snapshot` / `browser_tap` / `browser_swipe` / `browser_gesture` | browser | AX outline and pointer input. `input` `touch` (default), `cdp`, or `cdp-mouse` (tap only) |
 | `browser_key` / `browser_type` | browser | Key presses and typing. `cdp` stays on a background tab; device keys such as HOME need `touch` |
+| `browser_read` | browser | Page text as markdown, sliced by `offset` and `maxChars` (default 8000), or `outline` for headings with offsets. `scope` `article` (default, via Readability) or `page`, or a CSS `selector`. `url` opens a new tab and reads it in one call |
+| `browser_find` | browser | `kind` `text` (matches with context and nearest heading) or `links` (text, URL, same-origin), at offsets `browser_read` takes |
 | `browser_eval` / `browser_console` | browser | JS and logs |
 | `screenshot` | observe | PNG last resort (`scale` default 0.5) |
 | `logcat_tail` | observe | Recent lines via helper |
