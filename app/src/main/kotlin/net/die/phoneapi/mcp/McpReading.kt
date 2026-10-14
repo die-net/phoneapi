@@ -2,12 +2,16 @@ package net.die.phoneapi.mcp
 
 import io.modelcontextprotocol.kotlin.sdk.types.CallToolRequest
 import io.modelcontextprotocol.kotlin.sdk.types.CallToolResult
+import kotlinx.coroutines.delay
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.model.BrowserFindRequest
 import net.die.phoneapi.model.BrowserFindResult
 import net.die.phoneapi.model.BrowserReadRequest
 import net.die.phoneapi.model.BrowserReadResult
+import net.die.phoneapi.model.EvalRequest
 import net.die.phoneapi.model.FindKind
 import net.die.phoneapi.model.READ_FORMAT_DOC
 import net.die.phoneapi.model.READ_SCOPE_DOC
@@ -85,28 +89,60 @@ internal suspend fun browserRead(
 
 private data class Opened(val target: String, val line: String)
 
-/** Opens [url] in a new tab and waits up to [OPEN_SETTLE_MS] for it to settle. */
+/**
+ * Opens [url] in a new tab and waits up to [OPEN_SETTLE_MS] for it to load and settle. A settle
+ * wait alone can match before the page has loaded, since requests from before the wait started are
+ * not seen, so this also polls document.readyState.
+ */
 private suspend fun openAndSettle(
     services: ServerServices,
     scopes: Set<Scope>,
     url: String,
 ): Opened {
     val tab = services.browser.openTab(url)
-    val wait =
-        services.waits.wait(
-            WaitRequest(
-                all = listOf(WaitCondition.BrowserSettled(target = tab.id)),
-                timeoutMs = OPEN_SETTLE_MS,
-            ),
-            scopes,
-        )
+    val deadline = System.currentTimeMillis() + OPEN_SETTLE_MS
+    var settled = settle(services, scopes, tab.id, deadline)
+    var loaded = loaded(services, tab.id)
+    while (!loaded && System.currentTimeMillis() < deadline) {
+        delay(LOAD_POLL_MS)
+        loaded = loaded(services, tab.id)
+        if (loaded) settled = settle(services, scopes, tab.id, deadline)
+    }
     val line = buildString {
         append("# opened target=").append(tab.id)
         if (tab.tookScreen == true) append(" tookScreen")
-        if (wait.timedOut) append(" (not settled after ${OPEN_SETTLE_MS / MS_PER_S} s)")
+        if (!loaded || !settled) {
+            append(" (not ").append(if (loaded) "settled" else "loaded")
+            append(" after ").append(OPEN_SETTLE_MS / MS_PER_S).append(" s)")
+        }
         append("; close it with browser_close when done")
     }
     return Opened(tab.id, line)
+}
+
+/** Waits for the tab to settle, until [deadline]. True when it did. */
+private suspend fun settle(
+    services: ServerServices,
+    scopes: Set<Scope>,
+    target: String,
+    deadline: Long,
+): Boolean {
+    val left = deadline - System.currentTimeMillis()
+    if (left <= 0) return false
+    val wait =
+        services.waits.wait(
+            WaitRequest(
+                all = listOf(WaitCondition.BrowserSettled(target = target)),
+                timeoutMs = left,
+            ),
+            scopes,
+        )
+    return wait.matched
+}
+
+private suspend fun loaded(services: ServerServices, target: String): Boolean {
+    val state = services.browser.evaluate(target, EvalRequest("document.readyState")).value
+    return (state as? JsonPrimitive)?.contentOrNull == "complete"
 }
 
 internal suspend fun browserFind(
@@ -227,3 +263,4 @@ private fun quoted(text: String): String =
 private val WHITESPACE = Regex("\\s+")
 private const val OPEN_SETTLE_MS = 15_000L
 private const val MS_PER_S = 1_000
+private const val LOAD_POLL_MS = 250L
