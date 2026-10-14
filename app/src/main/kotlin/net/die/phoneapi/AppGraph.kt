@@ -287,6 +287,11 @@ class AppGraph(
                 )
             },
             inFront = { pkg -> appInFront(pkg) },
+            pageScript = {
+                asset("readability/Readability.js").decodeToString() +
+                    "\n" +
+                    asset("page-read.js").decodeToString()
+            },
             devtoolsGap = DevtoolsPreconditions(context)::explain,
             refreshHz = { deviceInfo.display().refreshRate },
             touchscreen = { touchBackend.touchscreen() },

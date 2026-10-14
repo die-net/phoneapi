@@ -6,8 +6,12 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.serializer
 import net.die.phoneapi.model.ActionResult
 import net.die.phoneapi.model.AppInfo
+import net.die.phoneapi.model.BrowserFindRequest
+import net.die.phoneapi.model.BrowserFindResult
 import net.die.phoneapi.model.BrowserGestureRequest
 import net.die.phoneapi.model.BrowserKeyRequest
+import net.die.phoneapi.model.BrowserReadRequest
+import net.die.phoneapi.model.BrowserReadResult
 import net.die.phoneapi.model.BrowserSnapshot
 import net.die.phoneapi.model.BrowserSwipeRequest
 import net.die.phoneapi.model.BrowserTapRequest
@@ -299,8 +303,24 @@ public val phoneApiEndpoints: List<ApiEndpoint> =
             ApiMethod.GET,
             "/v1/browser/targets/{id}/snapshot",
             Scope.BROWSER,
-            "Compact outline of a browser target.",
+            "Compact outline of a browser target. Query maxNodes (default 400) and maxChars cap it.",
             response = serializer<BrowserSnapshot>(),
+        ),
+        endpoint(
+            ApiMethod.POST,
+            "/v1/browser/targets/{id}/read",
+            Scope.BROWSER,
+            "Read a browser target's text as markdown or plain text, a slice at a time, or its outline.",
+            serializer<BrowserReadRequest>(),
+            serializer<BrowserReadResult>(),
+        ),
+        endpoint(
+            ApiMethod.POST,
+            "/v1/browser/targets/{id}/find",
+            Scope.BROWSER,
+            "Find text or links in a browser target's content, at the offsets read uses.",
+            serializer<BrowserFindRequest>(),
+            serializer<BrowserFindResult>(),
         ),
         endpoint(
             ApiMethod.POST,

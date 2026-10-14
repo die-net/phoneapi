@@ -36,9 +36,13 @@ import net.die.phoneapi.helper.TouchscreenInfo
 import net.die.phoneapi.input.SwipeSpec
 import net.die.phoneapi.input.fallbackTouchscreen
 import net.die.phoneapi.model.ActionResult
+import net.die.phoneapi.model.BrowserFindRequest
+import net.die.phoneapi.model.BrowserFindResult
 import net.die.phoneapi.model.BrowserGestureRequest
 import net.die.phoneapi.model.BrowserInput
 import net.die.phoneapi.model.BrowserKeyRequest
+import net.die.phoneapi.model.BrowserReadRequest
+import net.die.phoneapi.model.BrowserReadResult
 import net.die.phoneapi.model.BrowserSnapshot
 import net.die.phoneapi.model.BrowserSnapshotOptions
 import net.die.phoneapi.model.BrowserSwipeRequest
@@ -52,6 +56,7 @@ import net.die.phoneapi.model.EvalRequest
 import net.die.phoneapi.model.EvalResult
 import net.die.phoneapi.model.KeyRequest
 import net.die.phoneapi.model.Point
+import net.die.phoneapi.model.ReadScope
 import net.die.phoneapi.model.Rect
 import net.die.phoneapi.model.TextRequest
 import net.die.phoneapi.model.TimedPoint
@@ -91,6 +96,8 @@ internal class BrowserServiceImpl(
     private val invalidateSnapshots: () -> Unit = {},
     private val showPackage: suspend (String) -> Unit = {},
     private val inFront: suspend (String) -> Boolean = { true },
+    /** Readability.js followed by page-read.js. */
+    private val pageScript: suspend () -> String = { "" },
     private val devtoolsGap: (BrowserGap) -> String = { gap ->
         browserGapMessage(gap, chromeInstalled = true, usbDebugging = true)
     },
@@ -98,6 +105,7 @@ internal class BrowserServiceImpl(
     private val touchscreen: suspend () -> TouchscreenInfo = { fallbackTouchscreen() },
 ) : BrowserService {
     private val axTrees = newAxCache()
+    @Volatile private var pageSource: String? = null
     private val pageInput: PageInput by lazy {
         PageInput(
             touchAt = touchAt,
@@ -317,6 +325,27 @@ internal class BrowserServiceImpl(
         return usePage(socket, chromeId) { cdp ->
             evaluateIn(cdp, expression, request.awaitPromise)
         }
+    }
+
+    override suspend fun read(id: String, request: BrowserReadRequest): BrowserReadResult {
+        checkRead(request)
+        return readPage(extractPage(id, request.scope, request.selector), request)
+    }
+
+    override suspend fun find(id: String, request: BrowserFindRequest): BrowserFindResult {
+        checkFind(request)
+        return findInPage(extractPage(id, request.scope, request.selector), request)
+    }
+
+    private suspend fun extractPage(id: String, scope: ReadScope, selector: String?): PageExtract {
+        val script =
+            readScript(pageSource ?: pageScript().also { pageSource = it }, scope, selector)
+        val (socket, chromeId) = parseBrowserTargetId(id)
+        val result =
+            usePage(socket, chromeId, repeatable = true) { cdp ->
+                evaluateIn(cdp, script, awaitPromise = false)
+            }
+        return decodeExtract(result, selector)
     }
 
     override suspend fun console(id: String, request: ConsoleRequest): ConsoleResult {

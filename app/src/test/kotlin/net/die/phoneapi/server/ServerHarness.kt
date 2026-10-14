@@ -20,8 +20,12 @@ import net.die.phoneapi.core.WaitService
 import net.die.phoneapi.helperclient.ShellResult
 import net.die.phoneapi.model.ActionResult
 import net.die.phoneapi.model.AppInfo
+import net.die.phoneapi.model.BrowserFindRequest
+import net.die.phoneapi.model.BrowserFindResult
 import net.die.phoneapi.model.BrowserGestureRequest
 import net.die.phoneapi.model.BrowserKeyRequest
+import net.die.phoneapi.model.BrowserReadRequest
+import net.die.phoneapi.model.BrowserReadResult
 import net.die.phoneapi.model.BrowserSnapshot
 import net.die.phoneapi.model.BrowserSnapshotOptions
 import net.die.phoneapi.model.BrowserSwipeRequest
@@ -281,6 +285,20 @@ private object FakeBrowser : BrowserService {
 
     override suspend fun snapshot(id: String, options: BrowserSnapshotOptions) =
         BrowserSnapshot(id = id, compact = "page")
+
+    override suspend fun read(id: String, request: BrowserReadRequest) =
+        BrowserReadResult(
+            extracted = "page",
+            version = "0",
+            totalChars = 4,
+            offset = 0,
+            returnedChars = 4,
+            truncated = false,
+            content = "page",
+        )
+
+    override suspend fun find(id: String, request: BrowserFindRequest) =
+        BrowserFindResult(extracted = "page", version = "0", totalChars = 4, total = 0)
 
     override suspend fun tap(id: String, request: BrowserTapRequest) = acted()
 
