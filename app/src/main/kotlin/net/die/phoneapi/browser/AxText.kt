@@ -6,6 +6,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
+import net.die.phoneapi.model.BrowserSnapshotOptions
 
 /**
  * Turns `Accessibility.getFullAXTree` into the same kind of indented text the native snapshot uses.
@@ -14,14 +15,17 @@ import kotlinx.serialization.json.contentOrNull
  */
 internal data class AxText(val title: String?, val compact: String)
 
-internal fun formatAxTree(result: JsonObject, url: String? = null): AxText {
+internal fun formatAxTree(
+    result: JsonObject,
+    url: String? = null,
+    options: BrowserSnapshotOptions = BrowserSnapshotOptions(),
+): AxText {
     val nodes = result.decodeCdp<NodeList>()?.nodes?.mapNotNull { it.decodeCdp<AxNode>() }
     if (nodes == null) return blank(url)
-    return AxTree(nodes).format(url)
+    return AxTree(nodes).format(url, options)
 }
 
-private fun blank(url: String?) =
-    AxText(null, header(url, title = null, truncated = false).trimEnd())
+private fun blank(url: String?) = AxText(null, header(url, title = null, notes = emptyList()))
 
 private class AxTree(nodes: List<AxNode>) {
     private val byId = LinkedHashMap<String, AxNode>()
@@ -32,15 +36,25 @@ private class AxTree(nodes: List<AxNode>) {
         for (node in nodes) add(node)
     }
 
-    fun format(url: String?): AxText {
-        val out = StringBuilder()
-        val walk = Walk(this, out)
+    fun format(url: String?, options: BrowserSnapshotOptions): AxText {
+        val walk = Walk(this)
         walk.emitList(roots(), 0)
         val title =
             roots().firstOrNull()?.let {
                 byId[it]?.name.text()?.takeIf { name -> name.isNotBlank() }
             }
-        return AxText(title, (header(url, title, walk.truncated) + out.toString()).trimEnd())
+        val kept = keep(walk.lines, options)
+        val notes = buildList {
+            if (kept.size < walk.lines.size) {
+                add(
+                    "# showing ${kept.size} of ${walk.lines.size} nodes; " +
+                        "raise maxNodes or maxChars for more"
+                )
+            }
+            if (walk.depthCut) add("# nodes more than $MAX_DEPTH levels deep left out")
+        }
+        val body = kept.joinToString("") { "\n" + it }
+        return AxText(title, header(url, title, notes) + body)
     }
 
     fun node(id: String): AxNode? = byId[id]
@@ -59,14 +73,23 @@ private class AxTree(nodes: List<AxNode>) {
     }
 }
 
-private class Walk(private val tree: AxTree, private val out: StringBuilder) {
-    var lines = 0
-    var truncated = false
+private fun keep(lines: List<String>, options: BrowserSnapshotOptions): List<String> {
+    val maxChars = options.maxChars ?: Int.MAX_VALUE
+    var chars = 0
+    return lines.take(options.maxNodes).takeWhile { line ->
+        chars += line.length + 1
+        chars <= maxChars
+    }
+}
+
+private class Walk(private val tree: AxTree) {
+    val lines = ArrayList<String>()
+    var depthCut = false
     private val seen = HashSet<String>()
 
     fun emitList(ids: List<String>, depth: Int) {
         var index = 0
-        while (index < ids.size && !truncated) {
+        while (index < ids.size) {
             val run = textRun(ids, index)
             if (run == null) {
                 emit(ids[index], depth)
@@ -111,29 +134,24 @@ private class Walk(private val tree: AxTree, private val out: StringBuilder) {
     }
 
     private fun enter(id: String, depth: Int): Boolean {
-        if (truncated || !seen.add(id)) return false
+        if (!seen.add(id)) return false
         if (depth <= MAX_DEPTH) return true
-        truncated = true
+        depthCut = true
         return false
     }
 
     private fun append(node: AxNode, id: String, depth: Int, name: String?) {
-        if (lines >= MAX_LINES) {
-            truncated = true
-            return
-        }
-        out.append(line(node, id, depth, name)).append('\n')
-        lines++
-        if (lines >= MAX_LINES) truncated = true
+        lines += line(node, id, depth, name)
     }
 }
 
-private fun header(url: String?, title: String?, truncated: Boolean): String = buildString {
+/** The header line, ending with ` truncated` when [notes] say what was left out. */
+private fun header(url: String?, title: String?, notes: List<String>): String = buildString {
     append("#")
     title?.let { append(" title=").append(quote(it)) }
     url?.let { append(" url=").append(it) }
-    if (truncated) append(" truncated")
-    append('\n')
+    if (notes.isNotEmpty()) append(" truncated")
+    for (note in notes) append('\n').append(note)
 }
 
 private fun line(node: AxNode, id: String, depth: Int, name: String?): String = buildString {
@@ -189,5 +207,4 @@ private data class AxNode(
 
 private val SHOWN_FLAGS = setOf("focused", "checked", "disabled", "selected", "expanded")
 
-private const val MAX_LINES = 400
 private const val MAX_DEPTH = 40

@@ -24,6 +24,7 @@ import net.die.phoneapi.model.BROWSER_WAKE_DOC
 import net.die.phoneapi.model.BrowserGestureRequest
 import net.die.phoneapi.model.BrowserInput
 import net.die.phoneapi.model.BrowserKeyRequest
+import net.die.phoneapi.model.BrowserSnapshotOptions
 import net.die.phoneapi.model.BrowserSwipeRequest
 import net.die.phoneapi.model.BrowserTapRequest
 import net.die.phoneapi.model.BrowserTextRequest
@@ -67,6 +68,8 @@ internal suspend fun uiSnapshot(
                 format = SnapshotFormat.COMPACT,
                 windowId = args.window?.let(::windowId),
                 maxDepth = args.maxDepth,
+                maxNodes = args.maxNodes,
+                maxChars = args.maxChars,
                 includeInvisible = args.includeInvisible,
                 allWindows = args.all,
                 autoWake = args.autoWake,
@@ -228,7 +231,9 @@ internal suspend fun browserSnapshot(
     services: ServerServices,
     request: CallToolRequest,
 ): CallToolResult = runTool {
-    val snapshot = services.browser.snapshot(request.args<TargetArgs>().target)
+    val args = request.args<BrowserSnapshotArgs>()
+    val snapshot =
+        services.browser.snapshot(args.target, BrowserSnapshotOptions(args.maxNodes, args.maxChars))
     snapshot.compact
 }
 
@@ -445,6 +450,10 @@ internal data class SnapshotArgs(
     val window: String? = null,
     @Doc("Stop this many levels down. Leaving nodes out marks the outline truncated.")
     val maxDepth: Int? = null,
+    @Doc("Most nodes to show. The rest are counted, and a line after the header says so.")
+    val maxNodes: Int? = null,
+    @Doc("Most characters of outline to show, cut at a line. Cuts are reported like maxNodes.")
+    val maxChars: Int? = null,
     @Doc("Also include nodes that are off screen or hidden.") val includeInvisible: Boolean = false,
     @Doc("Include every window, such as the status bar and the keyboard's contents.")
     val all: Boolean = false,
@@ -478,6 +487,15 @@ internal data class PackageArgs(
 @Serializable internal data class UrlArgs(val url: String)
 
 @Serializable internal data class TargetArgs(val target: String)
+
+@Serializable
+internal data class BrowserSnapshotArgs(
+    val target: String,
+    @Doc("Most nodes to show, 1 to 5000. Defaults to 400. A line after the header counts the rest.")
+    val maxNodes: Int = 400,
+    @Doc("Most characters of outline to show, cut at a line. Cuts are reported like maxNodes.")
+    val maxChars: Int? = null,
+)
 
 @Serializable internal data class TargetUrlArgs(val target: String, val url: String)
 

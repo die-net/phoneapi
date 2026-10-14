@@ -66,6 +66,10 @@ public data class SnapshotOptions(
     val format: SnapshotFormat = SnapshotFormat.COMPACT,
     val windowId: Int? = null,
     val maxDepth: Int? = null,
+    /** Most node lines in the compact outline. The rest are counted and reported as cut. */
+    val maxNodes: Int? = null,
+    /** Most characters of compact outline below its header, cut at a line. */
+    val maxChars: Int? = null,
     val includeInvisible: Boolean = false,
     /** Include every window, not just the ones that are interesting to act on. */
     val allWindows: Boolean = false,

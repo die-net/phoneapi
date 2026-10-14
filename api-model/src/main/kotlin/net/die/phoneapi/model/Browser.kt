@@ -158,6 +158,13 @@ public data class EvalResult(
 
 @Serializable public data class ConsoleResult(val entries: List<ConsoleEntry> = emptyList())
 
+/** Caps on a browser snapshot's outline. Lines left out are counted and reported as cut. */
+@Serializable
+public data class BrowserSnapshotOptions(
+    @Doc("Most node lines to show, 1 to 5000. Defaults to 400.") val maxNodes: Int = 400,
+    @Doc("Most characters of outline below the header, cut at a line.") val maxChars: Int? = null,
+)
+
 /** Compact accessibility tree of a browser target. */
 @Serializable
 public data class BrowserSnapshot(

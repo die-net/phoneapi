@@ -49,11 +49,13 @@ ADB `CREATE_TOKEN` (via `phoneapi pair`) grants every scope. Narrower tokens: `P
 | `format` | `compact` | `compact`, `json`, or `both` |
 | `window` | — | Window id |
 | `maxDepth` | — | Truncate tree depth |
+| `maxNodes` | — | Most node lines in the compact outline |
+| `maxChars` | — | Most characters of compact outline, cut at a line |
 | `includeInvisible` | `false` | |
 | `all` | `false` | All windows, not only actionable |
 | `autoWake` | `true` | Wake before capture |
 
-Compact text looks like `[e12] button "Sign in"`. Prefer it over screenshots for agents. Node `ref` values (e.g. `e12`) are stable only when `capabilities` includes `ui.stableIds` (Android 13+).
+Compact text looks like `[e12] button "Sign in"`. When anything is left out, the header line ends with `truncated` and `#` lines after it say what: `# showing 120 of 1840 nodes; raise maxNodes or maxChars for more`, `# nodes below maxDepth 4 left out`, or `# stopped reading at 5000 nodes; pass window or maxDepth to narrow`. `maxNodes` and `maxChars` apply only to the compact outline. Prefer it over screenshots for agents. Node `ref` values (e.g. `e12`) are stable only when `capabilities` includes `ui.stableIds` (Android 13+).
 
 ### Wait
 
@@ -158,7 +160,7 @@ Target ids look like `chrome_devtools_remote~<pageId>`. Chrome must publish DevT
 | `POST` | `/v1/browser/tabs` | browser | Open tab (`OpenTabRequest`). `tookScreen` is true when Chrome was on screen and switched to it |
 | `POST` | `/v1/browser/targets/{id}/navigate` | browser | `NavigateRequest` |
 | `POST` | `/v1/browser/targets/{id}/close` | browser | Close the tab without bringing it forward → `ActionResult` |
-| `GET` | `/v1/browser/targets/{id}/snapshot` | browser | Compact AX outline → `BrowserSnapshot` |
+| `GET` | `/v1/browser/targets/{id}/snapshot` | browser | Compact AX outline → `BrowserSnapshot`. `maxNodes` (default 400, up to 5000) and `maxChars` cap it; cuts are reported as for the UI snapshot |
 | `POST` | `/v1/browser/targets/{id}/tap` | browser | Ref or CSS. `input` `touch` (default), `cdp`, or `cdp-mouse` (`BrowserTapRequest`) |
 | `POST` | `/v1/browser/targets/{id}/swipe` | browser | CSS pixels or a direction. `input` `touch` or `cdp` (`BrowserSwipeRequest`) |
 | `POST` | `/v1/browser/targets/{id}/gesture` | browser | Pointer paths in CSS pixels. `input` `touch` or `cdp` (`BrowserGestureRequest`) |

@@ -80,6 +80,17 @@ object UiStates {
     val INTERACTIVE: Set<String> = setOf(CLICKABLE, LONG_CLICKABLE, CHECKABLE, EDITABLE, SCROLLABLE)
 }
 
+/** Caps on how much of an outline is returned. Null means no cap. */
+data class OutlineLimits(val maxNodes: Int? = null, val maxChars: Int? = null)
+
+/**
+ * Why reading the tree stopped short: nodes below [maxDepth] were skipped, or reading stopped at
+ * [nodeCap] nodes. Null when that did not happen.
+ */
+data class TreeCut(val maxDepth: Int? = null, val nodeCap: Int? = null)
+
+private data class OutlineLine(val text: String, val node: Boolean)
+
 /**
  * Token-efficient outline of a snapshot: one line per meaningful node, indented by depth, with
  * layout-only containers flattened away and the labels of clickable rows pulled up into the row.
@@ -102,41 +113,82 @@ object CompactFormatter {
             "window_control" to "control",
         )
 
-    fun header(seq: Long, state: DeviceStateSummary, truncated: Boolean = false): String =
-        buildString {
-            append("# seq=").append(seq)
-            append(" screen=").append(state.screen.name.lowercase())
-            append(" keyguard=")
-            append(
-                when {
-                    !state.keyguard.locked -> "unlocked"
-                    state.keyguard.secure -> "locked(secure)"
-                    else -> "locked"
-                }
-            )
-            val ime = state.ime
-            append(" ime=")
-            if (ime.visible) {
-                append("shown")
-                ime.bounds?.let { append(rectText(it)) }
-                ime.packageName?.let { append(' ').append(it) }
-            } else {
-                append("hidden")
+    fun header(seq: Long, state: DeviceStateSummary): String = buildString {
+        append("# seq=").append(seq)
+        append(" screen=").append(state.screen.name.lowercase())
+        append(" keyguard=")
+        append(
+            when {
+                !state.keyguard.locked -> "unlocked"
+                state.keyguard.secure -> "locked(secure)"
+                else -> "locked"
             }
-            state.foregroundPackage?.let { append(" fg=").append(it) }
-            if (truncated) append(" truncated")
+        )
+        val ime = state.ime
+        append(" ime=")
+        if (ime.visible) {
+            append("shown")
+            ime.bounds?.let { append(rectText(it)) }
+            ime.packageName?.let { append(' ').append(it) }
+        } else {
+            append("hidden")
         }
+        state.foregroundPackage?.let { append(" fg=").append(it) }
+    }
 
-    fun format(header: String, windows: List<UiWindow>): String = buildString {
-        append(header).append('\n')
+    /**
+     * The outline under [header], cut to [limits]. When anything is left out, either here or by
+     * [cut] while reading the tree, the header ends with ` truncated` and `#` lines after it say
+     * what is missing.
+     */
+    fun format(
+        header: String,
+        windows: List<UiWindow>,
+        limits: OutlineLimits = OutlineLimits(),
+        cut: TreeCut = TreeCut(),
+    ): String {
+        val lines = ArrayList<OutlineLine>()
         for (window in windows) {
-            append(windowLine(window)).append('\n')
+            lines += OutlineLine(windowLine(window), node = false)
             val root = window.root
             if (root == null) {
-                if (window.type == "input_method") append("  (keys omitted; pass all=true)\n")
+                if (window.type == "input_method") {
+                    lines += OutlineLine("  (keys omitted; pass all=true)", node = false)
+                }
             } else {
-                emit(root, depth = 1, absorbed = HashSet(), out = this)
+                emit(root, depth = 1, absorbed = HashSet(), out = lines)
             }
+        }
+        val kept = keep(lines, limits)
+        val notes = buildList {
+            if (kept.size < lines.size) {
+                val shown = kept.count { it.node }
+                val total = lines.count { it.node }
+                add("# showing $shown of $total nodes; raise maxNodes or maxChars for more")
+            }
+            cut.maxDepth?.let { add("# nodes below maxDepth $it left out") }
+            cut.nodeCap?.let {
+                add("# stopped reading at $it nodes; pass window or maxDepth to narrow")
+            }
+        }
+        return buildString {
+            append(header)
+            if (notes.isNotEmpty()) append(" truncated")
+            append('\n')
+            for (note in notes) append(note).append('\n')
+            for (line in kept) append(line.text).append('\n')
+        }
+    }
+
+    private fun keep(lines: List<OutlineLine>, limits: OutlineLimits): List<OutlineLine> {
+        val maxNodes = limits.maxNodes ?: Int.MAX_VALUE
+        val maxChars = limits.maxChars ?: Int.MAX_VALUE
+        var nodes = 0
+        var chars = 0
+        return lines.takeWhile { line ->
+            if (line.node) nodes++
+            chars += line.text.length + 1
+            nodes <= maxNodes && chars <= maxChars
         }
     }
 
@@ -149,9 +201,14 @@ object CompactFormatter {
         append(']')
     }
 
-    private fun emit(node: UiNode, depth: Int, absorbed: MutableSet<String>, out: StringBuilder) {
+    private fun emit(
+        node: UiNode,
+        depth: Int,
+        absorbed: MutableSet<String>,
+        out: MutableList<OutlineLine>,
+    ) {
         val printed = node.ref !in absorbed && isMeaningful(node)
-        if (printed) out.append(line(node, depth, absorbed)).append('\n')
+        if (printed) out += OutlineLine(line(node, depth, absorbed), node = true)
         val childDepth = if (printed) depth + 1 else depth
         for (child in node.children) emit(child, childDepth, absorbed, out)
     }
