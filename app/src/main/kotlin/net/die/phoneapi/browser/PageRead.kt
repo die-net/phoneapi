@@ -124,7 +124,7 @@ private class PageRenderer(private val markdown: Boolean) {
     private fun body(block: PageBlock, inline: Inline?): String? =
         when (block.k) {
             "pre" -> if (markdown) "```\n${block.x}\n```" else block.x
-            "tr" -> row(block)
+            "tr" -> if (block.c.all { it.isBlank() }) null else row(block)
             "hr" -> if (markdown) "---" else null
             else -> inline?.text
         }

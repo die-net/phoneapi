@@ -50,6 +50,24 @@ class RedactorTest {
     }
 
     @Test
+    fun `uses the label before a field`() {
+        val (out, count) =
+            redact(
+                node("e1", text = "Code"),
+                node("e2", "edit", "482913", states = listOf("editable")),
+                node("e3", text = "ZIP code"),
+                node("e4", "edit", "94110", states = listOf("editable")),
+                node("e5", text = "Verification code"),
+                node("e6", "edit", "AB12CD", states = listOf("editable")),
+            )
+        assertEquals(
+            listOf("Code", "[redacted]", "ZIP code", "94110", "Verification code", "[redacted]"),
+            out.map { it.text },
+        )
+        assertEquals(2, count)
+    }
+
+    @Test
     fun `masks card numbers`() {
         val (out, count) =
             redact(
