@@ -152,7 +152,7 @@ internal class FrameRelay(
     private fun captureMissing() {
         try {
             onMissingFrame?.invoke()
-        } catch (e: RuntimeException) {
+        } catch (e: IllegalStateException) {
             Log.w(TAG, "capture", e)
         } catch (e: RemoteException) {
             Log.w(TAG, "capture", e)

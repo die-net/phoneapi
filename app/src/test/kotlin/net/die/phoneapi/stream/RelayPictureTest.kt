@@ -11,12 +11,12 @@ class RelayPictureTest {
     }
 
     @Test
-    fun `a screencap stands in until the mirror draws`() {
+    fun `a screencap stands in`() {
         assertEquals(RelayPicture.CAPTURE, relayPicture(hasMirrorFrame = false, hasCapture = true))
     }
 
     @Test
-    fun `nothing is drawn before either picture`() {
+    fun `nothing before either picture`() {
         assertEquals(RelayPicture.NONE, relayPicture(hasMirrorFrame = false, hasCapture = false))
     }
 }
