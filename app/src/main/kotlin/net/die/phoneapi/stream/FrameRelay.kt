@@ -1,5 +1,6 @@
 package net.die.phoneapi.stream
 
+import android.graphics.Bitmap
 import android.graphics.SurfaceTexture
 import android.opengl.EGL14
 import android.opengl.EGLConfig
@@ -9,8 +10,10 @@ import android.opengl.EGLExt
 import android.opengl.EGLSurface
 import android.opengl.GLES11Ext
 import android.opengl.GLES20
+import android.opengl.GLUtils
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.RemoteException
 import android.util.Log
 import android.view.Surface
 import java.nio.ByteBuffer
@@ -30,8 +33,24 @@ import java.util.concurrent.TimeoutException
  * redraws the last frame when asked (so a joining viewer gets its key frame) and after [IDLE_MS]
  * without one (so a still screen still sends a frame a second).
  *
- * Until the mirror delivers its first frame there is nothing to redraw.
+ * Until the mirror delivers its first frame there is nothing of its to redraw. A redraw asked for
+ * then draws a screencap instead, and repeats that picture until a mirror frame arrives. The mirror
+ * surface stays connected.
  */
+internal enum class RelayPicture {
+    MIRROR,
+    CAPTURE,
+    NONE,
+}
+
+/** A mirror frame wins. A screencap fills in until the mirror has drawn. */
+internal fun relayPicture(hasMirrorFrame: Boolean, hasCapture: Boolean): RelayPicture =
+    when {
+        hasMirrorFrame -> RelayPicture.MIRROR
+        hasCapture -> RelayPicture.CAPTURE
+        else -> RelayPicture.NONE
+    }
+
 internal class FrameRelay(
     encoderSurface: Surface,
     private val width: Int,
@@ -50,7 +69,19 @@ internal class FrameRelay(
     private var texCoord = 0
     private var frames: SurfaceTexture? = null
     private var hasFrame = false
+    private var hasCapture = false
+    private var bitmapProgram = 0
+    private var bitmapTexture = 0
+    private var bitmapPosition = 0
+    private var bitmapTexCoord = 0
+    private var bitmapSampler = 0
     private var released = false
+
+    /**
+     * Runs on the relay thread when a redraw is asked for and there is no picture yet. Set before
+     * the first redraw. A screencap, not a surface reconnect.
+     */
+    var onMissingFrame: (() -> Unit)? = null
     private var lastPtsNs = 0L
     private val matrix = FloatArray(16)
     private val quad: FloatBuffer =
@@ -61,6 +92,14 @@ internal class FrameRelay(
                 put(QUAD)
                 position(0)
             }
+    private val bitmapQuad: FloatBuffer =
+        ByteBuffer.allocateDirect(BITMAP_QUAD.size * Float.SIZE_BYTES)
+            .order(ByteOrder.nativeOrder())
+            .asFloatBuffer()
+            .apply {
+                put(BITMAP_QUAD)
+                position(0)
+            }
 
     /** The surface the mirror draws into. */
     val input: Surface
@@ -69,7 +108,13 @@ internal class FrameRelay(
         object : Runnable {
             override fun run() {
                 if (released) return
-                if (hasFrame && System.nanoTime() - lastPtsNs >= IDLE_MS * NS_PER_MS) draw()
+                val picture = relayPicture(hasFrame, hasCapture)
+                if (
+                    picture != RelayPicture.NONE &&
+                        System.nanoTime() - lastPtsNs >= IDLE_MS * NS_PER_MS
+                ) {
+                    presentPicture(picture)
+                }
                 handler.postDelayed(this, IDLE_MS / 2)
             }
         }
@@ -85,9 +130,41 @@ internal class FrameRelay(
             }
     }
 
-    /** Draws the last mirrored frame again, so a pending sync-frame request has input. */
+    /** Draws the last picture again, or asks for a screencap when the mirror has none yet. */
     fun redraw() {
-        handler.post { if (!released && hasFrame) draw() }
+        handler.post {
+            if (released) return@post
+            when (val picture = relayPicture(hasFrame, hasCapture)) {
+                RelayPicture.NONE -> captureMissing()
+                else -> presentPicture(picture)
+            }
+        }
+    }
+
+    /** Uploads [bitmap] and submits it. Call on the relay thread. Leaves the mirror connected. */
+    fun drawCapture(bitmap: Bitmap) {
+        if (released) return
+        uploadBitmap(bitmap)
+        hasCapture = true
+        presentPicture(RelayPicture.CAPTURE)
+    }
+
+    private fun captureMissing() {
+        try {
+            onMissingFrame?.invoke()
+        } catch (e: RuntimeException) {
+            Log.w(TAG, "capture", e)
+        } catch (e: RemoteException) {
+            Log.w(TAG, "capture", e)
+        }
+    }
+
+    private fun presentPicture(picture: RelayPicture) {
+        when (picture) {
+            RelayPicture.MIRROR -> draw()
+            RelayPicture.CAPTURE -> drawUploaded()
+            RelayPicture.NONE -> Unit
+        }
     }
 
     /** Stops drawing and frees the GL objects. Call after the mirror stops, before the codec. */
@@ -242,6 +319,82 @@ internal class FrameRelay(
         lastPtsNs = pts
     }
 
+    private fun uploadBitmap(bitmap: Bitmap) {
+        if (bitmapProgram == 0) initBitmapProgram()
+        if (bitmapTexture == 0) {
+            val ids = IntArray(1)
+            GLES20.glGenTextures(1, ids, 0)
+            bitmapTexture = ids[0]
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, bitmapTexture)
+            GLES20.glTexParameteri(
+                GLES20.GL_TEXTURE_2D,
+                GLES20.GL_TEXTURE_MIN_FILTER,
+                GLES20.GL_LINEAR,
+            )
+            GLES20.glTexParameteri(
+                GLES20.GL_TEXTURE_2D,
+                GLES20.GL_TEXTURE_MAG_FILTER,
+                GLES20.GL_LINEAR,
+            )
+            GLES20.glTexParameteri(
+                GLES20.GL_TEXTURE_2D,
+                GLES20.GL_TEXTURE_WRAP_S,
+                GLES20.GL_CLAMP_TO_EDGE,
+            )
+            GLES20.glTexParameteri(
+                GLES20.GL_TEXTURE_2D,
+                GLES20.GL_TEXTURE_WRAP_T,
+                GLES20.GL_CLAMP_TO_EDGE,
+            )
+        }
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, bitmapTexture)
+        GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bitmap, 0)
+    }
+
+    private fun initBitmapProgram() {
+        val vertex = compile(GLES20.GL_VERTEX_SHADER, BITMAP_VERTEX)
+        val fragment = compile(GLES20.GL_FRAGMENT_SHADER, BITMAP_FRAGMENT)
+        val built = GLES20.glCreateProgram()
+        GLES20.glAttachShader(built, vertex)
+        GLES20.glAttachShader(built, fragment)
+        GLES20.glLinkProgram(built)
+        GLES20.glDeleteShader(vertex)
+        GLES20.glDeleteShader(fragment)
+        val status = IntArray(1)
+        GLES20.glGetProgramiv(built, GLES20.GL_LINK_STATUS, status, 0)
+        if (status[0] == 0) {
+            val log = GLES20.glGetProgramInfoLog(built)
+            GLES20.glDeleteProgram(built)
+            error("Capture program did not link: $log")
+        }
+        bitmapProgram = built
+        bitmapPosition = GLES20.glGetAttribLocation(built, "aPosition")
+        bitmapTexCoord = GLES20.glGetAttribLocation(built, "aTexCoord")
+        bitmapSampler = GLES20.glGetUniformLocation(built, "sTexture")
+    }
+
+    private fun drawUploaded() {
+        if (bitmapProgram == 0 || bitmapTexture == 0) return
+        GLES20.glViewport(0, 0, width, height)
+        GLES20.glUseProgram(bitmapProgram)
+        GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+        GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, bitmapTexture)
+        GLES20.glUniform1i(bitmapSampler, 0)
+        bitmapQuad.position(0)
+        GLES20.glVertexAttribPointer(bitmapPosition, 2, GLES20.GL_FLOAT, false, STRIDE, bitmapQuad)
+        GLES20.glEnableVertexAttribArray(bitmapPosition)
+        bitmapQuad.position(2)
+        GLES20.glVertexAttribPointer(bitmapTexCoord, 2, GLES20.GL_FLOAT, false, STRIDE, bitmapQuad)
+        GLES20.glEnableVertexAttribArray(bitmapTexCoord)
+        GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+        val pts = maxOf(System.nanoTime(), lastPtsNs + 1)
+        EGLExt.eglPresentationTimeANDROID(display, eglSurface, pts)
+        if (!EGL14.eglSwapBuffers(display, eglSurface)) {
+            Log.w(TAG, "eglSwapBuffers failed: 0x${Integer.toHexString(EGL14.eglGetError())}")
+        }
+        lastPtsNs = pts
+    }
+
     private fun tearDown() {
         released = true
         handler.removeCallbacks(idleTick)
@@ -253,6 +406,8 @@ internal class FrameRelay(
         if (display != EGL14.EGL_NO_DISPLAY) {
             if (program != 0) GLES20.glDeleteProgram(program)
             if (texture != 0) GLES20.glDeleteTextures(1, intArrayOf(texture), 0)
+            if (bitmapProgram != 0) GLES20.glDeleteProgram(bitmapProgram)
+            if (bitmapTexture != 0) GLES20.glDeleteTextures(1, intArrayOf(bitmapTexture), 0)
             EGL14.eglMakeCurrent(
                 display,
                 EGL14.EGL_NO_SURFACE,
@@ -266,6 +421,8 @@ internal class FrameRelay(
         }
         program = 0
         texture = 0
+        bitmapProgram = 0
+        bitmapTexture = 0
         eglSurface = EGL14.EGL_NO_SURFACE
         context = EGL14.EGL_NO_CONTEXT
         display = EGL14.EGL_NO_DISPLAY
@@ -306,6 +463,10 @@ internal class FrameRelay(
         /** x, y, s, t for a full-screen triangle strip. */
         val QUAD = floatArrayOf(-1f, -1f, 0f, 0f, 1f, -1f, 1f, 0f, -1f, 1f, 0f, 1f, 1f, 1f, 1f, 1f)
 
+        /** Bitmap row 0 is the top of the screen, so the texture coordinate is flipped. */
+        val BITMAP_QUAD =
+            floatArrayOf(-1f, -1f, 0f, 1f, 1f, -1f, 1f, 1f, -1f, 1f, 0f, 0f, 1f, 1f, 1f, 0f)
+
         const val VERTEX_SHADER =
             """
             uniform mat4 uTexMatrix;
@@ -324,6 +485,27 @@ internal class FrameRelay(
             precision mediump float;
             varying vec2 vTexCoord;
             uniform samplerExternalOES sTexture;
+            void main() {
+                gl_FragColor = texture2D(sTexture, vTexCoord);
+            }
+            """
+
+        const val BITMAP_VERTEX =
+            """
+            attribute vec4 aPosition;
+            attribute vec2 aTexCoord;
+            varying vec2 vTexCoord;
+            void main() {
+                gl_Position = aPosition;
+                vTexCoord = aTexCoord;
+            }
+            """
+
+        const val BITMAP_FRAGMENT =
+            """
+            precision mediump float;
+            varying vec2 vTexCoord;
+            uniform sampler2D sTexture;
             void main() {
                 gl_FragColor = texture2D(sTexture, vTexCoord);
             }
