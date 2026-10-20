@@ -10,6 +10,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.RemoteException
+import android.os.SystemClock
 import android.util.Log
 import android.view.Display
 import io.ktor.server.websocket.DefaultWebSocketServerSession
@@ -77,6 +78,8 @@ internal class VideoStream(
     private var activeHeight = 0
     private var listening = false
     private var displayJob: Job? = null
+    @Volatile private var diagStart = 0L
+    @Volatile private var diagOutputs = 0
 
     private val displayListener =
         object : DisplayManager.DisplayListener {
@@ -211,10 +214,17 @@ internal class VideoStream(
             encoder.start()
             running = true
             codec = encoder
-            val frames = FrameRelay(surface, width, height)
+            diagStart = SystemClock.elapsedRealtime()
+            diagOutputs = 0
+            val useRelay = DiagProps.relayEnabled()
+            Log.i(TAG, "diag: encoder ${encoder.name} ${width}x$height relay=$useRelay")
+            val frames = if (useRelay) FrameRelay(surface, width, height) else null
             relay = frames
             val started =
-                helper.require().startMirror(frames.input, width, height, Display.DEFAULT_DISPLAY)
+                helper
+                    .require()
+                    .startMirror(frames?.input ?: surface, width, height, Display.DEFAULT_DISPLAY)
+            Log.i(TAG, "diag: startMirror returned $started at ${diagMs()}ms")
             if (!started) {
                 throw ApiException.unavailable(
                     "stream_error",
@@ -344,6 +354,14 @@ internal class VideoStream(
         val annex = accessUnitToAnnexB(data)
         if (annex.isEmpty()) return
         val key = info.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME != 0
+        diagOutputs++
+        if (diagOutputs <= DIAG_LOG_OUTPUTS) {
+            Log.i(
+                TAG,
+                "diag: encoder output $diagOutputs key=$key bytes=${annex.size} " +
+                    "at ${diagMs()}ms ptsUs=${info.presentationTimeUs}",
+            )
+        }
         val payload = if (key) withParameterSets(annex) else annex
         val type = if (key) FRAME_KEY else FRAME_DELTA
         emitFrame(packFrame(type, info.presentationTimeUs, payload))
@@ -389,9 +407,12 @@ internal class VideoStream(
         return sets + annex
     }
 
+    private fun diagMs(): Long = SystemClock.elapsedRealtime() - diagStart
+
     private fun requestSync() {
         val current = codec ?: return
         if (!running) return
+        Log.i(TAG, "diag: requestSync at ${diagMs()}ms viewers=${subscribers.size}")
         val bundle = Bundle()
         bundle.putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME, 0)
         try {
@@ -541,6 +562,7 @@ internal class VideoStream(
     private companion object {
         const val TAG = "PhoneApiStream"
         const val CHANNEL_CAP = 4
+        const val DIAG_LOG_OUTPUTS = 5
         const val REPEAT_US = 100_000
         const val DISPLAY_POLL_MS = 400L
         const val ENCODER_STOPPED = "The video encoder stopped"

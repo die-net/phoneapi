@@ -11,6 +11,7 @@ import android.opengl.GLES11Ext
 import android.opengl.GLES20
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.SystemClock
 import android.util.Log
 import android.view.Surface
 import java.nio.ByteBuffer
@@ -52,6 +53,10 @@ internal class FrameRelay(
     private var hasFrame = false
     private var released = false
     private var lastPtsNs = 0L
+    private val diagStart = SystemClock.elapsedRealtime()
+    private var diagMirrored = 0
+    private var diagFailed = 0
+    private var diagDraws = 0
     private val matrix = FloatArray(16)
     private val quad: FloatBuffer =
         ByteBuffer.allocateDirect(QUAD.size * Float.SIZE_BYTES)
@@ -69,6 +74,9 @@ internal class FrameRelay(
         object : Runnable {
             override fun run() {
                 if (released) return
+                if (!hasFrame) {
+                    Log.i(TAG, "diag: no mirror frame yet at ${diagMs()}ms failed=$diagFailed")
+                }
                 if (hasFrame && System.nanoTime() - lastPtsNs >= IDLE_MS * NS_PER_MS) draw()
                 handler.postDelayed(this, IDLE_MS / 2)
             }
@@ -87,7 +95,10 @@ internal class FrameRelay(
 
     /** Draws the last mirrored frame again, so a pending sync-frame request has input. */
     fun redraw() {
-        handler.post { if (!released && hasFrame) draw() }
+        handler.post {
+            Log.i(TAG, "diag: redraw at ${diagMs()}ms hasFrame=$hasFrame")
+            if (!released && hasFrame) draw()
+        }
     }
 
     /** Stops drawing and frees the GL objects. Call after the mirror stops, before the codec. */
@@ -209,18 +220,35 @@ internal class FrameRelay(
     private fun onMirrored() {
         val mirrored = frames ?: return
         if (released) return
+        diagMirrored++
         try {
             mirrored.updateTexImage()
         } catch (e: RuntimeException) {
-            Log.w(TAG, "updateTexImage", e)
+            diagFailed++
+            Log.w(
+                TAG,
+                "diag: updateTexImage failed on mirror frame $diagMirrored at ${diagMs()}ms",
+                e,
+            )
             return
+        }
+        if (diagMirrored <= DIAG_LOG_FRAMES) {
+            Log.i(
+                TAG,
+                "diag: mirror frame $diagMirrored at ${diagMs()}ms " +
+                    "timestampNs=${mirrored.timestamp}",
+            )
         }
         mirrored.getTransformMatrix(matrix)
         hasFrame = true
         draw()
     }
 
+    private fun diagMs(): Long = SystemClock.elapsedRealtime() - diagStart
+
     private fun draw() {
+        diagDraws++
+        if (diagDraws <= DIAG_LOG_FRAMES) Log.i(TAG, "diag: draw $diagDraws at ${diagMs()}ms")
         GLES20.glViewport(0, 0, width, height)
         GLES20.glUseProgram(program)
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
@@ -302,6 +330,7 @@ internal class FrameRelay(
         const val GL_WAIT_MS = 2_000L
         const val EGL_RECORDABLE_ANDROID = 0x3142
         const val STRIDE = 4 * Float.SIZE_BYTES
+        const val DIAG_LOG_FRAMES = 5
 
         /** x, y, s, t for a full-screen triangle strip. */
         val QUAD = floatArrayOf(-1f, -1f, 0f, 0f, 1f, -1f, 1f, 0f, -1f, 1f, 0f, 1f, 1f, 1f, 1f, 1f)

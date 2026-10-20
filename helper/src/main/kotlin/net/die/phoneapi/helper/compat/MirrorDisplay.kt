@@ -20,17 +20,24 @@ internal class MirrorDisplay {
     fun start(surface: Surface, width: Int, height: Int, displayId: Int) {
         synchronized(lock) {
             releaseLocked()
+            Log.i(
+                TAG,
+                "diag: mirror start ${width}x$height secure=${diagSecure()} " +
+                    "nudgeMs=${diagNudgeMs()} forceSurfaceControl=${diagForceSurfaceControl()}",
+            )
             require(width >= 2 && height >= 2) { "mirror size ${width}x$height is too small" }
             require(width % 2 == 0 && height % 2 == 0) {
                 "mirror size ${width}x$height must be even"
             }
             try {
+                if (diagForceSurfaceControl()) throw NoSuchMethodException("diag: forced")
                 virtual = createVirtualDisplay(surface, width, height, displayId)
                 Log.i(TAG, "Mirroring display $displayId at ${width}x$height via DisplayManager")
             } catch (e: ReflectiveOperationException) {
                 Log.w(TAG, "DisplayManager mirror is unavailable", unwrap(e))
                 token = surfaceDisplay(surface, width, height, displayId)
                 Log.i(TAG, "Mirroring display $displayId at ${width}x$height via SurfaceControl")
+                token?.let { scheduleNudge(it, displayId, width, height) }
             }
         }
     }
@@ -96,7 +103,7 @@ internal class MirrorDisplay {
                 ),
                 null,
                 "phoneapi",
-                false,
+                diagSecure(),
             )
                 as? IBinder ?: error("createDisplay returned null")
         val device = Rect(0, 0, info.width, info.height)
@@ -142,6 +149,78 @@ internal class MirrorDisplay {
         }
         return created
     }
+
+    /**
+     * Diagnostics: after [diagNudgeMs], projects onto a rect two pixels short, then back, so the
+     * display changes twice without its content changing.
+     */
+    private fun scheduleNudge(display: IBinder, displayId: Int, width: Int, height: Int) {
+        val delay = diagNudgeMs()
+        if (delay <= 0) return
+        Thread(
+                {
+                    Thread.sleep(delay)
+                    synchronized(lock) {
+                        if (token !== display) {
+                            Log.i(TAG, "diag: nudge skipped, the mirror stopped first")
+                            return@synchronized
+                        }
+                        try {
+                            val device =
+                                displayInfo(displayId).let { Rect(0, 0, it.width, it.height) }
+                            project(display, device, Rect(0, 0, width, height - 2))
+                            project(display, device, Rect(0, 0, width, height))
+                            Log.i(TAG, "diag: nudged the mirror projection after ${delay}ms")
+                        } catch (e: ReflectiveOperationException) {
+                            Log.w(TAG, "diag: nudge failed", unwrap(e))
+                        } catch (e: IllegalStateException) {
+                            Log.w(TAG, "diag: nudge failed", e)
+                        }
+                    }
+                },
+                "phoneapi-mirror-nudge",
+            )
+            .start()
+    }
+
+    private fun project(display: IBinder, device: Rect, target: Rect) {
+        val surfaceControl = Class.forName("android.view.SurfaceControl")
+        invoke(surfaceControl.getMethod("openTransaction"))
+        try {
+            invoke(
+                surfaceControl.getMethod(
+                    "setDisplayProjection",
+                    IBinder::class.java,
+                    Int::class.javaPrimitiveType,
+                    Rect::class.java,
+                    Rect::class.java,
+                ),
+                null,
+                display,
+                0,
+                device,
+                target,
+            )
+        } finally {
+            invoke(surfaceControl.getMethod("closeTransaction"))
+        }
+    }
+
+    private fun diagSecure(): Boolean = prop("debug.phoneapi.mirror.secure") == "1"
+
+    private fun diagForceSurfaceControl(): Boolean = prop("debug.phoneapi.mirror.sc") == "1"
+
+    private fun diagNudgeMs(): Long = prop("debug.phoneapi.mirror.nudge_ms").toLongOrNull() ?: 0L
+
+    private fun prop(name: String): String =
+        try {
+            Class.forName("android.os.SystemProperties")
+                .getMethod("get", String::class.java, String::class.java)
+                .invoke(null, name, "") as String
+        } catch (e: ReflectiveOperationException) {
+            Log.w(TAG, "diag: could not read $name", e)
+            ""
+        }
 
     private fun destroyDisplay(display: IBinder) {
         try {

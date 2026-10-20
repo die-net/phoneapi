@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+# video-probe opens /v1/stream/video for a few seconds and logs every frame it receives.
+#
+# Usage: scripts/video-probe LABEL [SECONDS] [SECOND_VIEWER_AT_SECONDS]
+# Prints one JSON object per event, then a {"summary": ...} line. Needs uv, jq, and a pairing
+# file ($PAPI_PAIRING, default .dev/pairing.json) with the API forwarded (phoneapi-dev server).
+
+set -Eeuo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PAIRING="${PAPI_PAIRING:-$HERE/../.dev/pairing.json}"
+LABEL="${1:?usage: video-probe LABEL [SECONDS] [SECOND_VIEWER_AT_SECONDS]}"
+SECONDS_ARG="${2:-8}"
+SECOND_AT="${3:-0}"
+
+HOST="$(jq -r '.host | select(. != "") // "127.0.0.1"' "$PAIRING")"
+PORT="$(jq -r .port "$PAIRING")"
+TOKEN="$(jq -r .token "$PAIRING")"
+
+exec uv run -q --with websockets python3 - "ws://$HOST:$PORT/v1/stream/video?maxSize=720" \
+    "$TOKEN" "$LABEL" "$SECONDS_ARG" "$SECOND_AT" <<'PY'
+import asyncio, json, sys, time
+import websockets
+
+url, token, label, secs, second_at = sys.argv[1], sys.argv[2], sys.argv[3], float(sys.argv[4]), float(sys.argv[5])
+KINDS = {1: "config", 2: "key", 3: "delta"}
+start = time.monotonic()
+events = []
+
+def emit(viewer, kind, **extra):
+    event = {"label": label, "viewer": viewer, "t_ms": round((time.monotonic() - start) * 1000), "kind": kind, **extra}
+    events.append(event)
+    print(json.dumps(event), flush=True)
+
+async def watch(viewer, delay, duration):
+    await asyncio.sleep(delay)
+    emit(viewer, "connect")
+    try:
+        async with websockets.connect(url, additional_headers={"Authorization": f"Bearer {token}"}, max_size=None) as ws:
+            try:
+                async with asyncio.timeout(duration):
+                    async for msg in ws:
+                        if isinstance(msg, str):
+                            emit(viewer, "header", text=msg)
+                        else:
+                            pts = int.from_bytes(msg[1:9], "big")
+                            emit(viewer, KINDS.get(msg[0], f"type{msg[0]}"), bytes=len(msg) - 9, pts_us=pts)
+            except TimeoutError:
+                emit(viewer, "timeout")
+                return
+            emit(viewer, "closed", code=ws.close_code, reason=ws.close_reason)
+    except Exception as e:  # noqa: BLE001 - report any failure as an event
+        emit(viewer, "error", error=f"{type(e).__name__}: {e}")
+
+async def main():
+    tasks = [watch(1, 0, secs)]
+    if second_at > 0:
+        tasks.append(watch(2, second_at, max(secs - second_at, 1)))
+    await asyncio.gather(*tasks)
+
+asyncio.run(main())
+
+def summary(viewer):
+    mine = [e for e in events if e["viewer"] == viewer]
+    if not mine:
+        return None
+    t0 = mine[0]["t_ms"]
+    def first(kind):
+        hit = next((e for e in mine if e["kind"] == kind), None)
+        return None if hit is None else hit["t_ms"] - t0
+    count = lambda kind: sum(1 for e in mine if e["kind"] == kind)
+    return {"first_config_ms": first("config"), "first_key_ms": first("key"), "first_delta_ms": first("delta"),
+            "keys": count("key"), "deltas": count("delta"), "end": mine[-1]["kind"]}
+
+print(json.dumps({"summary": {"label": label, "viewer1": summary(1), "viewer2": summary(2)}}), flush=True)
+PY
