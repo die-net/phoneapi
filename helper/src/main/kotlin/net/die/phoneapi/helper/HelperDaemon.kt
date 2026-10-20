@@ -25,7 +25,15 @@ internal object HelperDaemon {
     /** The looper [serve] is pumping. UiAutomation delivers events here. */
     fun looper(): Looper = daemonLooper ?: error("The helper looper is not prepared")
 
+    /**
+     * Runs on the process's main thread and pumps its looper as the main looper, since nothing else
+     * in `app_process` prepares one. Framework code expects `Looper.getMainLooper()`: Android 16's
+     * `AccessibilityInteractionClient` builds a Handler on it when UiAutomation connects, and
+     * crashes the helper when it is null.
+     */
+    @Suppress("DEPRECATION") // prepareMainLooper is meant for the system, which this stands in for.
     fun serve(helper: HelperImpl, packageName: String?, classpath: String) {
+        if (Looper.getMainLooper() == null) Looper.prepareMainLooper()
         if (Looper.myLooper() == null) Looper.prepare()
         val looper = Looper.myLooper() ?: error("Looper was not prepared")
         daemonLooper = looper
