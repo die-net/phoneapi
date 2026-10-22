@@ -57,14 +57,24 @@ class Tabs(
     internal suspend fun sharedTargets(): List<BrowserTarget> =
         base.targets().filter { it.id != placeholder }
 
-    /** The browser as [holder] sees it. */
-    fun browserFor(holder: Holder): BrowserService =
-        if (holder is Holder.Session) SessionBrowser(this, base, holder) else shared
+    /**
+     * The browser as [holder] sees it. A tab that belongs to a session [related] to it is still
+     * refused, but the error says whose it is, since the caller can use it through that session.
+     */
+    fun browserFor(
+        holder: Holder,
+        related: (Holder.Session) -> Boolean = { false },
+    ): BrowserService =
+        if (holder is Holder.Session) SessionBrowser(this, base, holder, related) else shared
 
     /** Waits as [holder] may run them: on its own tabs and unowned ones. */
-    fun waitsFor(holder: Holder, base: WaitService): WaitService =
+    fun waitsFor(
+        holder: Holder,
+        base: WaitService,
+        related: (Holder.Session) -> Boolean = { false },
+    ): WaitService =
         if (holder is Holder.Session) {
-            SessionWaits(base, browserFor(holder)) { access(holder, it) }
+            SessionWaits(base, browserFor(holder, related)) { access(holder, it, related) }
         } else {
             sharedWaits(base)
         }
@@ -246,15 +256,20 @@ class Tabs(
     /**
      * Lets [holder] use [id]: its own tab, an unowned Chrome tab, which it then claims, or the
      * WebView of the app in front while it holds the screen. Another session's tab, like a missing
-     * one, is not found.
+     * one, is not found, unless it belongs to a session [related] to [holder].
      */
-    internal suspend fun access(holder: Holder.Session, id: String) {
+    internal suspend fun access(
+        holder: Holder.Session,
+        id: String,
+        related: (Holder.Session) -> Boolean = { false },
+    ) {
         val (socket, _) = parseBrowserTargetId(id)
         if (id == placeholder) throw missing(id)
         mutex.withLock {
             val owner = owners[id]
             when {
                 owner?.holder == holder -> return
+                owner != null && related(owner.holder) -> throw elsewhere(id)
                 owner != null -> throw missing(id)
                 socket == CHROME_SOCKET -> {
                     owners[id] = Owner(holder, opened = false)
@@ -326,6 +341,13 @@ class Tabs(
     }
 
     private fun missing(id: String) = ApiException.notFound("No browser target $id")
+
+    private fun elsewhere(id: String) =
+        ApiException.notFound(
+            "Browser target $id belongs to another session in this conversation: your own, or " +
+                "one from session_start. Use it with the session that opened it: leave session " +
+                "out for your own tabs, or pass the id from session_start."
+        )
 
     companion object {
         const val PER_SESSION = 4

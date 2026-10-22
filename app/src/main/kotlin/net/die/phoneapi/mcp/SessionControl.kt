@@ -17,4 +17,7 @@ interface SessionControl {
 
     /** The holder [id] names, if it is this session or a live one it started. */
     fun resolve(id: String): Holder.Session?
+
+    /** Whether [holder] is this session or one it started, without counting as a use of it. */
+    fun related(holder: Holder.Session): Boolean
 }

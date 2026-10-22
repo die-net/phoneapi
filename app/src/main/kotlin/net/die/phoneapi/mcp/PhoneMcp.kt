@@ -162,6 +162,7 @@ private fun phoneServer(
                         },
                 )
         ),
+        instructions = mcpInstructions(scopes),
     ) {
         tools.forEach { tool ->
             addTool(
@@ -200,8 +201,8 @@ private const val SESSION_HEADER = "Mcp-Session-Id"
 /** The services as [holder] sees them: only its own tabs and unowned ones. */
 private fun ServerServices.forHolder(holder: Holder.Session, control: SessionControl) =
     copy(
-        browser = tabs.browserFor(holder),
-        waits = tabs.waitsFor(holder, waits),
+        browser = tabs.browserFor(holder, control::related),
+        waits = tabs.waitsFor(holder, waits, control::related),
         holder = holder,
         sessions = control,
     )

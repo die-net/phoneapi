@@ -148,7 +148,9 @@ class McpLeaseTest {
             assertTrue(call(http, parent, "browser_open", open).contains("~t"))
             val target = """"target":"chrome_devtools_remote~t""""
             val theirs = call(http, parent, "browser_read", "{$target}")
-            assertTrue(theirs.contains("not_found"), theirs)
+            assertTrue(theirs.contains("another session in this conversation"), theirs)
+            val stranger = call(http, initialize(http), "browser_read", "{$target}")
+            assertTrue(stranger.contains("No browser target"), stranger)
             val mine = call(http, parent, "browser_read", """{$target,"session":"$child"}""")
             assertFalse(mine.contains("isError\":true"), mine)
         }
@@ -169,6 +171,23 @@ class McpLeaseTest {
             settle { !http.get("/v1/sessions") { bearer(token) }.bodyAsText().contains("parent") }
             val listed = http.get("/v1/sessions") { bearer(token) }.bodyAsText()
             assertFalse(listed.contains(PARENT), listed)
+        }
+    }
+
+    @Test
+    fun `initialize explains sharing`() = testApplication {
+        application { phoneApiModule(api.services) }
+        apiClient().use { http ->
+            val response =
+                http.post("/mcp") {
+                    headers(null)
+                    contentType(ContentType.Application.Json)
+                    setBody(INITIALIZE)
+                }
+            val body = response.bodyAsText()
+            assertTrue(body.contains("\"instructions\""), body)
+            assertTrue(body.contains("session_start"), body)
+            assertTrue(body.contains("screen_release"), body)
         }
     }
 

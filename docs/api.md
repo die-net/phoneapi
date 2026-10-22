@@ -229,6 +229,7 @@ The socket also takes `{"op":"key","key":"HOME"}` (a `KeyRequest`), `{"op":"text
 - POSTs are answered with JSON. `GET` is refused with 405, since PhoneAPI sends nothing unprompted. `DELETE` ends the session, which cancels its calls in progress; those get 404.
 - A session ends after 20 minutes without a request, and when its token is revoked or replaced. A token can have 16 sessions open and the phone 32; past either, `initialize` fails with 429 `too_many_sessions`.
 - Sessions live in the app's memory, so restarting the app ends them all.
+- The `initialize` result's `instructions` give the model a short overview of sharing the phone: which calls wait for the screen, `screen_release`, and `session_start` for subagents and parallel tasks.
 
 Run `phoneapi server` and point a Streamable HTTP client at `http://127.0.0.1:<port>/mcp` with the bearer token. There is no stdio bridge: `phoneapi mcp` was retired when sessions arrived.
 

@@ -30,6 +30,7 @@ internal class SessionBrowser(
     private val tabs: Tabs,
     private val base: BrowserService,
     private val holder: Holder.Session,
+    private val related: (Holder.Session) -> Boolean,
 ) : BrowserService {
     override suspend fun targets(): List<BrowserTarget> = tabs.visible(holder, base.targets())
 
@@ -76,7 +77,7 @@ internal class SessionBrowser(
         mine(id) { base.console(id, request) }
 
     private suspend fun <T> mine(id: String, block: suspend () -> T): T {
-        tabs.access(holder, id)
+        tabs.access(holder, id, related)
         return block()
     }
 
