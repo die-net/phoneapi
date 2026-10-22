@@ -107,6 +107,7 @@ Authenticated errors are JSON:
 | 409 | `tab_limit` | An MCP session has 4 tabs it opened, or all sessions 8 |
 | 409 | `took_screen` | A call from an MCP session without the screen brought an app or Chrome forward; the message names it |
 | 409 | `tab_reloaded` | Chrome had unloaded the hidden tab, so PhoneAPI reloaded it instead of sending input or script to a page the caller has not seen |
+| 409 | `tab_frozen` | `cdp` or `cdp-mouse` input into a tab Chrome has paused, as it does to tabs hidden for about 5 minutes. Bring it forward with `touch` or `show`, or reload it |
 | 503 | `browser_frozen` | Android froze Chrome in the background, so nothing in it answers |
 | 429 | `too_many_sessions` | `initialize` past 16 MCP sessions for the token or 32 in all |
 | 503 | `helper_unavailable` | Helper down or dropped; message may say starting / needs pairing / needs USB / stopped |
