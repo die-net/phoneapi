@@ -21,6 +21,10 @@ internal class UiAutomationSession(
     private val busy: () -> Boolean,
 ) {
     private val lock = Any()
+    // Held while connecting. Android registers one UiAutomation per process, so two calls that
+    // both find the session down must not both connect: the second fails with "already
+    // registered".
+    private val connecting = Any()
     private var automation: UiAutomation? = null
     private var lastUseMs = 0L
     private var generation = 0
@@ -73,17 +77,18 @@ internal class UiAutomationSession(
                 return it
             }
         }
-        val created = open()
-        synchronized(lock) {
-            automation?.let {
-                runCatching { ShellUiAutomation.disconnect(created) }
-                return it
+        synchronized(connecting) {
+            synchronized(lock) {
+                automation?.let {
+                    return it
+                }
             }
-            automation = created
+            val created = open()
+            synchronized(lock) { automation = created }
+            onConnection(true)
+            armIdle()
+            return created
         }
-        onConnection(true)
-        armIdle()
-        return created
     }
 
     private fun open(): UiAutomation {

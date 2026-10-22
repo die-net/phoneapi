@@ -2,16 +2,40 @@ package net.die.phoneapi.mcp
 
 import io.modelcontextprotocol.kotlin.sdk.types.CallToolRequest
 import io.modelcontextprotocol.kotlin.sdk.types.CallToolRequestParams
+import io.modelcontextprotocol.kotlin.sdk.types.CallToolResult
+import io.modelcontextprotocol.kotlin.sdk.types.TextContent
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import net.die.phoneapi.lease.Holder
+import net.die.phoneapi.lease.ScreenLease
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
+@Suppress("InjectDispatcher") // The lease's cleanup scope needs no real dispatcher here.
 class McpScreenTest {
+    @Test
+    fun `notes reach any call`() = runBlocking {
+        val lease = ScreenLease(CoroutineScope(Dispatchers.Unconfined), cleanup = { emptyList() })
+        val holder = Holder.Session("a")
+        lease.addNote(holder, "the screen went elsewhere")
+        val result =
+            leased(lease, holder, needed = false) {
+                CallToolResult(content = listOf(TextContent(text = "ok")))
+            }
+        assertEquals(
+            "# note: the screen went elsewhere",
+            (result.content.first() as TextContent).text,
+        )
+        assertTrue(lease.takeNotes(holder).isEmpty())
+    }
+
     @Test
     fun `every tool is classified`() {
         val known = SCREEN_TOOLS + SOMETIMES_SCREEN_TOOLS + NO_SCREEN

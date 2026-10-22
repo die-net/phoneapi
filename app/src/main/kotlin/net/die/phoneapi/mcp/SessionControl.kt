@@ -1,6 +1,8 @@
 package net.die.phoneapi.mcp
 
 import net.die.phoneapi.lease.Holder
+import net.die.phoneapi.lease.LeaseState
+import net.die.phoneapi.model.DeviceInfo
 
 /**
  * Sessions as one MCP session's tools see them. `session_start` makes a session under it, for a
@@ -20,4 +22,14 @@ interface SessionControl {
 
     /** Whether [holder] is this session or one it started, without counting as a use of it. */
     fun related(holder: Holder.Session): Boolean
+
+    /**
+     * Why [caller] may not wait for the screen [holder] has: one started the other with
+     * `session_start`, so the wait would be the caller's own work queued behind itself. Null when
+     * they are unrelated and the caller should wait as usual.
+     */
+    fun conflict(caller: Holder.Session, holder: Holder.Session): String?
+
+    /** [info] with who has the screen in [state], as this session sees it. */
+    fun withScreenHolder(info: DeviceInfo, state: LeaseState, caller: Holder.Session): DeviceInfo
 }

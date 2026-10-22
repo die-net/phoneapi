@@ -31,18 +31,36 @@ internal suspend fun evaluateInFrame(
     frameId: String,
     expression: String,
     awaitPromise: Boolean,
+): EvalResult = evaluateInWorld(cdp, isolatedWorld(cdp, frameId), expression, awaitPromise)
+
+/** A new isolated world on the page's main frame, by its execution context id. */
+internal suspend fun isolatedWorld(cdp: CdpSession): Int {
+    val loaded = cdp.call("Page.getFrameTree").decodeCdp<FrameTreeResult>()
+    val frameId =
+        loaded?.frameTree?.frame?.id
+            ?: throw ApiException(502, "cdp_error", "Chrome did not return a frame")
+    return isolatedWorld(cdp, frameId)
+}
+
+private suspend fun isolatedWorld(cdp: CdpSession, frameId: String): Int =
+    cdp.call(
+            "Page.createIsolatedWorld",
+            buildJsonObject {
+                put("frameId", frameId)
+                put("worldName", ISOLATED_WORLD)
+            },
+        )
+        .decodeCdp<WorldResult>()
+        ?.executionContextId
+        ?: throw ApiException(502, "cdp_error", "Chrome did not return an isolated world")
+
+/** Evaluates [expression] in the isolated world [contextId]. */
+internal suspend fun evaluateInWorld(
+    cdp: CdpSession,
+    contextId: Int,
+    expression: String,
+    awaitPromise: Boolean,
 ): EvalResult {
-    val contextId =
-        cdp.call(
-                "Page.createIsolatedWorld",
-                buildJsonObject {
-                    put("frameId", frameId)
-                    put("worldName", ISOLATED_WORLD)
-                },
-            )
-            .decodeCdp<WorldResult>()
-            ?.executionContextId
-            ?: throw ApiException(502, "cdp_error", "Chrome did not return an isolated world")
     return evalResult(
         cdp.call(
             "Runtime.evaluate",

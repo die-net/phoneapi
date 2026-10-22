@@ -39,22 +39,34 @@ internal fun ApplicationCall.session(): Holder.Session {
  * Runs a REST call as the session it names. When [needed], the call holds the screen, waiting for
  * it first, and the session keeps it afterwards, as an MCP session does; Chrome shows none of
  * another session's tabs meanwhile. A call that could make a page launch an app, [launching], is
- * watched for that while the session lacks the screen. Notes for the session go in
- * `X-PhoneAPI-Note` headers.
+ * watched for that while the session lacks the screen. A call that can make Chrome open a tab,
+ * [claimNew], gives the caller that tab. Notes for the session go in `X-PhoneAPI-Note` headers.
  */
 internal suspend fun <T> withScreen(
     call: ApplicationCall,
     services: ServerServices,
     needed: Boolean = true,
     launching: Boolean = false,
+    claimNew: Boolean = false,
     block: suspend (Holder.Session) -> T,
 ): T {
     val holder = call.session()
     if (!needed) {
-        return if (launching) services.foreground.watch(holder) { block(holder) } else block(holder)
+        val value =
+            if (launching) services.foreground.watch(holder) { block(holder) } else block(holder)
+        services.lease.takeNotes(holder).forEach { call.response.headers.append(NOTE_HEADER, it) }
+        return value
+    }
+    val current = services.lease.state.value.holder as? Holder.Session
+    if (current != null) {
+        call.application.attributes[SessionsKey].conflict(holder.id, current.id)?.let {
+            throw ApiException(409, "session_conflict", it)
+        }
     }
     val screened =
-        services.lease.withScreen(holder) { services.tabs.screenCall(holder) { block(holder) } }
+        services.lease.withScreen(holder) {
+            services.tabs.screenCall(holder, claimNew) { block(holder) }
+        }
     screened.notes.forEach { call.response.headers.append(NOTE_HEADER, it) }
     return screened.value
 }

@@ -2,7 +2,9 @@ package net.die.phoneapi.tabs
 
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import net.die.phoneapi.core.BrowserService
 import net.die.phoneapi.core.WaitService
 import net.die.phoneapi.lease.Holder
@@ -31,6 +33,7 @@ import net.die.phoneapi.model.WaitCondition
 import net.die.phoneapi.model.WaitRequest
 import net.die.phoneapi.model.WaitResult
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 @Suppress("InjectDispatcher") // The lease's cleanup scope needs no real dispatcher here.
@@ -43,8 +46,54 @@ class TabsTest {
     private val a = Holder.Session("a")
     private val b = Holder.Session("b")
 
-    private fun tabs(perSession: Int = 4, total: Int = 8) =
-        Tabs(browser, lease, inFront = { it == front }, store = store, perSession, total)
+    private fun tabs(perSession: Int = 4, total: Int = 8, scope: CoroutineScope? = null) =
+        Tabs(browser, lease, inFront = { it == front }, store = store, perSession, total, scope)
+
+    @Test
+    fun `intent tabs become yours`() = runBlocking {
+        val tabs = tabs(scope = CoroutineScope(Dispatchers.Default))
+        lease.withScreen(a) {}
+        // Chrome opens the intent's tab itself, after the call that sent it.
+        tabs.screenCall(a, claimNew = true) { browser.add("from-intent") }
+        withTimeout(WAIT_MS) { while (tabs.count(a) == 0) delay(POLL_MS) }
+        assertEquals(listOf(true), tabs.browserFor(a).targets().map { it.owned })
+        assertEquals(setOf("chrome_devtools_remote~from-intent"), store.ids)
+    }
+
+    @Test
+    fun `stopped timers fail waits`() = runBlocking {
+        val tabs = tabs()
+        val tab = tabs.browserFor(a).openTab("https://example.com/")
+        browser.stalled = setOf(tab.id)
+        val wait = WaitRequest(all = listOf(WaitCondition.BrowserUrl(target = tab.id)))
+        assertEquals("tab_frozen", error { tabs.waitsFor(a, RecordingWaits()).wait(wait, SCOPES) })
+    }
+
+    @Test
+    fun `top target fills waits`() {
+        assertEquals(
+            "t",
+            (withTarget(WaitCondition.BrowserUrl(), "t") as WaitCondition.BrowserUrl).target,
+        )
+        val named = WaitCondition.BrowserUrl(target = "mine")
+        assertEquals(named, withTarget(named, "t"))
+        val node = WaitCondition.Idle()
+        assertEquals(node, withTarget(node, "t"))
+    }
+
+    @Test
+    fun `missing tabs explain`() = runBlocking {
+        val tabs = tabs()
+        val tab = tabs.browserFor(a).openTab("https://example.com/")
+        val message =
+            try {
+                tabs.browserFor(b).read(tab.id, BrowserReadRequest())
+                ""
+            } catch (e: ApiException) {
+                e.message.orEmpty()
+            }
+        assertTrue(message.contains("closed when the session that opened it ended"), message)
+    }
 
     @Test
     fun `opened tabs are yours`() = runBlocking {
@@ -262,6 +311,9 @@ class TabsTest {
 
         val activated = mutableListOf<String>()
         var shown: String? = null
+        var stalled = emptySet<String>()
+
+        override suspend fun timersStalled(id: String) = id in stalled
 
         /** Chrome ignores selecting a tab. */
         var stuck = false
@@ -326,5 +378,7 @@ class TabsTest {
     private companion object {
         val SCOPES = setOf(Scope.OBSERVE, Scope.BROWSER)
         const val CHROME = "com.android.chrome"
+        const val WAIT_MS = 3_000L
+        const val POLL_MS = 20L
     }
 }

@@ -57,10 +57,18 @@ import net.die.phoneapi.model.WaitCondition
 import net.die.phoneapi.model.WaitRequest
 import net.die.phoneapi.model.schema.Doc
 import net.die.phoneapi.server.ServerServices
+import net.die.phoneapi.tabs.withTarget
 import net.die.phoneapi.wait.requireWaitAccess
 
 internal suspend fun deviceInfo(services: ServerServices): CallToolResult = runTool {
-    jsonText(services.device.info())
+    val info = services.device.info()
+    val caller = services.holder
+    val control = services.sessions
+    val state = services.lease.state.value
+    jsonText(
+        if (caller != null && control != null) control.withScreenHolder(info, state, caller)
+        else info
+    )
 }
 
 internal suspend fun uiSnapshot(
@@ -141,8 +149,8 @@ internal suspend fun waitFor(
     val args = request.args<WaitArgs>()
     val wait =
         WaitRequest(
-            all = args.all,
-            any = args.any,
+            all = args.all.map { withTarget(it, args.target) },
+            any = args.any.map { withTarget(it, args.target) },
             timeoutMs = args.timeoutMs,
             settleMs = args.settleMs,
             snapshot = args.snapshot,
@@ -677,6 +685,10 @@ internal data class WaitArgs(
     val all: List<WaitCondition> = emptyList(),
     @Doc("At least one condition must match. Same types as all.")
     val any: List<WaitCondition> = emptyList(),
+    @Doc(
+        "The browser tab for every browser.* condition that names none, so it need not be repeated on each."
+    )
+    val target: String? = null,
     @Doc("Give up after this many milliseconds.") val timeoutMs: Long = 10_000,
     @Doc("After a match, keep waiting until the UI is quiet for this many milliseconds.")
     val settleMs: Long = 0,

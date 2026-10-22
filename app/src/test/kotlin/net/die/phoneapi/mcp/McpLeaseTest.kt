@@ -129,8 +129,10 @@ class McpLeaseTest {
             val child = start(http, parent)
             val tap = """{"x":1,"y":2,"session":"$child"}"""
             assertFalse(call(http, parent, "tap", tap).contains("isError\":true"))
+            // The parent does not queue behind its own subagent: it is told at once.
             val busy = call(http, parent, "tap", """{"x":1,"y":2}""")
-            assertTrue(busy.contains("screen_busy"), busy)
+            assertTrue(busy.contains("session_conflict"), busy)
+            assertTrue(busy.contains("A session you started"), busy)
             val listed = http.get("/v1/sessions") { bearer(token) }.bodyAsText()
             assertTrue(listed.contains(PARENT), listed)
 
@@ -140,6 +142,34 @@ class McpLeaseTest {
             assertFalse(call(http, parent, "tap", """{"x":1,"y":2}""").contains("isError\":true"))
             val gone = call(http, parent, "tap", tap)
             assertTrue(gone.contains("No such session"), gone)
+        }
+    }
+
+    @Test
+    fun `subagents never queue on you`() = testApplication {
+        application { phoneApiModule(api.services) }
+        apiClient().use { http ->
+            val parent = initialize(http)
+            val child = start(http, parent)
+            assertFalse(call(http, parent, "tap", """{"x":1,"y":2}""").contains("isError\":true"))
+            val mixed = call(http, parent, "tap", """{"x":1,"y":2,"session":"$child"}""")
+            assertTrue(mixed.contains("session_conflict"), mixed)
+            assertTrue(mixed.contains("Your own session holds the screen"), mixed)
+        }
+    }
+
+    @Test
+    fun `device info names the holder`() = testApplication {
+        application { phoneApiModule(api.services) }
+        apiClient().use { http ->
+            val first = initialize(http)
+            val second = initialize(http)
+            assertTrue(call(http, first, "device_info", "{}").contains("isError\":false"))
+            call(http, first, "tap", """{"x":1,"y":2}""")
+            val mine = call(http, first, "device_info", "{}")
+            assertTrue(mine.contains("""screenHolder\":\"you"""), mine)
+            val theirs = call(http, second, "device_info", "{}")
+            assertTrue(theirs.contains("""screenHolder\":\"agent"""), theirs)
         }
     }
 

@@ -242,6 +242,12 @@ private fun pageLine(title: String?, url: String?, extra: String = ""): String =
 
 private fun stateNotes(result: BrowserReadResult, show: Boolean): List<String> = buildList {
     if (result.reloaded) add(RELOADED_NOTE)
+    if (result.timersStopped) {
+        add(
+            "# timers stopped: Chrome stopped this hidden tab's timers, so content it would load " +
+                "or update on its own is not coming; read with show true to bring it forward"
+        )
+    }
     result.blocked?.let { add("# blocked: $it") }
     if (result.sparse)
         add("# sparse: under 200 characters of visible text; it may still be loading")

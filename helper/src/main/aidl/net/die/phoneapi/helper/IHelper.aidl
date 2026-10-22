@@ -55,5 +55,8 @@ interface IHelper {
 
     String tree(String op, String payload) = 51;
 
+    // The package of the top task, or null when there is none. Cheaper than dumpsys.
+    String topPackage() = 60;
+
     oneway void shutdown() = 99;
 }

@@ -34,3 +34,14 @@ private fun acceptable(url: String): Boolean {
 }
 
 private const val MAX_URL = 2_000
+
+/** Chrome refuses a DevTools connection to a tab that has closed with this. */
+internal const val TAB_GONE = "refused (404)"
+
+/** A tab that closed, whoever closed it. */
+internal fun tabClosed(id: String): ApiException =
+    ApiException.notFound(
+        "No browser target $id: it has closed. A session's tabs close when the session ends, " +
+            "and Chrome or a person can close one too. List tabs with browser_targets, or open " +
+            "the page again."
+    )

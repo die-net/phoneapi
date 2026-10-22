@@ -84,8 +84,10 @@ internal class TabProbe(
      */
     suspend fun requireRunning(cdp: CdpSession, socket: String) {
         if (socket != CHROME_SOCKET) return
-        if (withTimeoutOrNull(probeMs) { evaluate(cdp, "0") } == null) return
-        val ran = withTimeoutOrNull(frozenMs) { evaluate(cdp, SELF_MESSAGE, awaitPromise = true) }
+        // In an isolated world, so the page can neither see the check nor fool it by replacing
+        // MessageChannel. A page busy running script answers nothing here, and is let through.
+        val world = withTimeoutOrNull(probeMs) { isolatedWorld(cdp) } ?: return
+        val ran = withTimeoutOrNull(frozenMs) { evaluateInWorld(cdp, world, SELF_MESSAGE, true) }
         if (ran != null) return
         throw ApiException(
             409,

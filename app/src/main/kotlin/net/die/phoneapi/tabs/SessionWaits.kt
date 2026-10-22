@@ -1,5 +1,9 @@
 package net.die.phoneapi.tabs
 
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withTimeoutOrNull
+import net.die.phoneapi.browser.timersStopped
 import net.die.phoneapi.core.BrowserService
 import net.die.phoneapi.core.WaitService
 import net.die.phoneapi.model.ApiException
@@ -21,7 +25,24 @@ internal class SessionWaits(
     override suspend fun wait(request: WaitRequest, scopes: Set<Scope>): WaitResult {
         val all = request.all.map { scoped(it) }
         val any = request.any.map { scoped(it) }
-        return base.wait(request.copy(all = all, any = any), scopes)
+        val scopedRequest = request.copy(all = all, any = any)
+        val tabs = (all + any).mapNotNull { targeted(it)?.target }.distinct()
+        val watching = browser
+        if (watching == null || tabs.isEmpty()) return base.wait(scopedRequest, scopes)
+        // A tab whose timers stopped will not change, so the wait fails at once, or as soon as
+        // the check from the last input on it comes due, rather than running out its timeout.
+        return coroutineScope {
+            val waiting = async { base.wait(scopedRequest, scopes) }
+            while (waiting.isActive) {
+                val stopped = tabs.firstOrNull { watching.timersStalled(it) }
+                if (stopped != null) {
+                    waiting.cancel()
+                    throw timersStopped(stopped)
+                }
+                withTimeoutOrNull(STALL_POLL_MS) { waiting.join() }
+            }
+            waiting.await()
+        }
     }
 
     private suspend fun scoped(condition: WaitCondition): WaitCondition {
@@ -69,3 +90,12 @@ private fun targeted(condition: WaitCondition): Targeted? =
         is WaitCondition.Screen,
         is WaitCondition.Keyguard -> null
     }
+
+private const val STALL_POLL_MS = 250L
+
+/** [condition] with [target] as its tab, when it is a browser condition that names none. */
+internal fun withTarget(condition: WaitCondition, target: String?): WaitCondition {
+    if (target == null) return condition
+    val slot = targeted(condition) ?: return condition
+    return if (slot.target == null) slot.with(target) else condition
+}
