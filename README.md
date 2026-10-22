@@ -13,7 +13,7 @@ Android 10 and newer (minSdk 29). Wireless Debugging and helper restart without 
 ## Requirements
 
 - A phone or emulator with USB debugging (and Wireless Debugging on Android 11+ if you want to drop the cable later)
-- On the computer, `adb`, `jq`, and `curl` on your `PATH`. `phoneapi` (pair, server, helper, and the `mcp` bridge) shells out to these. Most machines already have `curl`; `adb` and `jq` usually need a separate install — for example `brew install android-platform-tools jq` on macOS, or [platform-tools](https://developer.android.com/tools/releases/platform-tools) from Google plus your OS package for `jq`
+- On the computer, `adb`, `jq`, and `curl` on your `PATH`. `phoneapi` (pair, server, helper, and papi) shells out to these. Most machines already have `curl`; `adb` and `jq` usually need a separate install — for example `brew install android-platform-tools jq` on macOS, or [platform-tools](https://developer.android.com/tools/releases/platform-tools) from Google plus your OS package for `jq`
 - An [MCP](https://modelcontextprotocol.io) client (for example Cursor or Claude Code) if you want an agent to drive the phone
 
 ## Install
