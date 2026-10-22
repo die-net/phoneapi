@@ -44,6 +44,8 @@ import net.die.phoneapi.input.InjectTouchBackend
 import net.die.phoneapi.input.InputServiceImpl
 import net.die.phoneapi.input.TouchInput
 import net.die.phoneapi.input.TouchOutcome
+import net.die.phoneapi.lease.ScreenCleanup
+import net.die.phoneapi.lease.ScreenLease
 import net.die.phoneapi.model.ActionResult
 import net.die.phoneapi.model.HelperStatus
 import net.die.phoneapi.model.ScreenState
@@ -219,6 +221,7 @@ class AppGraph(
             cdp = HelperCdpPipes(::openDevtools, ioDispatcher),
             viewerText = { viewerLink() },
             logcat = HelperLogcatFeed(helper, bus, ioDispatcher),
+            lease = ScreenLease(scope, cleanup = ScreenCleanup(input, power)::run),
         )
 
     val server = ApiServer(services, socketName = context.packageName)

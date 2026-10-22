@@ -49,7 +49,7 @@ internal fun Application.installPhoneMcp(services: ServerServices, sessions: Mcp
                     session.tokenId != call.token.id -> call.respond(HttpStatusCode.NotFound)
                     else -> {
                         session.touch(sessions.clock())
-                        serve(sessions, session, call)
+                        serve(session, call)
                     }
                 }
             }
@@ -100,27 +100,27 @@ private suspend fun startSession(
  * Hands [call] to the session's transport. A session that ends while the call waits, as on `DELETE`
  * or expiry, cancels it; the client then gets a 404 rather than an internal error.
  */
-private suspend fun serve(sessions: McpSessions, session: McpSession, call: ApplicationCall) =
-    coroutineScope {
-        val handled = async { session.transport.handleRequest(null, call) }
-        handled.join()
-        if (handled.isCancelled && sessions.get(session.id) == null) {
-            if (!call.response.isCommitted) {
-                call.respond(
-                    HttpStatusCode.NotFound,
-                    ApiError("not_found", "The MCP session ended"),
-                )
-            }
-        } else {
-            handled.await()
+private suspend fun serve(session: McpSession, call: ApplicationCall) = coroutineScope {
+    val handled = async { session.transport.handleRequest(null, call) }
+    handled.join()
+    // join throws when this call is canceled, as when its client goes away. Otherwise the
+    // transport only cancels a call when the session closes.
+    if (handled.isCancelled) {
+        if (!call.response.isCommitted) {
+            call.respond(
+                HttpStatusCode.NotFound,
+                ApiError("not_found", "The MCP session ended"),
+            )
         }
+    } else {
+        handled.await()
     }
+}
 
 private fun noSession() =
     ApiError("not_found", "No such MCP session. Start a new one with initialize.")
 
 /** The MCP server for one session, with the tools and resources [scopes] allow. */
-@Suppress("UnusedParameter") // The holder keys the screen lease, which tools take next.
 private fun phoneServer(services: ServerServices, scopes: Set<Scope>, holder: Holder): Server {
     val tools = visibleMcpTools(scopes, services.device.capabilities())
     val resources = mcpResources(scopes)
@@ -146,7 +146,8 @@ private fun phoneServer(services: ServerServices, scopes: Set<Scope>, holder: Ho
                 inputSchema = tool.schema,
                 toolAnnotations = tool.annotations,
             ) { request ->
-                tool.call(services, scopes, request)
+                val screen = takesScreen(tool.name, request.params.arguments)
+                leased(services.lease, holder, screen) { tool.call(services, scopes, request) }
             }
         }
         resources.forEach { resource ->

@@ -11,12 +11,14 @@ import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.put
+import net.die.phoneapi.model.OrientationRequest
 import net.die.phoneapi.model.PinStatus
 import net.die.phoneapi.model.Scope
 import net.die.phoneapi.model.SetPinRequest
 import net.die.phoneapi.model.UnlockRequest
 import net.die.phoneapi.server.ServerServices
 import net.die.phoneapi.server.scoped
+import net.die.phoneapi.server.withScreen
 
 /**
  * `GET /v1/device`, `POST /v1/device/wake|unlock|lock|orientation`, and `PUT|DELETE
@@ -27,13 +29,19 @@ fun Route.deviceRoutes(services: ServerServices) {
         get("/v1/device") { call.respond(services.device.info()) }
     }
     scoped(Scope.CONTROL) {
-        post("/v1/device/wake") { call.respond(services.power.wake()) }
-        post("/v1/device/unlock") {
-            call.respond(services.power.unlock(bodyOrDefault(call, UnlockRequest())))
+        post("/v1/device/wake") {
+            call.respond(withScreen(call, services) { services.power.wake() })
         }
-        post("/v1/device/lock") { call.respond(services.power.lock()) }
+        post("/v1/device/unlock") {
+            val request = bodyOrDefault(call, UnlockRequest())
+            call.respond(withScreen(call, services) { services.power.unlock(request) })
+        }
+        post("/v1/device/lock") {
+            call.respond(withScreen(call, services) { services.power.lock() })
+        }
         post("/v1/device/orientation") {
-            call.respond(services.power.orientation(call.receive()))
+            val request = call.receive<OrientationRequest>()
+            call.respond(withScreen(call, services) { services.power.orientation(request) })
         }
     }
     scoped(Scope.ADMIN) {

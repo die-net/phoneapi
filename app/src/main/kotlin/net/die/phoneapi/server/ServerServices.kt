@@ -12,6 +12,7 @@ import net.die.phoneapi.core.PowerService
 import net.die.phoneapi.core.UiService
 import net.die.phoneapi.core.WaitService
 import net.die.phoneapi.helperclient.ShellResult
+import net.die.phoneapi.lease.ScreenLease
 import net.die.phoneapi.model.Capabilities
 import net.die.phoneapi.model.CreatedToken
 import net.die.phoneapi.model.DeviceInfo
@@ -44,6 +45,8 @@ data class ServerServices(
     val cdp: CdpPipes,
     val viewerText: () -> String,
     val logcat: LogcatFeed,
+    /** The one screen lease, shared by MCP sessions, the viewer, and REST calls. */
+    val lease: ScreenLease,
 )
 
 /** Per-connection logcat. Not part of [ServerServices.events]; only clients that ask receive it. */

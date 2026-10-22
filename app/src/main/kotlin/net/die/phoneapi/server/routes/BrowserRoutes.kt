@@ -18,6 +18,7 @@ import net.die.phoneapi.browser.DEVTOOLS_CLOSED
 import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.model.BrowserFindRequest
 import net.die.phoneapi.model.BrowserGestureRequest
+import net.die.phoneapi.model.BrowserInput
 import net.die.phoneapi.model.BrowserKeyRequest
 import net.die.phoneapi.model.BrowserReadRequest
 import net.die.phoneapi.model.BrowserSnapshotOptions
@@ -32,6 +33,7 @@ import net.die.phoneapi.model.Scope
 import net.die.phoneapi.server.CdpPipe
 import net.die.phoneapi.server.ServerServices
 import net.die.phoneapi.server.scoped
+import net.die.phoneapi.server.withScreen
 
 /**
  * Browser routes: targets, navigation, snapshot, reading, input, evaluate, console, and raw CDP.
@@ -58,33 +60,24 @@ fun Route.browserRoutes(services: ServerServices) {
                     maxChars = q.int("maxChars"),
                     show = q.flag("show", default = false),
                 )
-            call.respond(services.browser.snapshot(call.targetId(), options))
+            call.respond(
+                withScreen(call, services, options.show) {
+                    services.browser.snapshot(call.targetId(), options)
+                }
+            )
         }
         post("/v1/browser/targets/{id}/read") {
-            call.respond(services.browser.read(call.targetId(), call.receive<BrowserReadRequest>()))
+            val request = call.receive<BrowserReadRequest>()
+            call.respond(
+                withScreen(call, services, request.show) {
+                    services.browser.read(call.targetId(), request)
+                }
+            )
         }
         post("/v1/browser/targets/{id}/find") {
             call.respond(services.browser.find(call.targetId(), call.receive<BrowserFindRequest>()))
         }
-        post("/v1/browser/targets/{id}/tap") {
-            call.respond(services.browser.tap(call.targetId(), call.receive<BrowserTapRequest>()))
-        }
-        post("/v1/browser/targets/{id}/swipe") {
-            call.respond(
-                services.browser.swipe(call.targetId(), call.receive<BrowserSwipeRequest>())
-            )
-        }
-        post("/v1/browser/targets/{id}/gesture") {
-            call.respond(
-                services.browser.gesture(call.targetId(), call.receive<BrowserGestureRequest>())
-            )
-        }
-        post("/v1/browser/targets/{id}/key") {
-            call.respond(services.browser.key(call.targetId(), call.receive<BrowserKeyRequest>()))
-        }
-        post("/v1/browser/targets/{id}/text") {
-            call.respond(services.browser.text(call.targetId(), call.receive<BrowserTextRequest>()))
-        }
+        browserInputRoutes(services)
         post("/v1/browser/targets/{id}/evaluate") {
             call.respond(services.browser.evaluate(call.targetId(), call.receive<EvalRequest>()))
         }
@@ -92,6 +85,50 @@ fun Route.browserRoutes(services: ServerServices) {
             call.respond(services.browser.console(call.targetId(), call.receive<ConsoleRequest>()))
         }
         webSocket("/v1/browser/targets/{id}/cdp") { proxyCdp(this, services, call.targetId()) }
+    }
+}
+
+/** Pointer, key, and text input. Touch, and cdp pointer input, take the screen. */
+private fun Route.browserInputRoutes(services: ServerServices) {
+    post("/v1/browser/targets/{id}/tap") {
+        val request = call.receive<BrowserTapRequest>()
+        call.respond(
+            withScreen(call, services, request.input != BrowserInput.CDP_MOUSE) {
+                services.browser.tap(call.targetId(), request)
+            }
+        )
+    }
+    post("/v1/browser/targets/{id}/swipe") {
+        val request = call.receive<BrowserSwipeRequest>()
+        call.respond(
+            withScreen(call, services, request.input != BrowserInput.CDP_MOUSE) {
+                services.browser.swipe(call.targetId(), request)
+            }
+        )
+    }
+    post("/v1/browser/targets/{id}/gesture") {
+        val request = call.receive<BrowserGestureRequest>()
+        call.respond(
+            withScreen(call, services, request.input != BrowserInput.CDP_MOUSE) {
+                services.browser.gesture(call.targetId(), request)
+            }
+        )
+    }
+    post("/v1/browser/targets/{id}/key") {
+        val request = call.receive<BrowserKeyRequest>()
+        call.respond(
+            withScreen(call, services, request.input == BrowserInput.TOUCH) {
+                services.browser.key(call.targetId(), request)
+            }
+        )
+    }
+    post("/v1/browser/targets/{id}/text") {
+        val request = call.receive<BrowserTextRequest>()
+        call.respond(
+            withScreen(call, services, request.input == BrowserInput.TOUCH) {
+                services.browser.text(call.targetId(), request)
+            }
+        )
     }
 }
 

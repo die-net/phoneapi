@@ -18,6 +18,7 @@ import net.die.phoneapi.model.Scope
 import net.die.phoneapi.model.SnapshotFormat
 import net.die.phoneapi.server.ServerServices
 import net.die.phoneapi.server.scoped
+import net.die.phoneapi.server.withScreen
 
 /**
  * `GET
@@ -41,21 +42,26 @@ fun Route.uiRoutes(services: ServerServices) {
                     allWindows = q.flag("all", default = false),
                     autoWake = q.flag("autoWake", default = true),
                 )
-            call.respond(services.ui.snapshot(options))
+            call.respond(withScreen(call, services) { services.ui.snapshot(options) })
         }
-        post("/v1/ui/find") { call.respond(services.ui.find(call.receive<FindRequest>())) }
+        post("/v1/ui/find") {
+            val request = call.receive<FindRequest>()
+            call.respond(withScreen(call, services) { services.ui.find(request) })
+        }
         get("/v1/screenshot") {
             val scale =
                 call.request.queryParameters["scale"]?.let {
                     it.toFloatOrNull() ?: throw ApiException.badRequest("scale must be a number")
                 } ?: ScreenshotScale.REST
-            call.respondBytes(services.screenshots(scale), ContentType.Image.PNG)
+            val png = withScreen(call, services) { services.screenshots(scale) }
+            call.respondBytes(png, ContentType.Image.PNG)
         }
     }
     scoped(Scope.CONTROL) {
         post("/v1/ui/nodes/{ref}/action") {
             val ref = call.parameters["ref"] ?: throw ApiException.badRequest("ref required")
-            call.respond(services.ui.act(ref, call.receive<NodeActionRequest>()))
+            val request = call.receive<NodeActionRequest>()
+            call.respond(withScreen(call, services) { services.ui.act(ref, request) })
         }
     }
 }
