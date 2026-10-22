@@ -1,11 +1,13 @@
 package net.die.phoneapi.browser
 
+import kotlinx.coroutines.runBlocking
 import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.core.ApiJson
 import net.die.phoneapi.model.BrowserFindRequest
 import net.die.phoneapi.model.BrowserReadRequest
 import net.die.phoneapi.model.FindKind
 import net.die.phoneapi.model.ReadFormat
+import net.die.phoneapi.model.ReadScope
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
@@ -136,6 +138,39 @@ class PageReadTest {
             findInPage(extract, BrowserFindRequest(query = "(", regex = true))
         }
         assertThrows(ApiException::class.java) { findInPage(extract, BrowserFindRequest()) }
+    }
+
+    @Test
+    fun `links fall back to the page`() = runBlocking {
+        // Readability picked a fragment of a listing page without its links.
+        val fragment =
+            extract.copy(blocks = listOf(PageBlock(k = "p", r = listOf(PageRun(t = "Results")))))
+        val asked = mutableListOf<ReadScope>()
+        val links = BrowserFindRequest(kind = FindKind.LINKS)
+        val found =
+            findWithFallback(links) { scope ->
+                asked += scope
+                if (scope == ReadScope.ARTICLE) fragment else extract.copy(extracted = "page")
+            }
+        assertEquals(listOf(ReadScope.ARTICLE, ReadScope.PAGE), asked)
+        assertEquals(2, found.total)
+        assertEquals("page", found.extracted)
+        // A filter that matches none of the article's links, or a text find, stays in the article.
+        asked.clear()
+        val none = links.copy(hrefContains = "missing")
+        assertEquals(
+            0,
+            findWithFallback(none) {
+                    asked += it
+                    extract
+                }
+                .total,
+        )
+        findWithFallback(BrowserFindRequest(query = "Results")) {
+            asked += it
+            fragment
+        }
+        assertEquals(listOf(ReadScope.ARTICLE, ReadScope.ARTICLE), asked)
     }
 
     @Test
