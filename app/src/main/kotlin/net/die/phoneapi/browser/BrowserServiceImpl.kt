@@ -17,6 +17,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
@@ -216,6 +217,23 @@ internal class BrowserServiceImpl(
         axTrees.remove(id)
         val ok = closed.decodeCdp<ClosedTarget>()?.success != false
         return ActionResult(ok = ok, backend = "cdp", seq = sequence())
+    }
+
+    override suspend fun activate(id: String) {
+        val (socket, chromeId) = parseBrowserTargetId(id)
+        useCdp(socket, "/devtools/browser") { cdp ->
+            cdp.call("Target.activateTarget", buildJsonObject { put("targetId", chromeId) })
+        }
+    }
+
+    override suspend fun showing(id: String): Boolean {
+        val (socket, chromeId) = parseBrowserTargetId(id)
+        return try {
+            withTimeoutOrNull(SHOWING_MS) { usePage(socket, chromeId) { tabShowing(it) } } == true
+        } catch (_: ApiException) {
+            // Closed, or not answering: either way, not showing.
+            false
+        }
     }
 
     override suspend fun tap(id: String, request: BrowserTapRequest): ActionResult {
@@ -459,7 +477,12 @@ internal class BrowserServiceImpl(
         timedOut: AtomicBoolean,
     ): List<BrowserTarget> =
         try {
-            parseTargets(socket, httpGet(devtools.input, devtools.output, "/json/list", MAX_BODY))
+            listedTargets(
+                httpGet(devtools.input, devtools.output, "/json/list", MAX_BODY),
+                socket.name,
+                socket.pid,
+                socket.packageName,
+            )
         } catch (e: SocketTimeoutException) {
             throw ApiException(
                 503,
@@ -663,7 +686,7 @@ internal class BrowserServiceImpl(
     }
 
     private fun browserPackage(socket: HelperSocket?, name: String): String? =
-        socket?.packageName ?: if (name == CHROME_SOCKET) "com.android.chrome" else null
+        socket?.packageName ?: if (name == CHROME_SOCKET) CHROME_PACKAGE else null
 
     private fun nodeRef(ref: String): String {
         val trimmed = ref.trim().removeSurrounding("[", "]")
@@ -698,28 +721,6 @@ internal class BrowserServiceImpl(
             }
         }
 
-    private fun parseTargets(socket: HelperSocket, json: String): List<BrowserTarget> {
-        val listed =
-            try {
-                ApiJson.decodeFromString(serializer<List<ListedTarget>>(), json)
-            } catch (e: SerializationException) {
-                throw ApiException(502, "cdp_error", "DevTools target list was not JSON", cause = e)
-            }
-        return listed
-            .filter { it.type !in SKIPPED_TYPES }
-            .map { item ->
-                BrowserTarget(
-                    id = browserTargetId(socket.name, item.id),
-                    type = item.type,
-                    title = item.title?.takeIf { it.isNotBlank() },
-                    url = item.url?.takeIf { it.isNotBlank() },
-                    socket = socket.name,
-                    pid = socket.pid,
-                    packageName = socket.packageName,
-                )
-            }
-    }
-
     private fun webUrl(url: String): String {
         val trimmed = url.trim()
         if (!acceptable(trimmed))
@@ -739,14 +740,6 @@ internal class BrowserServiceImpl(
         val name: String,
         val pid: Int? = null,
         @SerialName("package") val packageName: String? = null,
-    )
-
-    @Serializable
-    private data class ListedTarget(
-        val id: String,
-        val type: String = "page",
-        val title: String? = null,
-        val url: String? = null,
     )
 
     @Serializable private data class CreatedTarget(val targetId: String? = null)
@@ -776,9 +769,9 @@ internal class BrowserServiceImpl(
         const val PAGE_ATTEMPTS = 4
         const val PAGE_RETRY_MS = 200L
         const val APPEAR_MS = 500L
+        const val SHOWING_MS = 2_000L
         const val SHOW_ATTEMPTS = 3
         const val ERROR_SNIPPET = 80
-        val SKIPPED_TYPES = setOf("service_worker", "shared_worker", "worker")
     }
 
     private sealed interface SocketList {

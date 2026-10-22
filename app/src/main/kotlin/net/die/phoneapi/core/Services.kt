@@ -121,6 +121,14 @@ interface BrowserService {
     /** Closes a tab over DevTools, without bringing it forward. */
     suspend fun closeTab(id: String): ActionResult
 
+    /**
+     * Makes [id] the tab Chrome shows. With Chrome in the background, this may bring it forward.
+     */
+    suspend fun activate(id: String)
+
+    /** Whether [id] reports itself visible. Only meaningful while its app is in front. */
+    suspend fun showing(id: String): Boolean
+
     suspend fun snapshot(
         id: String,
         options: BrowserSnapshotOptions = BrowserSnapshotOptions(),

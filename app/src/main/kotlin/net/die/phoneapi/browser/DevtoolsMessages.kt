@@ -106,10 +106,6 @@ internal class DevtoolsPreconditions(private val context: Context) {
 
     private fun usbDebugging(): Boolean =
         Settings.Global.getInt(context.contentResolver, Settings.Global.ADB_ENABLED, 0) == 1
-
-    private companion object {
-        const val CHROME_PACKAGE = "com.android.chrome"
-    }
 }
 
 private fun isAdbRejected(error: Throwable?): Boolean {

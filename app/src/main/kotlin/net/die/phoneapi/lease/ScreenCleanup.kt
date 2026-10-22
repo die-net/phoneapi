@@ -8,13 +8,22 @@ import net.die.phoneapi.model.ApiException
 import net.die.phoneapi.model.KeyRequest
 
 /**
- * Leaves the screen in a known state between holders: keyboard hidden, home, locked. Locking every
- * time, rather than only when someone waits, keeps "locked between holders" simple to check, and
- * the stored PIN makes the next unlock cheap. Returns the steps that failed.
+ * Leaves the screen in a known state between holders: keyboard hidden, Chrome on its blank
+ * placeholder tab, home, locked. Locking every time, rather than only when someone waits, keeps
+ * "locked between holders" simple to check, and the stored PIN makes the next unlock cheap. Returns
+ * the steps that failed.
  */
-class ScreenCleanup(private val input: InputService, private val power: PowerService) {
+class ScreenCleanup(
+    private val input: InputService,
+    private val power: PowerService,
+    private val showPlaceholder: suspend () -> Unit = {},
+) {
     suspend fun run(): List<String> = buildList {
         step("hide the keyboard") { input.hideIme() }
+        step("show the blank tab") {
+            showPlaceholder()
+            ActionResult(ok = true)
+        }
         step("go home") { input.key(KeyRequest(key = "HOME")) }
         step("lock") { power.lock() }
     }

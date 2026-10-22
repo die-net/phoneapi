@@ -3,11 +3,13 @@ package net.die.phoneapi.lease
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -61,6 +63,7 @@ class ScreenLease(
     private data class Waiter(val holder: Holder, val granted: CompletableDeferred<Unit>)
 
     private val mutex = Mutex()
+    private val gate = Mutex()
     private val queue = ArrayDeque<Waiter>()
     private val notes = HashMap<Holder, MutableList<String>>()
     private val running = HashMap<Holder, MutableSet<Job>>()
@@ -86,6 +89,15 @@ class ScreenLease(
                 withContext(NonCancellable) { release(holder, cleanup = false) }
             }
         }
+    }
+
+    /**
+     * Runs [block] between screen calls: once none is running, and with none starting until it
+     * returns. For putting Chrome back on the holder's tab without cutting into a gesture.
+     */
+    suspend fun <T> betweenCalls(block: suspend () -> T): T = gate.withLock {
+        while (mutex.withLock { running.values.any { it.isNotEmpty() } }) delay(BETWEEN_POLL_MS)
+        block()
     }
 
     /** Whether [holder] has the screen now. */
@@ -220,8 +232,10 @@ class ScreenLease(
 
     /** Runs [block] as a child that [takeOver] can cancel, turning that into `screen_taken`. */
     private suspend fun <T> runTracked(holder: Holder, block: suspend () -> T): T = coroutineScope {
-        val work = async { block() }
-        mutex.withLock { running.getOrPut(holder) { HashSet() } += work }
+        val work = async(start = CoroutineStart.LAZY) { block() }
+        // Registered under the gate, so betweenCalls cannot miss a call that is about to start.
+        gate.withLock { mutex.withLock { running.getOrPut(holder) { HashSet() } += work } }
+        work.start()
         try {
             // join throws only when this caller is canceled, not when take over cancels the child.
             work.join()
@@ -281,6 +295,7 @@ class ScreenLease(
 
     companion object {
         const val WAIT_MS = 60_000L
+        private const val BETWEEN_POLL_MS = 50L
         private const val MS_PER_S = 1_000
     }
 }

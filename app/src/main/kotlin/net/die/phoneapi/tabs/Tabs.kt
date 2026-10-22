@@ -1,8 +1,10 @@
 package net.die.phoneapi.tabs
 
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import net.die.phoneapi.browser.CHROME_PACKAGE
 import net.die.phoneapi.browser.CHROME_SOCKET
 import net.die.phoneapi.browser.parseBrowserTargetId
 import net.die.phoneapi.core.BrowserService
@@ -24,6 +26,9 @@ interface TabStore {
  * popups those tabs open, and unowned tabs it claims by using them. Other sessions cannot see or
  * touch them. When a session ends, the tabs it opened close and those it claimed go back to being
  * unowned. REST and the raw CDP socket can use any tab a live session does not own.
+ *
+ * Whenever Chrome is in front, it shows the screen holder's tab or an `about:blank` placeholder no
+ * one owns, never another session's page.
  */
 class Tabs(
     private val base: BrowserService,
@@ -37,9 +42,20 @@ class Tabs(
 
     private val owners = ConcurrentHashMap<String, Owner>()
     private val mutex = Mutex()
+    private val placeholderMutex = Mutex()
+
+    /** The tab Chrome shows when the screen holder has none forward. */
+    @Volatile private var placeholder: String? = null
+
+    /** The tab each session last opened or brought forward. */
+    private val fronts = ConcurrentHashMap<Holder.Session, String>()
 
     /** The browser for REST and the raw CDP socket, which own nothing. */
     val shared: BrowserService by lazy { SharedBrowser(this, base) }
+
+    /** Chrome's tabs for REST, without the placeholder. */
+    internal suspend fun sharedTargets(): List<BrowserTarget> =
+        base.targets().filter { it.id != placeholder }
 
     /** The browser as [holder] sees it. */
     fun browserFor(holder: Holder): BrowserService =
@@ -64,6 +80,7 @@ class Tabs(
         val mine = mutex.withLock {
             val ids = owners.filterValues { it.holder == holder }
             ids.keys.forEach(owners::remove)
+            fronts.remove(holder)
             saveOpened()
             ids
         }
@@ -104,14 +121,124 @@ class Tabs(
             owners[tab.id] = Owner(holder, opened = true)
             saveOpened()
         }
-        return tab
+        if (lease.holds(holder)) {
+            fronts[holder] = tab.id
+            return tab
+        }
+        // Chrome switches to a new tab while it is in front, which must not show this session's
+        // page to whoever holds the screen.
+        if (!putBack()) {
+            closeQuietly(tab.id)
+            closed(tab.id)
+            throw ApiException(
+                409,
+                "took_screen",
+                "Chrome showed the new tab on screen and would not switch back, so PhoneAPI " +
+                    "closed it. Try again once Chrome is in the background.",
+            )
+        }
+        return tab.copy(tookScreen = false)
     }
 
     internal suspend fun closed(id: String) {
         mutex.withLock {
             owners.remove(id)
+            fronts.values.remove(id)
             saveOpened()
         }
+    }
+
+    /** Remembers that [holder] brought [id] forward, so Chrome goes back to it. */
+    internal fun broughtForward(holder: Holder.Session, id: String) {
+        if (lease.holds(holder)) fronts[holder] = id
+    }
+
+    /**
+     * After a call by [holder] that a page could answer by opening a popup: if [holder] does not
+     * hold the screen and Chrome is in front, Chrome goes back to the screen holder's tab.
+     */
+    internal suspend fun afterInput(holder: Holder.Session) {
+        if (lease.holds(holder) || !chromeInFront()) return
+        adoptPopups(base.targets())
+        if (!putBack()) {
+            throw ApiException(
+                409,
+                "took_screen",
+                "Chrome showed a tab this session's page opened and would not switch back. " +
+                    "Close the popup.",
+            )
+        }
+    }
+
+    /**
+     * Runs [holder]'s screen call [block], making sure Chrome shows none of another session's tabs
+     * while Chrome is in front: before the call, and after it when Chrome came forward during it.
+     */
+    suspend fun <T> screenCall(holder: Holder, block: suspend () -> T): T {
+        // With no other session's tabs, there is nothing Chrome could show by mistake.
+        if (owners.values.all { it.holder == holder }) return block()
+        val before = chromeInFront()
+        if (before) bestEffort { showFor(holder) }
+        val value = block()
+        if (!before && chromeInFront()) bestEffort { showFor(holder) }
+        return value
+    }
+
+    private suspend fun chromeInFront(): Boolean =
+        try {
+            inFront(CHROME_PACKAGE)
+        } catch (_: ApiException) {
+            false
+        }
+
+    /** Fixing Chrome's selection must not fail the holder's own call. */
+    private suspend fun bestEffort(block: suspend () -> Unit) {
+        try {
+            block()
+        } catch (_: ApiException) {
+            // Chrome is not answering; the next screen call tries again.
+        }
+    }
+
+    /** For cleanup: shows the placeholder if Chrome is in front, so it is blank next time. */
+    suspend fun showPlaceholder() {
+        if (!inFront(CHROME_PACKAGE)) return
+        base.activate(placeholderTab())
+    }
+
+    /** Between screen calls, puts Chrome back on the screen holder's tab. False if it would not. */
+    private suspend fun putBack(): Boolean =
+        try {
+            lease.betweenCalls { showFor(lease.state.value.holder) }
+        } catch (_: ApiException) {
+            false
+        }
+
+    /**
+     * With Chrome in front, selects [holder]'s tab, or the placeholder, if Chrome shows another
+     * session's. Selecting a tab can bring Chrome forward, so this does nothing while it is hidden.
+     * True when Chrome shows nothing it should not.
+     */
+    private suspend fun showFor(holder: Holder?): Boolean {
+        if (!inFront(CHROME_PACKAGE)) return true
+        val front = (holder as? Holder.Session)?.let { fronts[it] }
+        if (front != null && base.showing(front)) return true
+        val others = owners.filterValues { it.holder != holder }.keys
+        if (others.none { base.showing(it) }) return true
+        val view = front ?: placeholderTab()
+        base.activate(view)
+        delay(SELECT_MS)
+        return base.showing(view)
+    }
+
+    /** The placeholder, opened again if it was closed. */
+    private suspend fun placeholderTab(): String = placeholderMutex.withLock {
+        val id = placeholder
+        if (id != null && base.targets().any { it.id == id }) return@withLock id
+        val tab = base.openTab(BLANK)
+        placeholder = tab.id
+        mutex.withLock { saveOpened() }
+        tab.id
     }
 
     /**
@@ -121,6 +248,7 @@ class Tabs(
      */
     internal suspend fun access(holder: Holder.Session, id: String) {
         val (socket, _) = parseBrowserTargetId(id)
+        if (id == placeholder) throw missing(id)
         mutex.withLock {
             val owner = owners[id]
             when {
@@ -138,7 +266,7 @@ class Tabs(
 
     /** REST and raw CDP: any tab a live session does not own. */
     fun accessShared(id: String) {
-        if (owners.containsKey(id)) throw missing(id)
+        if (owners.containsKey(id) || id == placeholder) throw missing(id)
     }
 
     /**
@@ -151,19 +279,12 @@ class Tabs(
     ): List<BrowserTarget> {
         val holds = lease.holds(holder)
         val out = ArrayList<BrowserTarget>()
-        mutex.withLock {
-            for (tab in all) {
-                val opener = tab.openerId?.let(owners::get)
-                if (owners[tab.id] == null && opener != null) {
-                    owners[tab.id] = Owner(opener.holder, opened = true)
-                }
-            }
-            saveOpened()
-        }
+        adoptPopups(all)
         for (tab in all) {
             val owner = owners[tab.id]
             val chrome = tab.socket == CHROME_SOCKET
             when {
+                tab.id == placeholder -> Unit
                 owner?.holder == holder -> out += tab.copy(owned = true)
                 owner != null -> Unit
                 chrome -> out += tab.copy(owned = false)
@@ -174,11 +295,24 @@ class Tabs(
         return out
     }
 
+    /** Gives each unowned popup in [all] to the owner of the tab that opened it. */
+    private suspend fun adoptPopups(all: List<BrowserTarget>) {
+        mutex.withLock {
+            for (tab in all) {
+                val opener = tab.openerId?.let(owners::get)
+                if (owners[tab.id] == null && opener != null) {
+                    owners[tab.id] = Owner(opener.holder, opened = true)
+                }
+            }
+            saveOpened()
+        }
+    }
+
     internal fun ownedByOthers(holder: Holder.Session, id: String): Boolean =
         owners[id]?.let { it.holder != holder } == true
 
     private fun saveOpened() {
-        store.save(owners.filterValues { it.opened }.keys.toSet())
+        store.save(owners.filterValues { it.opened }.keys + listOfNotNull(placeholder))
     }
 
     private suspend fun closeQuietly(id: String) {
@@ -194,5 +328,9 @@ class Tabs(
     companion object {
         const val PER_SESSION = 4
         const val TOTAL = 8
+        private const val BLANK = "about:blank"
+
+        /** How long Chrome takes to switch tabs before this checks. */
+        private const val SELECT_MS = 200L
     }
 }

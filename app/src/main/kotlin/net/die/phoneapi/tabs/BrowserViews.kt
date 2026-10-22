@@ -6,6 +6,7 @@ import net.die.phoneapi.model.ActionResult
 import net.die.phoneapi.model.BrowserFindRequest
 import net.die.phoneapi.model.BrowserFindResult
 import net.die.phoneapi.model.BrowserGestureRequest
+import net.die.phoneapi.model.BrowserInput
 import net.die.phoneapi.model.BrowserKeyRequest
 import net.die.phoneapi.model.BrowserReadRequest
 import net.die.phoneapi.model.BrowserReadResult
@@ -20,7 +21,11 @@ import net.die.phoneapi.model.ConsoleResult
 import net.die.phoneapi.model.EvalRequest
 import net.die.phoneapi.model.EvalResult
 
-/** The browser as one MCP session sees it: its own tabs and unowned ones, as [Tabs] rules. */
+/**
+ * The browser as one MCP session sees it: its own tabs and unowned ones, as [Tabs] rules. Calls
+ * that bring a tab forward tell [Tabs], and calls a page could answer with a popup let it put
+ * Chrome back.
+ */
 internal class SessionBrowser(
     private val tabs: Tabs,
     private val base: BrowserService,
@@ -31,37 +36,41 @@ internal class SessionBrowser(
     override suspend fun openTab(url: String): BrowserTarget = tabs.opened(holder, url)
 
     override suspend fun navigate(id: String, url: String): BrowserTarget =
-        mine(id) { base.navigate(id, url) }
+        acting(id) { base.navigate(id, url) }
 
     override suspend fun closeTab(id: String): ActionResult =
         mine(id) { base.closeTab(id) }.also { tabs.closed(id) }
 
+    override suspend fun activate(id: String) = mine(id) { base.activate(id) }
+
+    override suspend fun showing(id: String): Boolean = mine(id) { base.showing(id) }
+
     override suspend fun snapshot(id: String, options: BrowserSnapshotOptions): BrowserSnapshot =
-        mine(id) { base.snapshot(id, options) }
+        mine(id) { base.snapshot(id, options) }.also { forward(id, options.show) }
 
     override suspend fun read(id: String, request: BrowserReadRequest): BrowserReadResult =
-        mine(id) { base.read(id, request) }
+        mine(id) { base.read(id, request) }.also { forward(id, request.show) }
 
     override suspend fun find(id: String, request: BrowserFindRequest): BrowserFindResult =
         mine(id) { base.find(id, request) }
 
     override suspend fun tap(id: String, request: BrowserTapRequest): ActionResult =
-        mine(id) { base.tap(id, request) }
+        acting(id, request.input) { base.tap(id, request) }
 
     override suspend fun swipe(id: String, request: BrowserSwipeRequest): ActionResult =
-        mine(id) { base.swipe(id, request) }
+        acting(id, request.input) { base.swipe(id, request) }
 
     override suspend fun gesture(id: String, request: BrowserGestureRequest): ActionResult =
-        mine(id) { base.gesture(id, request) }
+        acting(id, request.input) { base.gesture(id, request) }
 
     override suspend fun key(id: String, request: BrowserKeyRequest): ActionResult =
-        mine(id) { base.key(id, request) }
+        acting(id, request.input) { base.key(id, request) }
 
     override suspend fun text(id: String, request: BrowserTextRequest): ActionResult =
-        mine(id) { base.text(id, request) }
+        acting(id, request.input) { base.text(id, request) }
 
     override suspend fun evaluate(id: String, request: EvalRequest): EvalResult =
-        mine(id) { base.evaluate(id, request) }
+        acting(id) { base.evaluate(id, request) }
 
     override suspend fun console(id: String, request: ConsoleRequest): ConsoleResult =
         mine(id) { base.console(id, request) }
@@ -70,12 +79,28 @@ internal class SessionBrowser(
         tabs.access(holder, id)
         return block()
     }
+
+    /** A call a page could answer with a popup; touch [input] brings the tab forward first. */
+    private suspend fun <T> acting(
+        id: String,
+        input: BrowserInput? = null,
+        block: suspend () -> T,
+    ): T {
+        val value = mine(id, block)
+        forward(id, input == BrowserInput.TOUCH)
+        tabs.afterInput(holder)
+        return value
+    }
+
+    private fun forward(id: String, shown: Boolean) {
+        if (shown) tabs.broughtForward(holder, id)
+    }
 }
 
 /** The browser for REST and the raw CDP socket: every tab no live session owns. */
 internal class SharedBrowser(private val tabs: Tabs, private val base: BrowserService) :
     BrowserService {
-    override suspend fun targets(): List<BrowserTarget> = base.targets()
+    override suspend fun targets(): List<BrowserTarget> = tabs.sharedTargets()
 
     override suspend fun openTab(url: String): BrowserTarget = base.openTab(url)
 
@@ -83,6 +108,10 @@ internal class SharedBrowser(private val tabs: Tabs, private val base: BrowserSe
         free(id) { base.navigate(id, url) }
 
     override suspend fun closeTab(id: String): ActionResult = free(id) { base.closeTab(id) }
+
+    override suspend fun activate(id: String) = free(id) { base.activate(id) }
+
+    override suspend fun showing(id: String): Boolean = free(id) { base.showing(id) }
 
     override suspend fun snapshot(id: String, options: BrowserSnapshotOptions): BrowserSnapshot =
         free(id) { base.snapshot(id, options) }

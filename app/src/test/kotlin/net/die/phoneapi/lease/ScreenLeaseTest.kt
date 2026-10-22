@@ -51,6 +51,20 @@ class ScreenLeaseTest {
     }
 
     @Test
+    fun `between calls waits its turn`() = runTest {
+        val lease = lease()
+        val going = CompletableDeferred<Unit>()
+        val call = async { lease.withScreen(a) { going.await() } }
+        runCurrent()
+        val between = async { lease.betweenCalls { "fixed" } }
+        runCurrent()
+        assertFalse(between.isCompleted)
+        going.complete(Unit)
+        call.await()
+        assertEquals("fixed", between.await())
+    }
+
+    @Test
     fun `wait ends in screen busy`() = runTest {
         val lease = lease()
         lease.withScreen(a) {}

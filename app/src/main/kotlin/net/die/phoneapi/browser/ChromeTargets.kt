@@ -1,7 +1,11 @@
 package net.die.phoneapi.browser
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.serializer
+import net.die.phoneapi.core.ApiException
+import net.die.phoneapi.core.ApiJson
 import net.die.phoneapi.model.BrowserTarget
 
 /**
@@ -41,3 +45,44 @@ private data class TargetInfo(
     val url: String? = null,
     val openerId: String? = null,
 )
+
+/**
+ * A WebView's pages from `/json/list`. Chrome's come from [chromeTargets] instead, since its
+ * `/json/list` ids differ from the ones the `Target` domain uses.
+ */
+internal fun listedTargets(
+    json: String,
+    socket: String,
+    pid: Int?,
+    packageName: String?,
+): List<BrowserTarget> {
+    val listed =
+        try {
+            ApiJson.decodeFromString(serializer<List<ListedTarget>>(), json)
+        } catch (e: SerializationException) {
+            throw ApiException(502, "cdp_error", "DevTools target list was not JSON", cause = e)
+        }
+    return listed
+        .filter { it.type !in SKIPPED_TYPES }
+        .map { item ->
+            BrowserTarget(
+                id = browserTargetId(socket, item.id),
+                type = item.type,
+                title = item.title?.takeIf { it.isNotBlank() },
+                url = item.url?.takeIf { it.isNotBlank() },
+                socket = socket,
+                pid = pid,
+                packageName = packageName,
+            )
+        }
+}
+
+@Serializable
+private data class ListedTarget(
+    val id: String,
+    val type: String = "page",
+    val title: String? = null,
+    val url: String? = null,
+)
+
+private val SKIPPED_TYPES = setOf("service_worker", "shared_worker", "worker")
