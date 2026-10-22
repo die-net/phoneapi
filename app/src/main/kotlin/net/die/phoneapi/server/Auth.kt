@@ -15,6 +15,8 @@ import io.ktor.server.routing.RouteSelector
 import io.ktor.server.routing.RouteSelectorEvaluation
 import io.ktor.server.routing.RoutingResolveContext
 import io.ktor.util.AttributeKey
+import java.net.URI
+import java.net.URISyntaxException
 import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.model.Scope
 import net.die.phoneapi.model.TokenInfo
@@ -44,6 +46,10 @@ val BearerAuth =
     createApplicationPlugin("BearerAuth", ::AuthConfig) {
         val tokens = pluginConfig.tokens
         onCall { call ->
+            if (call.isWebSocketUpgrade() && !call.sameOriginOrNone()) {
+                call.respondBytes(ByteArray(0), status = HttpStatusCode.NotFound)
+                return@onCall
+            }
             val header =
                 call.request.headers[HttpHeaders.Authorization]
                     ?.takeIf { it.startsWith("Bearer ", ignoreCase = true) }
@@ -67,10 +73,43 @@ val BearerAuth =
 private const val BEARER_PREFIX_LENGTH = 7
 
 internal fun ApplicationCall.acceptsAccessTokenQuery(): Boolean {
-    val upgrade = request.headers[HttpHeaders.Upgrade]
-    if (upgrade?.contains("websocket", ignoreCase = true) == true) return true
+    if (isWebSocketUpgrade()) return true
     return request.httpMethod == HttpMethod.Get && request.path() == VIEWER_PATH
 }
+
+private fun ApplicationCall.isWebSocketUpgrade(): Boolean =
+    request.headers[HttpHeaders.Upgrade]?.contains("websocket", ignoreCase = true) == true
+
+/**
+ * A WebSocket upgrade from a browser names its page in `Origin`. The viewer cookie is
+ * `SameSite=Strict`, but a page on `127.0.0.1` at any port is the same site, so another local web
+ * server's page could otherwise open the viewer's sockets with it. Only the API's own address may.
+ * Clients outside a browser send no `Origin`.
+ */
+private fun ApplicationCall.sameOriginOrNone(): Boolean {
+    val origin = request.headers[HttpHeaders.Origin] ?: return true
+    val host = request.headers[HttpHeaders.Host] ?: return false
+    val page =
+        try {
+            URI(origin)
+        } catch (_: URISyntaxException) {
+            return false
+        }
+    val scheme = page.scheme?.lowercase()
+    val pageHost = page.host ?: return false
+    if (scheme != "http" && scheme != "https") return false
+    val defaultPort = if (scheme == "https") HTTPS_PORT else HTTP_PORT
+    val pagePort = if (page.port == -1) defaultPort else page.port
+    val split = host.lastIndexOf(':')
+    val hostName = if (split > host.lastIndexOf(']')) host.substring(0, split) else host
+    val hostPort =
+        if (split > host.lastIndexOf(']')) host.substring(split + 1).toIntOrNull() else defaultPort
+    return pageHost.trim('[', ']').equals(hostName.trim('[', ']'), ignoreCase = true) &&
+        pagePort == hostPort
+}
+
+private const val HTTP_PORT = 80
+private const val HTTPS_PORT = 443
 
 val ApplicationCall.token: TokenInfo
     get() = attributes[TokenKey]

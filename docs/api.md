@@ -197,7 +197,7 @@ Target ids look like `chrome_devtools_remote~<pageId>`. Chrome must publish DevT
 
 ## WebSockets
 
-Auth: Bearer header, the `phoneapi` cookie, or `access_token` on the upgrade URL.
+Auth: Bearer header, the `phoneapi` cookie, or `access_token` on the upgrade URL. A browser's upgrade must come from the API's own address: one whose `Origin` names another host or port gets the empty 404, so another local web page cannot open these sockets with the viewer's cookie.
 
 | Path | Scope | Summary |
 | --- | --- | --- |
