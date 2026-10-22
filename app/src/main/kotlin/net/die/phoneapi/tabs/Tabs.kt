@@ -1,7 +1,9 @@
 package net.die.phoneapi.tabs
 
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import net.die.phoneapi.browser.CHROME_PACKAGE
@@ -37,10 +39,15 @@ class Tabs(
     private val store: TabStore,
     private val perSession: Int = PER_SESSION,
     private val total: Int = TOTAL,
+    /** Where tabs Chrome opens a moment after an intent are looked for. */
+    private val scope: CoroutineScope? = null,
 ) {
     private data class Owner(val holder: Holder.Session, val opened: Boolean)
 
     private val owners = ConcurrentHashMap<String, Owner>()
+
+    /** Sessions that have ended, so a late claim does not give them a tab no one will close. */
+    private val ended: MutableSet<Holder.Session> = ConcurrentHashMap.newKeySet()
     private val mutex = Mutex()
     private val placeholderMutex = Mutex()
 
@@ -87,6 +94,12 @@ class Tabs(
 
     /** Closes the tabs [holder] opened and gives back those it claimed. */
     suspend fun end(holder: Holder.Session) {
+        ended += holder
+        // Remembered only for as long as a late claim could still look.
+        scope?.launch {
+            delay(CLAIM_CHECKS_MS.sum())
+            ended -= holder
+        }
         val mine = mutex.withLock {
             val ids = owners.filterValues { it.holder == holder }
             ids.keys.forEach(owners::remove)
@@ -184,7 +197,19 @@ class Tabs(
      * Runs [holder]'s screen call [block], making sure Chrome shows none of another session's tabs
      * while Chrome is in front: before the call, and after it when Chrome came forward during it.
      */
-    suspend fun <T> screenCall(holder: Holder, block: suspend () -> T): T {
+    suspend fun <T> screenCall(
+        holder: Holder,
+        claimNew: Boolean = false,
+        block: suspend () -> T,
+    ): T {
+        // A tab Chrome opens for an intent is the caller's, as if it had opened the tab itself.
+        val known = if (claimNew && holder is Holder.Session) chromeTabs() else null
+        val value = showingOwn(holder, block)
+        if (known != null) claimLater(holder as Holder.Session, known)
+        return value
+    }
+
+    private suspend fun <T> showingOwn(holder: Holder, block: suspend () -> T): T {
         // With no other session's tabs, there is nothing Chrome could show by mistake.
         if (owners.values.all { it.holder == holder }) return block()
         val before = chromeInFront()
@@ -192,6 +217,40 @@ class Tabs(
         val value = block()
         if (!before && chromeInFront()) bestEffort { showFor(holder) }
         return value
+    }
+
+    /** The ids of Chrome's tabs now, or null when Chrome is not answering. */
+    private suspend fun chromeTabs(): Set<String>? =
+        try {
+            base.targets().filter { it.socket == CHROME_SOCKET }.map { it.id }.toSet()
+        } catch (_: ApiException) {
+            null
+        }
+
+    /**
+     * Gives [holder] the Chrome tabs that appear, unowned, after its call: Chrome handles an
+     * intent's URL after the activity starts, so the tab can show up a moment later.
+     */
+    private fun claimLater(holder: Holder.Session, known: Set<String>) {
+        val launch = scope ?: return
+        launch.launch {
+            for (wait in CLAIM_CHECKS_MS) {
+                delay(wait)
+                if (holder in ended) return@launch
+                chromeTabs()?.let { adopt(holder, it - known) }
+            }
+        }
+    }
+
+    /** Gives [holder] the tabs in [ids] that no one owns yet. */
+    private suspend fun adopt(holder: Holder.Session, ids: Set<String>) {
+        mutex.withLock {
+            for (id in ids) {
+                if (id != placeholder && owners[id] == null)
+                    owners[id] = Owner(holder, opened = true)
+            }
+            saveOpened()
+        }
     }
 
     private suspend fun chromeInFront(): Boolean =
@@ -340,7 +399,11 @@ class Tabs(
         }
     }
 
-    private fun missing(id: String) = ApiException.notFound("No browser target $id")
+    private fun missing(id: String) =
+        ApiException.notFound(
+            "No browser target $id. It may have closed when the session that opened it ended, " +
+                "as tabs do, or it belongs to another session. List yours with browser_targets."
+        )
 
     private fun elsewhere(id: String) =
         ApiException.notFound(
@@ -356,5 +419,8 @@ class Tabs(
 
         /** How long Chrome takes to switch tabs before this checks. */
         private const val SELECT_MS = 200L
+
+        /** When to look for a tab Chrome opened for an intent, each after the last. */
+        private val CLAIM_CHECKS_MS = listOf(0L, 500L, 1_500L)
     }
 }

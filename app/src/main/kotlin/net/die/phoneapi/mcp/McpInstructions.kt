@@ -32,7 +32,8 @@ internal fun mcpInstructions(scopes: Set<Scope>): String = buildList {
     )
     add(
         "- If you run subagents or parallel tasks that use the phone, give each its own session " +
-            "with session_start, and have it pass that id as session on every call it makes."
+            "with session_start, and have it pass that id as session on every call it makes. Never " +
+            "pass session on your own calls."
     )
     add("")
     add(

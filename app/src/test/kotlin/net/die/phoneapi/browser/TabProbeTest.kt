@@ -1,12 +1,5 @@
 package net.die.phoneapi.browser
 
-import java.io.ByteArrayInputStream
-import java.io.ByteArrayOutputStream
-import java.io.IOException
-import java.io.InputStream
-import java.io.OutputStream
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import net.die.phoneapi.model.ApiException
@@ -77,7 +70,8 @@ class TabProbeTest {
 
     @Test
     fun `running tab takes input`() {
-        val page = StallingSocket(harness.switched() + value(1, "0") + value(2, "true"))
+        // The frame, an isolated world, then the page's message arriving.
+        val page = StallingSocket(harness.switched() + world() + value(3, "true"))
         assertEquals(
             "no error",
             onPage(page) { failure { probe().requireRunning(it, CHROME_SOCKET) } },
@@ -86,8 +80,8 @@ class TabProbeTest {
 
     @Test
     fun `frozen tab refuses input`() {
-        // DevTools script runs, but the page's own message never arrives.
-        val page = StallingSocket(harness.switched() + value(1, "0"))
+        // DevTools script runs in the isolated world, but the page's own message never arrives.
+        val page = StallingSocket(harness.switched() + world())
         assertEquals(
             "tab_frozen",
             onPage(page) { failure { probe().requireRunning(it, CHROME_SOCKET) } },
@@ -135,6 +129,11 @@ class TabProbeTest {
 
     private fun empty(id: Int) = harness.serverTextFrame("""{"id":$id,"result":{}}""")
 
+    /** Replies to Page.getFrameTree and Page.createIsolatedWorld. */
+    private fun world() =
+        harness.serverTextFrame("""{"id":1,"result":{"frameTree":{"frame":{"id":"F"}}}}""") +
+            harness.serverTextFrame("""{"id":2,"result":{"executionContextId":7}}""")
+
     /** `Inspector.targetCrashed`, then the replies to `Inspector.enable` and `Page.reload`. */
     private fun crashed() =
         harness.serverTextFrame("""{"method":"Inspector.targetCrashed","params":{}}""") +
@@ -143,66 +142,4 @@ class TabProbeTest {
 
     private fun value(id: Int, json: String) =
         harness.serverTextFrame("""{"id":$id,"result":{"result":{"value":$json}}}""")
-
-    /** Plays [replies], then reads nothing until closed, as a page that stopped answering. */
-    private class StallingSocket(replies: ByteArray) : DevtoolsSocket {
-        private val closed = CountDownLatch(1)
-        private val played = ByteArrayInputStream(replies)
-        override val output: OutputStream = ByteArrayOutputStream()
-        override val input: InputStream =
-            object : InputStream() {
-                override fun read(): Int {
-                    val one = ByteArray(1)
-                    return if (read(one, 0, 1) < 0) -1 else one[0].toInt() and BYTE
-                }
-
-                override fun read(b: ByteArray, off: Int, len: Int): Int {
-                    val n = played.read(b, off, len)
-                    if (n > 0) return n
-                    if (!closed.await(STALL_S, TimeUnit.SECONDS)) throw IOException("not closed")
-                    return -1
-                }
-            }
-
-        override fun close() = closed.countDown()
-
-        /** The CDP methods sent, in order. */
-        fun methods(): List<String> {
-            val text = String((output as ByteArrayOutputStream).toByteArray(), Charsets.ISO_8859_1)
-            return METHOD.findAll(unmasked(text)).map { it.groupValues[1] }.toList()
-        }
-
-        private fun unmasked(text: String): String {
-            val bytes = text.toByteArray(Charsets.ISO_8859_1)
-            var at = text.indexOf("\r\n\r\n") + HEADER_END
-            val out = StringBuilder()
-            while (at + 2 <= bytes.size) {
-                var length = bytes[at + 1].toInt() and LENGTH_BITS
-                var header = 2
-                if (length == LENGTH_16) {
-                    length =
-                        (bytes[at + 2].toUByte().toInt() shl 8) or bytes[at + 3].toUByte().toInt()
-                    header = 4
-                }
-                val mask = bytes.copyOfRange(at + header, at + header + MASK_BYTES)
-                val start = at + header + MASK_BYTES
-                for (i in 0 until length) {
-                    out.append((bytes[start + i].toInt() xor mask[i % MASK_BYTES].toInt()).toChar())
-                }
-                out.append('\n')
-                at = start + length
-            }
-            return out.toString()
-        }
-    }
-
-    private companion object {
-        const val STALL_S = 10L
-        const val BYTE = 0xFF
-        const val HEADER_END = 4
-        const val LENGTH_BITS = 0x7F
-        const val LENGTH_16 = 126
-        const val MASK_BYTES = 4
-        val METHOD = Regex(""""method":"([^"]+)"""")
-    }
 }

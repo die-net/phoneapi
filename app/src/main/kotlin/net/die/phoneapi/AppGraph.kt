@@ -214,6 +214,7 @@ class AppGraph(
             screenLease,
             inFront = { pkg -> appInFront(pkg) },
             store = FileTabStore(File(filesDir, "session-tabs")),
+            scope = scope,
         )
     val waits: WaitService =
         WaitServiceImpl(
@@ -291,14 +292,13 @@ class AppGraph(
         )
 
     /**
-     * Screen on, keyguard down, and [pkg]'s activity is resumed, even with no web content showing,
-     * such as Chrome's start screen. Asks the helper's shell, since foregroundPackage can be stale.
+     * Screen on, keyguard down, and [pkg]'s task is on top, even with no web content showing, such
+     * as Chrome's start screen. Asks the helper, since foregroundPackage can be stale.
      */
     private suspend fun appInFront(pkg: String): Boolean {
         val now = state.refresh()
         if (now.screen != ScreenState.ON || now.keyguard.locked) return false
-        val activities = shell.exec(RESUMED_ACTIVITY_ARGS)
-        return activities.ok && resumedPackage(activities.stdout) == pkg
+        return topPackage() == pkg
     }
 
     private suspend fun launchPackage(pkg: String) =
@@ -322,14 +322,29 @@ class AppGraph(
             null
         }
 
-    /** The package of the resumed activity, or null when the helper cannot tell. */
-    private suspend fun topPackage(): String? =
-        try {
+    /**
+     * The package of the top task, or null when the helper cannot tell. The helper asks the
+     * activity task manager directly, in milliseconds; `dumpsys` is the fallback for a release
+     * where that call fails, at about 100 ms on a phone.
+     */
+    private suspend fun topPackage(): String? {
+        val proxy =
+            try {
+                helper.require()
+            } catch (_: ApiException) {
+                return null
+            }
+        val direct = withContext(ioDispatcher) { runCatching { proxy.topPackage() } }
+        direct.onSuccess {
+            return it
+        }
+        return try {
             val activities = shell.exec(RESUMED_ACTIVITY_ARGS)
             if (activities.ok) resumedPackage(activities.stdout) else null
         } catch (_: ApiException) {
             null
         }
+    }
 
     /** Puts [pkg] back in front, or goes home when it has no launcher entry, as a launcher. */
     private suspend fun bringBack(pkg: String) {
@@ -385,6 +400,7 @@ class AppGraph(
             devtoolsGap = DevtoolsPreconditions(context)::explain,
             refreshHz = { deviceInfo.display().refreshRate },
             touchscreen = { touchBackend.touchscreen() },
+            scope = scope,
         )
 
     fun start() {

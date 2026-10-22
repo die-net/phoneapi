@@ -129,6 +129,12 @@ interface BrowserService {
     /** Whether [id] reports itself visible. Only meaningful while its app is in front. */
     suspend fun showing(id: String): Boolean
 
+    /**
+     * Whether Chrome has stopped [id]'s timers, as the check started with its last background input
+     * shows, confirmed again now. False when nothing has checked.
+     */
+    suspend fun timersStalled(id: String): Boolean = false
+
     suspend fun snapshot(
         id: String,
         options: BrowserSnapshotOptions = BrowserSnapshotOptions(),

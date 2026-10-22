@@ -79,7 +79,29 @@ class ScreenLeaseTest {
         assertTrue(lease.holds(b))
         lease.release(b)
         val notes = lease.withScreen(a) {}.notes
-        assertTrue(notes.single().contains("went to another client"), notes.toString())
+        assertTrue(notes.any { it.contains("went to another client") }, notes.toString())
+    }
+
+    @Test
+    fun `next holder hears of cleanup`() = runTest {
+        val lease = lease()
+        lease.withScreen(a) {}
+        lease.release(a)
+        runCurrent()
+        val notes = lease.withScreen(b) {}.notes
+        assertTrue(notes.single().contains("cleaned up after the last holder"), notes.toString())
+    }
+
+    @Test
+    fun `long waits are noted`() = runTest {
+        val lease = lease()
+        lease.withScreen(a) {}
+        val waiting = async { lease.withScreen(b) {} }
+        advanceTimeBy(5_000)
+        lease.release(a)
+        runCurrent()
+        val notes = waiting.await().notes
+        assertTrue(notes.any { it.contains("waited 5 s") }, notes.toString())
     }
 
     @Test

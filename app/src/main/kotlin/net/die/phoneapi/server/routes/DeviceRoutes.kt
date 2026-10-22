@@ -4,6 +4,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.request.contentLength
+import io.ktor.server.request.header
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
 import io.ktor.server.routing.Route
@@ -16,7 +17,9 @@ import net.die.phoneapi.model.PinStatus
 import net.die.phoneapi.model.Scope
 import net.die.phoneapi.model.SetPinRequest
 import net.die.phoneapi.model.UnlockRequest
+import net.die.phoneapi.server.SESSION_HEADER
 import net.die.phoneapi.server.ServerServices
+import net.die.phoneapi.server.SessionsKey
 import net.die.phoneapi.server.scoped
 import net.die.phoneapi.server.withScreen
 
@@ -26,7 +29,17 @@ import net.die.phoneapi.server.withScreen
  */
 fun Route.deviceRoutes(services: ServerServices) {
     scoped(Scope.OBSERVE) {
-        get("/v1/device") { call.respond(services.device.info()) }
+        get("/v1/device") {
+            val sessions = call.application.attributes[SessionsKey]
+            val caller = call.request.header(SESSION_HEADER)
+            call.respond(
+                sessions.withScreenHolder(
+                    services.device.info(),
+                    services.lease.state.value,
+                    caller,
+                )
+            )
+        }
     }
     scoped(Scope.CONTROL) {
         post("/v1/device/wake") {

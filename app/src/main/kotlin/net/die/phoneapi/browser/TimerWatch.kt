@@ -1,0 +1,127 @@
+package net.die.phoneapi.browser
+
+import java.util.concurrent.ConcurrentHashMap
+import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
+import net.die.phoneapi.core.ApiException
+
+/**
+ * Whether a tab's timers still run. On an Android 11 phone, Chrome stopped a hidden tab's timers
+ * about a minute after hiding it, well before pausing the page, so input seemed to work but a page
+ * that reacts through timers never did, and nothing said why.
+ *
+ * Waiting for a timer before every input would cost about a second each, since Chrome runs a hidden
+ * tab's timers at most once a second. So a check starts alongside each input, in the background,
+ * and the next call on the tab reads its result. Checks run in an isolated world, so the page
+ * cannot see them, and Chrome stops that world's timers along with the page's.
+ */
+internal class TimerWatch(
+    private val scope: CoroutineScope,
+    /** Runs a block on the tab's DevTools connection. */
+    private val onPage: suspend (String, suspend (CdpSession) -> Unit) -> Unit,
+    private val now: () -> Long = System::currentTimeMillis,
+    private val stallMs: Long = STALL_MS,
+    private val watchMs: Long = WATCH_MS,
+    private val setupMs: Long = SETUP_MS,
+) {
+    // Starting and Waiting compare by identity, so each check records only over its own state.
+    private sealed interface State {
+        /** A check is connecting; it has not set its timer yet. */
+        class Starting : State
+
+        /** A check set its timer at [atMs] and is waiting for it. */
+        class Waiting(val atMs: Long) : State
+
+        /** A check's timer did not fire within [watchMs]. */
+        data object Stalled : State
+    }
+
+    private val states = ConcurrentHashMap<String, State>()
+
+    /** Starts a check on [id], replacing any earlier one. */
+    fun arm(id: String) {
+        val starting = State.Starting()
+        states[id] = starting
+        scope.launch {
+            var mine: State = starting
+            val fired =
+                check(id, watchMs) { waiting ->
+                    if (states.replace(id, starting, waiting)) mine = waiting
+                }
+            // Only the latest check records a result; a newer one has replaced this one's state.
+            if (fired == false) states.replace(id, mine, State.Stalled) else states.remove(id, mine)
+        }
+    }
+
+    /** Whether [id]'s last check shows its timers stopped: overdue, or never fired. */
+    fun stalled(id: String): Boolean =
+        when (val state = states[id]) {
+            is State.Waiting -> now() - state.atMs > stallMs
+            State.Stalled -> true
+            else -> false
+        }
+
+    /** Forgets [id]'s check, as when the tab comes on screen or loads a new page. */
+    fun clear(id: String) {
+        states.remove(id)
+    }
+
+    /**
+     * Checks [id] again now, waiting for its timer, so a tab that has come back to life is not
+     * refused. True when its timers are still stopped.
+     */
+    suspend fun confirm(id: String): Boolean {
+        val fired = check(id, stallMs) {}
+        if (fired == false) states[id] = State.Stalled else states.remove(id)
+        return fired == false
+    }
+
+    /**
+     * Sets a zero-length timer in an isolated world on [id] and waits up to [limitMs] for it. Null
+     * when that cannot be told, as when the page is busy running script or has closed.
+     */
+    private suspend fun check(
+        id: String,
+        limitMs: Long,
+        onSet: (State.Waiting) -> Unit,
+    ): Boolean? {
+        var fired: Boolean? = null
+        try {
+            onPage(id) { cdp ->
+                val world = withTimeoutOrNull(setupMs) { isolatedWorld(cdp) } ?: return@onPage
+                onSet(State.Waiting(now()))
+                fired =
+                    withTimeoutOrNull(limitMs) { evaluateInWorld(cdp, world, TIMER, true) } != null
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: ApiException) {
+            return null
+        }
+        return fired
+    }
+
+    companion object {
+        /** Longer than the once-a-second batching Chrome gives a hidden tab that still runs. */
+        const val STALL_MS = 1_100L
+
+        /** How long a background check waits, within DevTools' read timeout. */
+        private const val WATCH_MS = 10_000L
+        private const val SETUP_MS = 2_000L
+        private const val TIMER = "new Promise((done) => setTimeout(() => done(true), 0))"
+    }
+}
+
+/** Input or a wait on a tab whose timers have stopped. */
+internal fun timersStopped(id: String): ApiException =
+    ApiException(
+        409,
+        "tab_frozen",
+        "Chrome has stopped the timers of tab $id, as it does to tabs in the background, so the " +
+            "page may not react to input, and your last input on it may not have taken effect. " +
+            "Reading it still works. To use it, bring it forward with input touch, or " +
+            "browser_read or browser_snapshot with show, which take the screen. Or reload it with " +
+            "browser_navigate to its URL, which loses anything typed or scrolled.",
+    )

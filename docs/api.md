@@ -58,6 +58,7 @@ One client at a time holds the screen, as [sharing.md](sharing.md) describes. Ca
 - A session keeps the screen from its first such call until the session ends, it calls `screen_release`, or it makes no screen call for 30 s while someone else waits. Then cleanup runs and the waiter gets the screen; the session keeps its tabs, and its next screen call waits again and gets a note. REST sessions follow the same rules.
 - A call that needs the screen while someone else has it waits up to 60 s, then fails with 409 `screen_busy`, saying how long the screen has been held.
 - When a holder lets go, PhoneAPI hides the keyboard, puts Chrome on a blank placeholder tab, goes home, and locks the phone before the next holder gets the screen. A step that failed is reported to the next holder: as a `# note:` line first in an MCP tool result, or an `X-PhoneAPI-Note` header on REST.
+- Notes waiting for a session appear first on its next call of any kind: that cleanup ran before it got the screen, that it waited more than 2 s for the screen, that its screen went to another client, or that a person used it.
 - While Chrome is in front, it shows the screen holder's tab or the placeholder, never another session's tab. A session without the screen that opens a tab, or whose page opens a popup, gets it behind, with `tookScreen` false.
 - A browser input, `browser_eval`, `browser_navigate`, or `browser_open` call from a session without the screen that brings an app forward fails with 409 `took_screen`. If no one held the screen, that session now does; otherwise the app that was in front comes back and the holder gets a note. Android and Chrome block nearly all of these, so this is a tripwire for workflows that rely on it.
 
@@ -119,7 +120,8 @@ Authenticated errors are JSON:
 | 409 | `tab_limit` | A session has 4 tabs it opened, or all sessions 8 |
 | 409 | `took_screen` | A call from a session without the screen brought an app or Chrome forward; the message names it |
 | 409 | `tab_reloaded` | Chrome had unloaded the hidden tab, so PhoneAPI reloaded it instead of sending input or script to a page the caller has not seen |
-| 409 | `tab_frozen` | `cdp` or `cdp-mouse` input into a tab Chrome has paused, as it does to tabs hidden for about 5 minutes. Bring it forward with `touch` or `show`, or reload it |
+| 409 | `tab_frozen` | `cdp` or `cdp-mouse` input into a tab Chrome has paused, or whose timers it has stopped, as it does to tabs hidden in the background. Also a wait on such a tab. Bring it forward with `touch` or `show`, or reload it |
+| 409 | `session_conflict` | A screen call while the session that started the caller with `session_start`, or one the caller started, holds the screen |
 | 503 | `browser_frozen` | Android froze Chrome in the background, so nothing in it answers |
 | 429 | `too_many_sessions` | `initialize` or `POST /v1/sessions` past 16 sessions for the token or 32 in all |
 | 503 | `helper_unavailable` | Helper down or dropped; message may say starting / needs pairing / needs USB / stopped |
@@ -131,7 +133,7 @@ Authenticated errors are JSON:
 
 | Method | Path | Scope | Summary |
 | --- | --- | --- | --- |
-| `GET` | `/v1/device` | observe | `DeviceInfo`: display, helper status, capabilities, whether Android's app freezer is on (`appFreezer`), and whether PhoneAPI holds Chrome's Custom Tabs binding, which keeps the freezer off Chrome while the helper runs (`chromeKept`) |
+| `GET` | `/v1/device` | observe | `DeviceInfo`: display, helper status, capabilities, whether Android's app freezer is on (`appFreezer`), whether PhoneAPI holds Chrome's Custom Tabs binding, which keeps the freezer off Chrome while the helper runs (`chromeKept`), and who has the screen (`screenHolder`: `you` when `Mcp-Session-Id` names the holder, `agent`, `person`, or `script`) and for how long (`screenHeldMs`) |
 | `POST` | `/v1/device/wake` | control | Turn the screen on → `ActionResult` |
 | `POST` | `/v1/device/unlock` | control | Dismiss keyguard (`UnlockRequest`, optional) |
 | `POST` | `/v1/device/lock` | control | Lock the device |
@@ -263,7 +265,7 @@ Run `phoneapi server` and point a Streamable HTTP client at `http://127.0.0.1:<p
 | `swipe` | control | From/to or direction inside selector |
 | `type_text` | control | `mode` auto / keyboard / keyevent / setText |
 | `press_key` | control | Key names |
-| `wait_for` | observe | Same conditions as `/v1/wait`. `snapshot` adds a capped, masked outline and `screenshot` a PNG |
+| `wait_for` | observe | Same conditions as `/v1/wait`. `snapshot` adds a capped, masked outline and `screenshot` a PNG. `target` names the tab for browser conditions that name none |
 | `keyboard_hide` / `keyboard_show` | control | Soft keyboard |
 | `app_launch` / `app_stop` / `app_clear` | control | Package control (`stop`/`clear` need helper) |
 | `open_intent` | control | Start an intent (needs helper) |

@@ -258,10 +258,16 @@ private suspend fun callTool(
     val services = if (holder == own.holder) own else shared.forHolder(holder, control)
     val request = resolveInput(tool.name, withoutSession(asked), services.lease.holds(holder))
     val screen = takesScreen(tool.name, request.params.arguments)
+    val current = services.lease.state.value.holder as? Holder.Session
+    if (screen && current != null) {
+        control.conflict(holder, current)?.let {
+            return sessionConflict(it)
+        }
+    }
     return leased(services.lease, holder, screen) {
         val call = suspend { tool.call(services, scopes, request) }
         when {
-            screen -> services.tabs.screenCall(holder, call)
+            screen -> services.tabs.screenCall(holder, tool.name in CLAIMING_TOOLS, call)
             tool.name in LAUNCHING_TOOLS ->
                 tookScreenError { services.foreground.watch(holder, call) }
             else -> call()
@@ -285,6 +291,12 @@ private fun withoutSession(asked: CallToolRequest): CallToolRequest {
     val params = asked.params.copy(arguments = JsonObject(arguments - SESSION_ARGUMENT))
     return asked.copy(params = params)
 }
+
+private fun sessionConflict(message: String) =
+    CallToolResult(
+        content = listOf(TextContent(text = "session_conflict: $message")),
+        isError = true,
+    )
 
 private fun unknownSession() =
     CallToolResult(

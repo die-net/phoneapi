@@ -86,9 +86,18 @@ class ScreenLease(
      * screen from this holder.
      */
     suspend fun <T> withScreen(holder: Holder, block: suspend () -> T): Screened<T> {
+        val asked = now()
         acquire(holder)
+        val waited = now() - asked
+        if (waited >= WAITED_NOTE_MS) {
+            addNote(
+                holder,
+                "This call waited ${waited / MS_PER_S} s for the screen while another client " +
+                    "used it.",
+            )
+        }
         val value = runTracked(holder, block)
-        return Screened(value, drainNotes(holder))
+        return Screened(value, takeNotes(holder))
     }
 
     /**
@@ -216,7 +225,7 @@ class ScreenLease(
             holder,
             "The screen went to another client after this session made no screen call for " +
                 "${graceMs / MS_PER_S} s while it waited, and was cleaned up: home and locked. " +
-                "This call waited for it again. Check the screen before acting.",
+                "Your next call that needs the screen waits for it. Check the screen before acting.",
         )
         return letGo(holder, cleanup = true)
     }
@@ -244,12 +253,18 @@ class ScreenLease(
     private suspend fun finishCleanup(failed: List<String>) {
         mutex.withLock {
             cleaning = false
-            val next = grantNext()
-            if (failed.isEmpty()) return
+            // The next holder hears about cleanup either way, so a home screen and a locked
+            // phone are no surprise.
             val message =
-                "Cleanup after the last holder did not finish: ${failed.joinToString("; ")}. " +
-                    "Check the screen before acting."
-            if (next != null) note(next, message) else pendingCleanup = message
+                if (failed.isEmpty()) {
+                    "The screen was cleaned up after the last holder: keyboard hidden, home " +
+                        "screen, locked. Unlock it before acting."
+                } else {
+                    "Cleanup after the last holder did not finish: ${failed.joinToString("; ")}. " +
+                        "Check the screen before acting."
+                }
+            pendingCleanup = message
+            grantNext()
         }
     }
 
@@ -356,7 +371,8 @@ class ScreenLease(
         notes.getOrPut(holder) { mutableListOf() } += message
     }
 
-    private suspend fun drainNotes(holder: Holder): List<String> = mutex.withLock {
+    /** Takes the notes waiting for [holder], so its next result shows them once. */
+    suspend fun takeNotes(holder: Holder): List<String> = mutex.withLock {
         notes.remove(holder).orEmpty()
     }
 
@@ -387,6 +403,8 @@ class ScreenLease(
     companion object {
         const val WAIT_MS = 60_000L
         const val GRACE_MS = 30_000L
+        /** A screen call that waited at least this long says so in a note. */
+        private const val WAITED_NOTE_MS = 2_000L
         private const val BETWEEN_POLL_MS = 50L
         private const val MS_PER_S = 1_000
     }

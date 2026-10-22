@@ -89,6 +89,13 @@ public data class DeviceInfo(
      * Chrome. It does while the helper runs.
      */
     val chromeKept: Boolean = false,
+    /**
+     * Who has the screen now: `you` (the calling session), `agent`, `person` (in the viewer), or
+     * `script` (a REST session). Absent when it is free.
+     */
+    val screenHolder: String? = null,
+    /** How long [screenHolder] has had the screen. */
+    val screenHeldMs: Long? = null,
 )
 
 /** Runtime feature flags. A flag is true only when that path works on this device right now. */

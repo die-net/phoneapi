@@ -291,6 +291,10 @@ public data class BrowserReadResult(
     @Doc(PENDING_DOC) val pending: List<String> = emptyList(),
     @Doc(SHOWN_DOC) val shown: Boolean? = null,
     @Doc(RELOADED_DOC) val reloaded: Boolean = false,
+    @Doc(
+        "Chrome has stopped this hidden tab's timers, as it does to tabs in the background, so content the page would load or update on its own is not coming. Read with show true to bring it forward."
+    )
+    val timersStopped: Boolean = false,
     @Doc("What was read: article, page (also when no article was found), or selector.")
     val extracted: String,
     @Doc("Changes when the rendered content changes, so offsets from another call still apply.")

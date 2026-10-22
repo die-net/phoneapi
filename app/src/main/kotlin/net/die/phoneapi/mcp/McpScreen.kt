@@ -94,6 +94,9 @@ internal val LAUNCHING_TOOLS =
         "browser_type",
     )
 
+/** Tools that can make Chrome open a tab, which then belongs to the caller. */
+internal val CLAIMING_TOOLS = setOf("open_intent", "app_launch")
+
 /** The browser input tools, and the kind of input each sends. */
 private val INPUT_KINDS =
     mapOf(
@@ -158,7 +161,9 @@ internal suspend fun leased(
     needed: Boolean,
     call: suspend () -> CallToolResult,
 ): CallToolResult {
-    if (!needed) return call()
+    // A call that needs no screen still shows the notes waiting for its session, such as the
+    // screen having gone to another client, so they are not held until its next screen call.
+    if (!needed) return withNotes(call(), lease.takeNotes(holder))
     val screened =
         try {
             lease.withScreen(holder) { call() }
@@ -167,11 +172,15 @@ internal suspend fun leased(
         } catch (e: ApiException) {
             return errorResult(e)
         }
-    val result = screened.value
-    if (screened.notes.isEmpty()) return result
-    val notes = TextContent(text = screened.notes.joinToString("\n") { "# note: $it" })
+    return withNotes(screened.value, screened.notes)
+}
+
+/** [result] with [notes] first, as `# note:` lines. */
+private fun withNotes(result: CallToolResult, notes: List<String>): CallToolResult {
+    if (notes.isEmpty()) return result
+    val lines = TextContent(text = notes.joinToString("\n") { "# note: $it" })
     return CallToolResult(
-        content = listOf(notes) + result.content,
+        content = listOf(lines) + result.content,
         isError = result.isError,
         structuredContent = result.structuredContent,
     )

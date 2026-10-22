@@ -13,7 +13,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import net.die.phoneapi.lease.Holder
+import net.die.phoneapi.lease.LeaseState
 import net.die.phoneapi.model.ApiException
+import net.die.phoneapi.model.DeviceInfo
 import net.die.phoneapi.model.SessionInfo
 import net.die.phoneapi.server.TokenGateway
 
@@ -176,6 +178,42 @@ class McpSessions(
         return Holder.Session(id)
     }
 
+    /**
+     * Why the session [callerId] may not wait for the screen [holderId] has, when one started the
+     * other with `session_start`. Two sessions started by the same one may wait for each other.
+     */
+    fun conflict(callerId: String, holderId: String): String? =
+        when {
+            callerId == holderId -> null
+            sessions[callerId]?.parentId == holderId ->
+                "Your own session holds the screen. If this call is yours, leave session " +
+                    "out. If it is for a subagent, call screen_release without session first."
+            sessions[holderId]?.parentId == callerId ->
+                "A session you started with session_start holds the screen. Wait for that " +
+                    "task to finish, or end it with session_end, before using the screen " +
+                    "yourself."
+            else -> null
+        }
+
+    /**
+     * [info] with who has the screen in [state], as [caller] sees it: itself, another agent, a
+     * person in the viewer, or a script on REST.
+     */
+    fun withScreenHolder(info: DeviceInfo, state: LeaseState, caller: String?): DeviceInfo {
+        val holder = state.holder ?: return info
+        val kind =
+            when (holder) {
+                is Holder.Viewer -> "person"
+                is Holder.Session ->
+                    when {
+                        holder.id == caller -> "you"
+                        isRest(holder.id) -> "script"
+                        else -> "agent"
+                    }
+            }
+        return info.copy(screenHolder = kind, screenHeldMs = now() - state.sinceMs)
+    }
+
     /** Whether [id] is a session made with `POST /v1/sessions`. */
     fun isRest(id: String): Boolean = sessions[id]?.rest == true
 
@@ -238,6 +276,15 @@ class McpSessions(
 
             override fun related(holder: Holder.Session): Boolean =
                 sessions[holder.id]?.let(::ours) == true
+
+            override fun conflict(caller: Holder.Session, holder: Holder.Session): String? =
+                conflict(caller.id, holder.id)
+
+            override fun withScreenHolder(
+                info: DeviceInfo,
+                state: LeaseState,
+                caller: Holder.Session,
+            ): DeviceInfo = this@McpSessions.withScreenHolder(info, state, caller.id)
 
             private fun ours(session: McpSession): Boolean =
                 session.tokenId == tokenId &&

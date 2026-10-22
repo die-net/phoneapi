@@ -6,6 +6,7 @@ import java.io.OutputStream
 import java.util.LinkedHashMap
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -99,9 +100,20 @@ internal class BrowserServiceImpl(
     },
     private val refreshHz: () -> Float = { 60f },
     private val touchscreen: suspend () -> TouchscreenInfo = { fallbackTouchscreen() },
+    /** Where background timer checks run. Null checks nothing. */
+    scope: CoroutineScope? = null,
 ) : BrowserService {
     private val axTrees = newAxCache()
     private val probe = openProbe?.let { TabProbe(io, it, websocketKey) }
+    private val timers = scope?.let {
+        TimerWatch(
+            it,
+            { id, block ->
+                val (socket, chromeId) = parseBrowserTargetId(id)
+                usePage(socket, chromeId, repeatable = true) { cdp -> block(cdp) }
+            },
+        )
+    }
     @Volatile private var pageSource: String? = null
     @Volatile private var stateSource: String? = null
     private val pageInput: PageInput by lazy {
@@ -193,6 +205,7 @@ internal class BrowserServiceImpl(
     }
 
     override suspend fun navigate(id: String, url: String): BrowserTarget {
+        timers?.clear(id)
         val pageUrl = webUrl(url)
         val (socket, chromeId) = parseBrowserTargetId(id)
         axTrees.remove(id)
@@ -321,6 +334,8 @@ internal class BrowserServiceImpl(
                     browserPackage(socketList().firstOrNull { it.name == socket }, socket)
                 }
             if (pointer && input == BrowserInput.CDP) requireOnScreen(pkg)
+            val background = input !in TOUCH_INPUTS && socket == CHROME_SOCKET
+            if (background && timersStalled(id)) throw timersStopped(id)
             val result =
                 usePage(socket, chromeId) { cdp ->
                     probe?.revive(cdp, socket, reading = false)
@@ -329,6 +344,8 @@ internal class BrowserServiceImpl(
                     if (pointer && input == BrowserInput.CDP) requireShowing(cdp)
                     block(cdp, pkg)
                 }
+            // Touch brought the tab on screen; background input gets a timer check for next time.
+            if (background) timers?.arm(id) else timers?.clear(id)
             return result.copy(woke = woke, seq = sequence())
         } finally {
             invalidateSnapshots()
@@ -353,8 +370,15 @@ internal class BrowserServiceImpl(
         val extract = extractPage(id, request.scope, request.selector)
         val socket = parseBrowserTargetId(id).first
         return readPage(extract, request)
-            .copy(shown = drawn(socket, extract.visibility), reloaded = extract.reloaded)
+            .copy(
+                shown = drawn(socket, extract.visibility),
+                reloaded = extract.reloaded,
+                timersStopped = timers?.stalled(id) == true,
+            )
     }
+
+    override suspend fun timersStalled(id: String): Boolean =
+        timers?.let { it.stalled(id) && it.confirm(id) } == true
 
     override suspend fun find(id: String, request: BrowserFindRequest): BrowserFindResult {
         checkFind(request)
@@ -425,6 +449,7 @@ internal class BrowserServiceImpl(
      * still, or this tries again.
      */
     private suspend fun show(id: String) {
+        timers?.clear(id)
         val (socket, chromeId) = parseBrowserTargetId(id)
         prepare(true)
         val pkg = browserPackage(socketList().firstOrNull { it.name == socket }, socket)
@@ -490,6 +515,9 @@ internal class BrowserServiceImpl(
                     block(cdp)
                 }
             } catch (e: ApiException) {
+                if (!started && e.message.orEmpty().contains(TAB_GONE)) {
+                    throw tabClosed(browserTargetId(socket, chromeId))
+                }
                 if (!retryable(e, socket, started, repeatable)) throw e
                 last = e
                 if (attempt < PAGE_ATTEMPTS - 1) delay(PAGE_RETRY_MS)
