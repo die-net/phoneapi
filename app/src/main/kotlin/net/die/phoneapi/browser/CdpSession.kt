@@ -48,6 +48,12 @@ internal class CdpSession(
         )
     val events: Flow<CdpEvent> = eventsFlow.asSharedFlow()
 
+    /**
+     * Whether [method] arrived among the last events. Messages are handled in order, so an event
+     * sent before a command's reply is here once that command returns.
+     */
+    fun seen(method: String): Boolean = eventsFlow.replayCache.any { it.method == method }
+
     fun open(path: String) {
         socket.handshake(path)
         socket.connect()

@@ -223,6 +223,8 @@ class Tabs(
         if (!inFront(CHROME_PACKAGE)) return true
         val front = (holder as? Holder.Session)?.let { fronts[it] }
         if (front != null && base.showing(front)) return true
+        // A popup a page opened on its own, since the last listing, is its opener's too.
+        adoptPopups(base.targets())
         val others = owners.filterValues { it.holder != holder }.keys
         if (others.none { base.showing(it) }) return true
         val view = front ?: placeholderTab()

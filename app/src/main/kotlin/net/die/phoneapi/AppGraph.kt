@@ -317,8 +317,7 @@ class AppGraph(
 
     private suspend fun readFreezer(): Boolean? =
         try {
-            val settings = shell.exec(FREEZER_ARGS)
-            if (settings.ok) freezerOn(settings.stdout) else null
+            freezerOn(shell.exec(FREEZER_ARGS).stdout)
         } catch (_: ApiException) {
             null
         }

@@ -50,15 +50,13 @@ internal class TabProbe(
         }
 
     /**
-     * Checks that [cdp]'s page runs script. When it does not but the browser answers, Chrome
-     * unloaded the tab, so this reloads it in the background. A [reading] caller then gets true
-     * once the fresh page has loaded; any other fails with `tab_reloaded`, so it does not act on a
-     * page it has not looked at. When the browser does not answer either, this fails with
-     * `browser_frozen`.
+     * Checks that [cdp]'s page has a renderer. When Chrome unloaded the tab, this reloads it in the
+     * background. A [reading] caller then gets true once the fresh page has loaded; any other fails
+     * with `tab_reloaded`, so it does not act on a page it has not looked at. When Chrome does not
+     * answer at all, this fails with `browser_frozen`.
      */
     suspend fun revive(cdp: CdpSession, socket: String, reading: Boolean): Boolean {
-        if (socket != CHROME_SOCKET || runsScript(cdp)) return false
-        if (!browserAnswers(socket)) throw browserFrozen()
+        if (socket != CHROME_SOCKET || !unloaded(cdp, socket)) return false
         cdp.call("Page.reload")
         if (!reading) {
             throw ApiException(
@@ -73,8 +71,18 @@ internal class TabProbe(
         return true
     }
 
-    private suspend fun runsScript(cdp: CdpSession): Boolean =
-        withTimeoutOrNull(probeMs) { evaluate(cdp, "0") } != null
+    /**
+     * Whether the tab has no renderer. `Inspector.enable` says so with `Inspector.targetCrashed`,
+     * from the browser side, so a page whose main thread is busy is not taken for an unloaded one,
+     * as a script probe with a timeout would.
+     */
+    private suspend fun unloaded(cdp: CdpSession, socket: String): Boolean {
+        if (withTimeoutOrNull(probeMs) { cdp.call("Inspector.enable") } == null) {
+            if (!browserAnswers(socket)) throw browserFrozen()
+            return false
+        }
+        return cdp.seen("Inspector.targetCrashed")
+    }
 
     private suspend fun evaluate(cdp: CdpSession, expression: String): JsonElement? =
         cdp.call(

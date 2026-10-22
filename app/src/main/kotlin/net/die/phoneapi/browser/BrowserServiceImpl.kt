@@ -501,7 +501,7 @@ internal class BrowserServiceImpl(
         started: Boolean,
         repeatable: Boolean,
     ): Boolean {
-        if (e.status < HTTP_SERVER_ERROR || e.error == "helper_unavailable") return false
+        if (e.status < HTTP_SERVER_ERROR || e.error in FINAL_ERRORS) return false
         if (started) return repeatable
         // A page that never answered: if Chrome as a whole does not, retrying is no use.
         if (e.error == "cdp_timeout" && probe?.frozen(socket) == true) throw browserFrozen()
@@ -686,6 +686,8 @@ internal class BrowserServiceImpl(
 
     private companion object {
         const val HTTP_SERVER_ERROR = 500
+        /** Server errors that trying again cannot fix. */
+        val FINAL_ERRORS = setOf("helper_unavailable", "browser_frozen")
         val NODE_REF = Regex("[A-Za-z0-9_-]{1,64}")
         const val MAX_SELECTOR = 1_000
         const val MAX_EXPRESSION = 20_000
