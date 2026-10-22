@@ -183,8 +183,15 @@ class AppGraph(
             bus = bus,
         )
     val browser: BrowserService = browserService()
-    private val screenLease = ScreenLease(scope, cleanup = ScreenCleanup(input, power)::run)
-    private val tabs =
+    // Cleanup runs only after a holder lets go, long after tabs exists.
+    @Suppress("PropertyUsedBeforeDeclaration")
+    private val screenLease: ScreenLease =
+        ScreenLease(
+            scope,
+            cleanup =
+                ScreenCleanup(input, power, showPlaceholder = { tabs.showPlaceholder() })::run,
+        )
+    private val tabs: Tabs =
         Tabs(
             browser,
             screenLease,

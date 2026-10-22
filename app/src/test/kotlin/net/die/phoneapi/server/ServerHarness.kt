@@ -306,6 +306,10 @@ private object FakeBrowser : BrowserService {
 
     override suspend fun closeTab(id: String) = acted()
 
+    override suspend fun activate(id: String) = Unit
+
+    override suspend fun showing(id: String) = false
+
     override suspend fun snapshot(id: String, options: BrowserSnapshotOptions) =
         BrowserSnapshot(id = id, compact = "page")
 

@@ -12,6 +12,7 @@ import net.die.phoneapi.model.ApiException
 import net.die.phoneapi.model.BrowserFindRequest
 import net.die.phoneapi.model.BrowserFindResult
 import net.die.phoneapi.model.BrowserGestureRequest
+import net.die.phoneapi.model.BrowserInput
 import net.die.phoneapi.model.BrowserKeyRequest
 import net.die.phoneapi.model.BrowserReadRequest
 import net.die.phoneapi.model.BrowserReadResult
@@ -34,11 +35,11 @@ import org.junit.jupiter.api.Test
 
 @Suppress("InjectDispatcher") // The lease's cleanup scope needs no real dispatcher here.
 class TabsTest {
-    private val browser = RecordingBrowser()
+    private var front = "com.app"
+    private val browser = RecordingBrowser { front == CHROME }
     private val store = MemoryStore()
     private val lease =
         ScreenLease(CoroutineScope(Dispatchers.Unconfined), cleanup = { emptyList() })
-    private var front = "com.app"
     private val a = Holder.Session("a")
     private val b = Holder.Session("b")
 
@@ -142,6 +143,79 @@ class TabsTest {
         assertEquals("not_found", error { tabs.waitsFor(b, waits).wait(other, SCOPES) })
     }
 
+    @Test
+    fun `others' new tabs go behind`() = runBlocking {
+        val tabs = tabs()
+        front = CHROME
+        lease.withScreen(a) {}
+        val mine = tabs.browserFor(a).openTab("https://example.com/")
+        val theirs = tabs.browserFor(b).openTab("https://example.com/")
+        assertEquals(mine.id, browser.shown)
+        assertEquals(false, theirs.tookScreen)
+    }
+
+    @Test
+    fun `placeholder stands in`() = runBlocking {
+        val tabs = tabs()
+        front = CHROME
+        tabs.browserFor(a).openTab("https://example.com/")
+        val blank = browser.shown.orEmpty()
+        assertEquals("about:blank", browser.open.first { it.id == blank }.url)
+        assertEquals(emptyList<String>(), tabs.browserFor(b).targets().map { it.id })
+        assertEquals(false, tabs.shared.targets().any { it.id == blank })
+        assertEquals("not_found", error { tabs.browserFor(b).read(blank, BrowserReadRequest()) })
+        assertEquals(true, blank in store.ids)
+    }
+
+    @Test
+    fun `others' popups go behind`() = runBlocking {
+        val tabs = tabs()
+        front = CHROME
+        lease.withScreen(a) {}
+        val mine = tabs.browserFor(a).openTab("https://example.com/")
+        val theirs = tabs.browserFor(b).openTab("https://example.com/")
+        browser.shown = browser.add("popup", opener = theirs.id)
+        val tap = BrowserTapRequest(selector = "a", input = BrowserInput.CDP_MOUSE)
+        tabs.browserFor(b).tap(theirs.id, tap)
+        assertEquals(mine.id, browser.shown)
+        assertEquals(1, tabs.count(a))
+        assertEquals(2, tabs.count(b))
+    }
+
+    @Test
+    fun `screen calls fix Chrome first`() = runBlocking {
+        val tabs = tabs()
+        lease.withScreen(a) {}
+        val theirs = tabs.browserFor(b).openTab("https://example.com/")
+        assertEquals(emptyList<String>(), browser.activated)
+        front = CHROME
+        browser.shown = theirs.id
+        val seen = tabs.screenCall(a) { browser.shown }
+        assertEquals("about:blank", browser.open.first { it.id == seen }.url)
+    }
+
+    @Test
+    fun `cleanup leaves Chrome blank`() = runBlocking {
+        val tabs = tabs()
+        tabs.showPlaceholder()
+        assertEquals(emptyList<String>(), browser.activated)
+        front = CHROME
+        tabs.showPlaceholder()
+        assertEquals("about:blank", browser.open.first { it.id == browser.shown }.url)
+    }
+
+    @Test
+    fun `stuck tabs close`() = runBlocking {
+        val tabs = tabs()
+        front = CHROME
+        browser.stuck = true
+        lease.withScreen(a) {}
+        tabs.browserFor(a).openTab("https://example.com/")
+        assertEquals("took_screen", error { tabs.browserFor(b).openTab("https://example.com/") })
+        assertEquals(0, tabs.count(b))
+        assertEquals(1, browser.closed.size)
+    }
+
     private suspend fun error(block: suspend () -> Unit): String =
         try {
             block()
@@ -169,7 +243,8 @@ class TabsTest {
         }
     }
 
-    private class RecordingBrowser : BrowserService {
+    /** Chrome as it behaves on Android: a new tab shows at once while Chrome is in front. */
+    private class RecordingBrowser(private val chromeInFront: () -> Boolean) : BrowserService {
         val open = mutableListOf<BrowserTarget>()
         val closed = mutableListOf<String>()
         private var next = 0
@@ -185,11 +260,19 @@ class TabsTest {
             return id
         }
 
+        val activated = mutableListOf<String>()
+        var shown: String? = null
+
+        /** Chrome ignores selecting a tab. */
+        var stuck = false
+
         override suspend fun targets(): List<BrowserTarget> = open.toList()
 
         override suspend fun openTab(url: String): BrowserTarget {
             val id = add("t${next++}")
-            return open.first { it.id == id }
+            open[open.lastIndex] = open.last().copy(url = url)
+            if (chromeInFront()) shown = id
+            return open.last()
         }
 
         override suspend fun navigate(id: String, url: String) = open.first { it.id == id }
@@ -199,6 +282,13 @@ class TabsTest {
             open.removeAll { it.id == id }
             return ActionResult(ok = true)
         }
+
+        override suspend fun activate(id: String) {
+            activated += id
+            if (!stuck) shown = id
+        }
+
+        override suspend fun showing(id: String) = shown == id
 
         override suspend fun snapshot(id: String, options: BrowserSnapshotOptions) =
             BrowserSnapshot(id = id, compact = "")
@@ -235,5 +325,6 @@ class TabsTest {
 
     private companion object {
         val SCOPES = setOf(Scope.OBSERVE, Scope.BROWSER)
+        const val CHROME = "com.android.chrome"
     }
 }

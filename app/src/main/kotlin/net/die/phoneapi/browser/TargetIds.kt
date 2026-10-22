@@ -3,6 +3,7 @@ package net.die.phoneapi.browser
 import net.die.phoneapi.core.ApiException
 
 internal const val CHROME_SOCKET = "chrome_devtools_remote"
+internal const val CHROME_PACKAGE = "com.android.chrome"
 
 /** One path segment: the socket name, then Chrome's target id. */
 internal fun browserTargetId(socket: String, chromeId: String): String =
