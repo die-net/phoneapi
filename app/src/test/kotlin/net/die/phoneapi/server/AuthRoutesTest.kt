@@ -80,4 +80,43 @@ class AuthRoutesTest {
             client.webSocket("/v1/events?access_token=$observe") {}
         }
     }
+
+    @Test
+    fun `sockets refuse other origins`() = testApplication {
+        val api = FakeApi()
+        val secret = api.tokens.issue("events", setOf(Scope.OBSERVE))
+        application { phoneApiModule(api.services) }
+        apiClient().use { client ->
+            val refused =
+                try {
+                    client.webSocket(
+                        "/v1/events",
+                        {
+                            bearer(secret)
+                            header(HttpHeaders.Host, "localhost")
+                            header(HttpHeaders.Origin, "http://127.0.0.1:9999")
+                        },
+                    ) {}
+                    false
+                } catch (_: IllegalStateException) {
+                    // The test client reports a refused handshake this way.
+                    true
+                }
+            assertTrue(refused)
+
+            for (origin in listOf("http://localhost", "http://LOCALHOST:80", null)) {
+                withTimeout(5.seconds) {
+                    client.webSocket(
+                        "/v1/events",
+                        {
+                            bearer(secret)
+                            // Browsers always send Host; the test engine does not.
+                            header(HttpHeaders.Host, "localhost")
+                            if (origin != null) header(HttpHeaders.Origin, origin)
+                        },
+                    ) {}
+                }
+            }
+        }
+    }
 }
