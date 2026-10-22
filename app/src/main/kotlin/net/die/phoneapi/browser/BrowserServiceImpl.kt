@@ -333,9 +333,8 @@ internal class BrowserServiceImpl(
                 } else {
                     browserPackage(socketList().firstOrNull { it.name == socket }, socket)
                 }
-            if (pointer && input == BrowserInput.CDP) requireOnScreen(pkg)
             val background = input !in TOUCH_INPUTS && socket == CHROME_SOCKET
-            if (background && timersStalled(id)) throw timersStopped(id)
+            beforeInput(id, input, pkg, pointer, background)
             val result =
                 usePage(socket, chromeId) { cdp ->
                     probe?.revive(cdp, socket, reading = false)
@@ -350,6 +349,20 @@ internal class BrowserServiceImpl(
         } finally {
             invalidateSnapshots()
         }
+    }
+
+    /** Refuses input that cannot land, and brings the tab on screen for touch. */
+    private suspend fun beforeInput(
+        id: String,
+        input: BrowserInput,
+        pkg: String?,
+        pointer: Boolean,
+        background: Boolean,
+    ) {
+        if (pointer && input == BrowserInput.CDP) requireOnScreen(pkg)
+        if (background && timersStalled(id)) throw timersStopped(id)
+        // Page.bringToFront alone leaves Chrome behind another app, as after cleanup.
+        if (input == BrowserInput.TOUCH) show(id)
     }
 
     override suspend fun evaluate(id: String, request: EvalRequest): EvalResult {
@@ -384,8 +397,7 @@ internal class BrowserServiceImpl(
 
     override suspend fun find(id: String, request: BrowserFindRequest): BrowserFindResult {
         checkFind(request)
-        val extract = extractPage(id, request.scope, request.selector)
-        return findInPage(extract, request).copy(reloaded = extract.reloaded)
+        return findWithFallback(request) { scope -> extractPage(id, scope, request.selector) }
     }
 
     private suspend fun extractPage(id: String, scope: ReadScope, selector: String?): PageExtract {

@@ -143,9 +143,11 @@ private suspend fun closeQuietly(services: ServerServices, target: String): Stri
     }
 
 /**
- * Opens [url] in a new tab and waits up to [OPEN_SETTLE_MS] for it to load and settle. A settle
- * wait alone can match before the page has loaded, since requests from before the wait started are
- * not seen, so this also polls document.readyState.
+ * Opens [url] in a new tab, waits up to [OPEN_LOAD_MS] for it to load, and then up to
+ * [AFTER_LOAD_SETTLE_MS] more for it to settle. A busy page, with ads, tracking requests, or
+ * carousels, never goes quiet, so a long settle wait would cost every read of it the whole wait
+ * while its content was already there. Load comes first because a settle wait alone can match
+ * before the page has loaded: requests from before the wait started are not seen.
  */
 private suspend fun openAndSettle(
     services: ServerServices,
@@ -154,20 +156,23 @@ private suspend fun openAndSettle(
     closing: Boolean = false,
 ): Opened {
     val tab = services.browser.openTab(url)
-    val deadline = System.currentTimeMillis() + OPEN_SETTLE_MS
-    var settled = settle(services, scopes, tab.id, deadline)
+    val deadline = System.currentTimeMillis() + OPEN_LOAD_MS
     var loaded = loaded(services, tab.id)
     while (!loaded && System.currentTimeMillis() < deadline) {
         delay(LOAD_POLL_MS)
         loaded = loaded(services, tab.id)
-        if (loaded) settled = settle(services, scopes, tab.id, deadline)
     }
+    val settled =
+        loaded &&
+            settle(services, scopes, tab.id, System.currentTimeMillis() + AFTER_LOAD_SETTLE_MS)
     val line = buildString {
         append("# opened target=").append(tab.id)
         if (tab.tookScreen == true) append(" tookScreen")
-        if (!loaded || !settled) {
-            append(" (not ").append(if (loaded) "settled" else "loaded")
-            append(" after ").append(OPEN_SETTLE_MS / MS_PER_S).append(" s)")
+        if (!loaded) {
+            append(" (not loaded after ").append(OPEN_LOAD_MS / MS_PER_S).append(" s)")
+        } else if (!settled) {
+            append(" (loaded; still busy after ").append(AFTER_LOAD_SETTLE_MS / MS_PER_S)
+            append(" s, so content it adds later may be missing)")
         }
         if (!closing) append("; close it with browser_close when done")
     }
@@ -395,6 +400,7 @@ private fun quoted(text: String): String =
     "\"" + oneLine(text).replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
 private val WHITESPACE = Regex("\\s+")
-private const val OPEN_SETTLE_MS = 15_000L
+private const val OPEN_LOAD_MS = 15_000L
+private const val AFTER_LOAD_SETTLE_MS = 5_000L
 private const val MS_PER_S = 1_000
 private const val LOAD_POLL_MS = 250L

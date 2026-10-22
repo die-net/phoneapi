@@ -336,6 +336,28 @@ internal fun cutPoint(text: String, start: Int, maxChars: Int): Int {
     return if (Character.isHighSurrogate(text[limit - 1])) limit - 1 else limit
 }
 
+/**
+ * [request]'s results from the page [extract] gives for a scope. Links asked for in article scope
+ * come from the whole page when the article has none and the page has some, as on a listing page
+ * where Readability picks a fragment without the results; `extracted` then says page.
+ */
+internal suspend fun findWithFallback(
+    request: BrowserFindRequest,
+    extract: suspend (ReadScope) -> PageExtract,
+): BrowserFindResult {
+    val first = extract(request.scope)
+    val found = findInPage(first, request).copy(reloaded = first.reloaded)
+    val linkless =
+        request.kind == FindKind.LINKS &&
+            request.selector == null &&
+            first.extracted == "article" &&
+            first.links > 0 &&
+            renderPage(first.blocks, request.format).links.isEmpty()
+    if (!linkless) return found
+    val whole = extract(ReadScope.PAGE)
+    return findInPage(whole, request).copy(reloaded = first.reloaded || whole.reloaded)
+}
+
 internal fun findInPage(extract: PageExtract, request: BrowserFindRequest): BrowserFindResult {
     val page = renderPage(extract.blocks, request.format)
     val base =
