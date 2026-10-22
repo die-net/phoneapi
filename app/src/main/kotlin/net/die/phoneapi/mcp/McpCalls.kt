@@ -147,6 +147,23 @@ internal suspend fun waitFor(
     if (body.isNullOrBlank()) header else "$header\n$body"
 }
 
+internal suspend fun sessionStart(services: ServerServices): CallToolResult = runTool {
+    val id = checkNotNull(services.sessions).start()
+    "session=$id\nPass it as session on each call for that task, and end it with session_end " +
+        "when the task is done."
+}
+
+internal suspend fun sessionEnd(
+    services: ServerServices,
+    request: CallToolRequest,
+): CallToolResult = runTool {
+    val id = request.args<SessionEndArgs>().session
+    if (!checkNotNull(services.sessions).end(id)) {
+        throw ApiException.notFound("No session you started has that id; it may have ended")
+    }
+    "Ended the session: its tabs are closed, and the screen is cleaned up if it held it."
+}
+
 /** Lets the session's screen go, with cleanup, keeping the session and its tabs. */
 internal suspend fun screenRelease(services: ServerServices): CallToolResult = runTool {
     val holder = services.holder ?: return@runTool "This call has no MCP session."
@@ -617,6 +634,9 @@ internal data class ScaleArgs(
 @Serializable internal data class LogcatArgs(val lines: Int = 80, val tag: String? = null)
 
 @Serializable internal class EmptyArgs
+
+@Serializable
+internal data class SessionEndArgs(@Doc("The id session_start returned.") val session: String)
 
 @Serializable
 internal data class WaitArgs(

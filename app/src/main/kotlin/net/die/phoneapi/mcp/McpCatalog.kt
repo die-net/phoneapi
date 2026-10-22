@@ -6,9 +6,11 @@ import io.modelcontextprotocol.kotlin.sdk.types.ToolAnnotations
 import io.modelcontextprotocol.kotlin.sdk.types.ToolSchema
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import kotlinx.serialization.serializer
 import net.die.phoneapi.model.Capabilities
 import net.die.phoneapi.model.FindRequest
@@ -79,7 +81,10 @@ private fun toolSchema(serializer: KSerializer<*>): ToolSchema {
     )
 }
 
-private val MCP_TOOLS: List<McpTool> =
+/** The tools that manage sessions, which take no `session` argument of their own. */
+internal val SESSION_TOOLS = setOf("session_start", "session_end")
+
+private val TOOLS: List<McpTool> =
     listOf(
         McpTool(
             name = "device_info",
@@ -90,6 +95,26 @@ private val MCP_TOOLS: List<McpTool> =
             arguments = serializer<EmptyArgs>(),
             annotations = readOnly,
             call = { graph, _, _ -> deviceInfo(graph) },
+        ),
+        McpTool(
+            name = "session_start",
+            description =
+                "Start a separate session for a subagent or a parallel task, with its own turn at the screen and its own browser tabs, so parallel work does not tap over each other or share tabs. Pass the returned id as session on every call made for that task, and end it with session_end when the task is done. It also ends with your own session, or after 20 minutes unused.",
+            scope = Scope.OBSERVE,
+            available = always,
+            arguments = serializer<EmptyArgs>(),
+            annotations = changes,
+            call = { graph, _, _ -> sessionStart(graph) },
+        ),
+        McpTool(
+            name = "session_end",
+            description =
+                "End a session from session_start: close the tabs it opened and let the screen go if it held it.",
+            scope = Scope.OBSERVE,
+            available = always,
+            arguments = serializer<SessionEndArgs>(),
+            annotations = destructive,
+            call = { graph, _, request -> sessionEnd(graph, request) },
         ),
         McpTool(
             name = "screen_release",
@@ -439,6 +464,26 @@ private val MCP_TOOLS: List<McpTool> =
             call = { graph, _, request -> logcatTail(graph, request) },
         ),
     )
+
+/** Every tool but the session tools also takes `session`. */
+private val MCP_TOOLS: List<McpTool> = TOOLS.map {
+    if (it.name in SESSION_TOOLS) it else it.withSessionArgument()
+}
+
+/** The argument that names which session a call is for. */
+internal const val SESSION_ARGUMENT = "session"
+
+private const val SESSION_DOC =
+    "A session from session_start, for a subagent or parallel task with its own turn at the screen and its own tabs. Leave it out to act as yourself."
+
+private fun McpTool.withSessionArgument(): McpTool {
+    val argument = buildJsonObject {
+        put("type", "string")
+        put("description", SESSION_DOC)
+    }
+    val properties = JsonObject(schema.properties.orEmpty() + (SESSION_ARGUMENT to argument))
+    return copy(schema = schema.copy(properties = properties))
+}
 
 internal data class McpResource(
     val uri: String,

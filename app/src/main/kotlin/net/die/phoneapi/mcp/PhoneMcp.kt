@@ -20,9 +20,13 @@ import io.modelcontextprotocol.kotlin.sdk.types.CallToolResult
 import io.modelcontextprotocol.kotlin.sdk.types.Implementation
 import io.modelcontextprotocol.kotlin.sdk.types.ReadResourceResult
 import io.modelcontextprotocol.kotlin.sdk.types.ServerCapabilities
+import io.modelcontextprotocol.kotlin.sdk.types.TextContent
 import io.modelcontextprotocol.kotlin.sdk.types.TextResourceContents
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import net.die.phoneapi.lease.Holder
 import net.die.phoneapi.model.ApiError
 import net.die.phoneapi.model.Scope
@@ -45,7 +49,8 @@ internal fun Application.installPhoneMcp(services: ServerServices, sessions: Mcp
                     startSession(services, sessions, call)
                     return@post
                 }
-                val session = sessions.get(id)
+                // A session from session_start has no transport: it is only a tool argument.
+                val session = sessions.get(id)?.takeIf { it.transport != null }
                 when {
                     session == null -> call.respond(HttpStatusCode.NotFound, noSession())
                     session.tokenId != call.token.id -> call.respond(HttpStatusCode.NotFound)
@@ -61,10 +66,11 @@ internal fun Application.installPhoneMcp(services: ServerServices, sessions: Mcp
             }
             delete {
                 val session = call.request.header(SESSION_HEADER)?.let(sessions::get)
+                val transport = session?.transport
                 when {
-                    session == null -> call.respond(HttpStatusCode.NotFound, noSession())
+                    transport == null -> call.respond(HttpStatusCode.NotFound, noSession())
                     session.tokenId != call.token.id -> call.respond(HttpStatusCode.NotFound)
-                    else -> session.transport.handleRequest(null, call)
+                    else -> transport.handleRequest(null, call)
                 }
             }
         }
@@ -87,8 +93,17 @@ private suspend fun startSession(
             )
         )
     transport.setSessionIdGenerator { id }
-    val server = phoneServer(services, token.scopes, Holder.Session(id))
-    val session = McpSession(id, token.id, token.name, transport, server, sessions.clock())
+    val control = sessions.control(id, token.id, token.name)
+    val server = phoneServer(services, token.scopes, Holder.Session(id), control)
+    val session =
+        McpSession(
+            id = id,
+            tokenId = token.id,
+            tokenName = token.name,
+            transport = transport,
+            server = server,
+            startedAtMs = sessions.clock(),
+        )
     transport.setOnSessionInitialized { sessions.add(session) }
     transport.setOnSessionClosed { sessions.closed(it) }
     server.createSession(transport)
@@ -103,7 +118,8 @@ private suspend fun startSession(
  * or expiry, cancels it; the client then gets a 404 rather than an internal error.
  */
 private suspend fun serve(session: McpSession, call: ApplicationCall) = coroutineScope {
-    val handled = async { session.transport.handleRequest(null, call) }
+    val transport = checkNotNull(session.transport)
+    val handled = async { transport.handleRequest(null, call) }
     handled.join()
     // join throws when this call is canceled, as when its client goes away. Otherwise the
     // transport only cancels a call when the session closes.
@@ -127,14 +143,9 @@ private fun phoneServer(
     shared: ServerServices,
     scopes: Set<Scope>,
     holder: Holder.Session,
+    control: SessionControl,
 ): Server {
-    // The session's tools see only its own tabs and unowned ones.
-    val services =
-        shared.copy(
-            browser = shared.tabs.browserFor(holder),
-            waits = shared.tabs.waitsFor(holder, shared.waits),
-            holder = holder,
-        )
+    val services = shared.forHolder(holder, control)
     val tools = visibleMcpTools(scopes, services.device.capabilities())
     val resources = mcpResources(scopes)
     return Server(
@@ -159,7 +170,7 @@ private fun phoneServer(
                 inputSchema = tool.schema,
                 toolAnnotations = tool.annotations,
             ) { asked ->
-                callTool(services, scopes, holder, tool, asked)
+                callTool(shared, services, scopes, tool, asked)
             }
         }
         resources.forEach { resource ->
@@ -186,18 +197,37 @@ private fun phoneServer(
 
 private const val SESSION_HEADER = "Mcp-Session-Id"
 
+/** The services as [holder] sees them: only its own tabs and unowned ones. */
+private fun ServerServices.forHolder(holder: Holder.Session, control: SessionControl) =
+    copy(
+        browser = tabs.browserFor(holder),
+        waits = tabs.waitsFor(holder, waits),
+        holder = holder,
+        sessions = control,
+    )
+
 /**
- * Runs [holder]'s call to [tool]: holding the screen when it needs it, keeping other sessions' tabs
- * off Chrome's screen meanwhile, and otherwise watching for it bringing an app forward.
+ * Runs a call to [tool] for the session it names, or the caller's own: holding the screen when it
+ * needs it, keeping other sessions' tabs off Chrome's screen meanwhile, and otherwise watching for
+ * it bringing an app forward.
  */
 private suspend fun callTool(
-    services: ServerServices,
+    shared: ServerServices,
+    own: ServerServices,
     scopes: Set<Scope>,
-    holder: Holder.Session,
     tool: McpTool,
     asked: CallToolRequest,
 ): CallToolResult {
-    val request = resolveInput(tool.name, asked, services.lease.holds(holder))
+    val named = sessionArgument(tool, asked) ?: return tool.call(own, scopes, asked)
+    val control = checkNotNull(own.sessions)
+    val holder =
+        if (named.isEmpty()) {
+            checkNotNull(own.holder)
+        } else {
+            control.resolve(named) ?: return unknownSession()
+        }
+    val services = if (holder == own.holder) own else shared.forHolder(holder, control)
+    val request = resolveInput(tool.name, withoutSession(asked), services.lease.holds(holder))
     val screen = takesScreen(tool.name, request.params.arguments)
     return leased(services.lease, holder, screen) {
         val call = suspend { tool.call(services, scopes, request) }
@@ -209,3 +239,33 @@ private suspend fun callTool(
         }
     }
 }
+
+/**
+ * The `session` argument of a call to [tool]: empty when there is none, so the call is the caller's
+ * own, and null for the session tools, which handle sessions themselves.
+ */
+private fun sessionArgument(tool: McpTool, asked: CallToolRequest): String? {
+    if (tool.name in SESSION_TOOLS) return null
+    val value = asked.params.arguments?.get(SESSION_ARGUMENT) as? JsonPrimitive
+    return value?.contentOrNull.orEmpty()
+}
+
+private fun withoutSession(asked: CallToolRequest): CallToolRequest {
+    val arguments = asked.params.arguments ?: return asked
+    if (SESSION_ARGUMENT !in arguments) return asked
+    val params = asked.params.copy(arguments = JsonObject(arguments - SESSION_ARGUMENT))
+    return asked.copy(params = params)
+}
+
+private fun unknownSession() =
+    CallToolResult(
+        content =
+            listOf(
+                TextContent(
+                    text =
+                        "not_found: No such session. It may have ended or idled out. Start " +
+                            "one with session_start, or leave session out to use your own."
+                )
+            ),
+        isError = true,
+    )

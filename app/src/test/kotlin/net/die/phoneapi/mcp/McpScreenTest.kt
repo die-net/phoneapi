@@ -70,6 +70,8 @@ class McpScreenTest {
             setOf(
                 "device_info",
                 "screen_release",
+                "session_start",
+                "session_end",
                 "logcat_tail",
                 "browser_targets",
                 "browser_open",

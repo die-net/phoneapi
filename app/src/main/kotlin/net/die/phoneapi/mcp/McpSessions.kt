@@ -12,18 +12,24 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import net.die.phoneapi.lease.Holder
 import net.die.phoneapi.model.ApiException
 import net.die.phoneapi.model.SessionInfo
 import net.die.phoneapi.server.TokenGateway
 
-/** One stateful MCP session: its transport, its server, and the token that started it. */
+/**
+ * One session: a holder of the screen and of tabs, and the token that started it. A session from
+ * `initialize` has its own transport and server. One from `session_start` has neither: it is named
+ * by the `session` argument on the calls of the session that started it, its [parentId].
+ */
 internal class McpSession(
     val id: String,
     val tokenId: String,
     val tokenName: String,
-    val transport: StreamableHttpServerTransport,
-    val server: Server,
+    val transport: StreamableHttpServerTransport?,
+    val server: Server?,
     val startedAtMs: Long,
+    val parentId: String? = null,
 ) {
     @Volatile
     var lastActiveMs: Long = startedAtMs
@@ -79,6 +85,7 @@ class McpSessions(
                     holdsScreen = holdsScreen(it.id),
                     tabs = tabCount(it.id),
                     tookScreen = tookScreen(it.id),
+                    parent = it.parentId?.let(::hashOf),
                 )
             }
     }
@@ -102,13 +109,19 @@ class McpSessions(
         }
     }
 
-    /** Ends [id]: closes its transport, which cancels its calls, then runs [onEnd]. Idempotent. */
+    /**
+     * Ends [id], and the sessions it started: closes its transport, which cancels its calls, then
+     * runs [onEnd]. Idempotent.
+     */
     suspend fun end(id: String, why: String) {
         val session = sessions.remove(id) ?: return
         info("MCP session ${hashOf(id)} ended: $why")
+        for (child in sessions.values.filter { it.parentId == id }) {
+            end(child.id, "the session that started it ended")
+        }
         try {
-            session.transport.close()
-            session.server.close()
+            session.transport?.close()
+            session.server?.close()
         } catch (e: CancellationException) {
             throw e
         } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
@@ -129,15 +142,51 @@ class McpSessions(
                 429,
                 "too_many_sessions",
                 "Too many MCP sessions are open: $perToken per token and $total in all. " +
-                    "Close one with DELETE, or an admin can end one with DELETE /v1/sessions/{hash}.",
+                    "Close one with DELETE or session_end, or an admin can end one with " +
+                    "DELETE /v1/sessions/{hash}.",
             )
         }
     }
 
     internal fun add(session: McpSession) {
         sessions[session.id] = session
-        info("MCP session ${hashOf(session.id)} started for token ${session.tokenName}")
+        val under = session.parentId?.let { " under ${hashOf(it)}" }.orEmpty()
+        info("MCP session ${hashOf(session.id)} started for token ${session.tokenName}$under")
     }
+
+    /** What the session [parentId] can do with sessions, from its tools. */
+    internal fun control(parentId: String, tokenId: String, tokenName: String): SessionControl =
+        object : SessionControl {
+            override fun start(): String {
+                admit(tokenId)
+                val child =
+                    McpSession(
+                        id = newId(),
+                        tokenId = tokenId,
+                        tokenName = tokenName,
+                        transport = null,
+                        server = null,
+                        startedAtMs = now(),
+                        parentId = parentId,
+                    )
+                add(child)
+                return child.id
+            }
+
+            override suspend fun end(id: String): Boolean {
+                if (sessions[id]?.parentId != parentId) return false
+                end(id, "session_end")
+                return true
+            }
+
+            override fun resolve(id: String): Holder.Session? {
+                val session = sessions[id] ?: return null
+                val ours = session.id == parentId || session.parentId == parentId
+                if (session.tokenId != tokenId || !ours) return null
+                session.touch(now())
+                return Holder.Session(session.id)
+            }
+        }
 
     /** A transport closed itself, as on `DELETE`. */
     internal fun closed(id: String) {

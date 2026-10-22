@@ -199,7 +199,7 @@ An MCP session owns the tabs it opens, popups they open, and unowned tabs it cla
 | `GET` | `/v1/tokens` | admin | `TokenInfo[]` |
 | `POST` | `/v1/tokens` | admin | `CreateTokenRequest` → `CreatedToken` (201; secret once) |
 | `DELETE` | `/v1/tokens/{id}` | admin | Revoke → 204. Ends the token's MCP sessions within 30 s |
-| `GET` | `/v1/sessions` | admin | `SessionInfo[]`: MCP sessions by a hash of their id, with age, idle time, whether they hold the screen, their tab count, and how often they brought an app forward without it (`tookScreen`) |
+| `GET` | `/v1/sessions` | admin | `SessionInfo[]`: MCP sessions by a hash of their id, with age, idle time, whether they hold the screen, their tab count, how often they brought an app forward without it (`tookScreen`), and for one from `session_start`, the hash of the session that started it (`parent`) |
 | `DELETE` | `/v1/sessions/{hash}` | admin | End an MCP session → 204 |
 | `GET` | `/v1/openapi.json` | observe | OpenAPI 3.1 document |
 
@@ -238,6 +238,7 @@ Run `phoneapi server` and point a Streamable HTTP client at `http://127.0.0.1:<p
 | --- | --- | --- |
 | `device_info` | observe | Device + helper + capabilities |
 | `screen_release` | observe | Let the screen go for now, with cleanup; tabs stay the session's |
+| `session_start` / `session_end` | observe | A separate session for a subagent or parallel task, with its own turn at the screen and its own tabs. Every other tool takes `session` with the id `session_start` returns; without it a call acts as the caller's own session |
 | `ui_snapshot` | observe | Compact UI outline |
 | `ui_find` | observe | Find by selector |
 | `ui_act` | control | Action on a ref; `mode` `real` or `semantic` |
