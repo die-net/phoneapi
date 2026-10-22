@@ -12,6 +12,7 @@ import net.die.phoneapi.core.PowerService
 import net.die.phoneapi.core.UiService
 import net.die.phoneapi.core.WaitService
 import net.die.phoneapi.helperclient.ShellResult
+import net.die.phoneapi.lease.ForegroundWatch
 import net.die.phoneapi.lease.ScreenLease
 import net.die.phoneapi.model.Capabilities
 import net.die.phoneapi.model.CreatedToken
@@ -50,6 +51,8 @@ data class ServerServices(
     val lease: ScreenLease,
     /** Who owns which browser tab. */
     val tabs: Tabs,
+    /** Catches a session without the screen bringing an app forward. */
+    val foreground: ForegroundWatch,
 )
 
 /** Per-connection logcat. Not part of [ServerServices.events]; only clients that ask receive it. */

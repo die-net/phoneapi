@@ -8,7 +8,7 @@ import kotlinx.serialization.json.JsonObject
 public data class Event(
     /**
      * e.g. `ui.changed`, `window.changed`, `ime.shown`, `ime.hidden`, `screen.on`, `screen.off`,
-     * `user.present`, `toast`, `logcat`, `helper.status`.
+     * `user.present`, `toast`, `logcat`, `helper.status`, `screen.taken`.
      */
     val type: String,
     val timestampMs: Long,
@@ -27,4 +27,9 @@ public object EventTypes {
     public const val TOAST: String = "toast"
     public const val LOGCAT: String = "logcat"
     public const val HELPER_STATUS: String = "helper.status"
+    /**
+     * An MCP session without the screen brought an app forward: `session` is its hash, `package`
+     * what came forward.
+     */
+    public const val SCREEN_TAKEN: String = "screen.taken"
 }

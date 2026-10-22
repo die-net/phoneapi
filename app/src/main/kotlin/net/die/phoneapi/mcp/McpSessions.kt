@@ -47,6 +47,7 @@ class McpSessions(
     private val onEnd: suspend (String) -> Unit = {},
     private val holdsScreen: (String) -> Boolean = { false },
     private val tabCount: (String) -> Int = { 0 },
+    private val tookScreen: (String) -> Int = { 0 },
     private val now: () -> Long = System::currentTimeMillis,
     private val idleMs: Long = IDLE_MS,
     private val perToken: Int = PER_TOKEN,
@@ -77,6 +78,7 @@ class McpSessions(
                     idleMs = at - it.lastActiveMs,
                     holdsScreen = holdsScreen(it.id),
                     tabs = tabCount(it.id),
+                    tookScreen = tookScreen(it.id),
                 )
             }
     }

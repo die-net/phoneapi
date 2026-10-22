@@ -1,21 +1,15 @@
 package net.die.phoneapi.browser
 
 import android.os.RemoteException
-import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
-import java.net.SocketTimeoutException
 import java.util.LinkedHashMap
-import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.cancellation.CancellationException
-import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.ensureActive
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.SerialName
@@ -74,6 +68,8 @@ internal class BrowserServiceImpl(
     private val listSockets: suspend () -> String,
     private val open: suspend (String) -> DevtoolsSocket,
     private val websocketKey: () -> String = ::websocketKey,
+    /** Opens a DevTools socket with a short read timeout, for [TabProbe]. Null probes nothing. */
+    openProbe: (suspend (String) -> DevtoolsSocket)? = null,
     private val contentBounds: suspend (String?) -> Rect = { Rect(0, 0, 0, 0) },
     private val touchAt: suspend (Rect, Boolean) -> ActionResult = { _, _ ->
         ActionResult(ok = false)
@@ -104,6 +100,7 @@ internal class BrowserServiceImpl(
     private val touchscreen: suspend () -> TouchscreenInfo = { fallbackTouchscreen() },
 ) : BrowserService {
     private val axTrees = newAxCache()
+    private val probe = openProbe?.let { TabProbe(io, it, websocketKey) }
     @Volatile private var pageSource: String? = null
     @Volatile private var stateSource: String? = null
     private val pageInput: PageInput by lazy {
@@ -325,6 +322,7 @@ internal class BrowserServiceImpl(
             if (pointer && input == BrowserInput.CDP) requireOnScreen(pkg)
             val result =
                 usePage(socket, chromeId) { cdp ->
+                    probe?.revive(cdp, socket, reading = false)
                     if (pointer && input == BrowserInput.CDP) requireShowing(cdp)
                     block(cdp, pkg)
                 }
@@ -341,6 +339,7 @@ internal class BrowserServiceImpl(
         }
         val (socket, chromeId) = parseBrowserTargetId(id)
         return usePage(socket, chromeId) { cdp ->
+            probe?.revive(cdp, socket, reading = false)
             evaluateIn(cdp, expression, request.awaitPromise)
         }
     }
@@ -350,23 +349,27 @@ internal class BrowserServiceImpl(
         if (request.show) show(id)
         val extract = extractPage(id, request.scope, request.selector)
         val socket = parseBrowserTargetId(id).first
-        return readPage(extract, request).copy(shown = drawn(socket, extract.visibility))
+        return readPage(extract, request)
+            .copy(shown = drawn(socket, extract.visibility), reloaded = extract.reloaded)
     }
 
     override suspend fun find(id: String, request: BrowserFindRequest): BrowserFindResult {
         checkFind(request)
-        return findInPage(extractPage(id, request.scope, request.selector), request)
+        val extract = extractPage(id, request.scope, request.selector)
+        return findInPage(extract, request).copy(reloaded = extract.reloaded)
     }
 
     private suspend fun extractPage(id: String, scope: ReadScope, selector: String?): PageExtract {
         val script =
             readScript(pageSource ?: pageScript().also { pageSource = it }, scope, selector)
         val (socket, chromeId) = parseBrowserTargetId(id)
+        var reloaded = false
         val result =
             usePage(socket, chromeId, repeatable = true) { cdp ->
+                reloaded = probe?.revive(cdp, socket, reading = true) == true || reloaded
                 evaluateIn(cdp, script, awaitPromise = false)
             }
-        return decodeExtract(result, selector)
+        return decodeExtract(result, selector).copy(reloaded = reloaded)
     }
 
     override suspend fun console(id: String, request: ConsoleRequest): ConsoleResult {
@@ -387,8 +390,10 @@ internal class BrowserServiceImpl(
         }
         val (socket, chromeId) = parseBrowserTargetId(id)
         if (options.show) show(id)
+        var reloaded = false
         val (snapshot, state) =
             usePage(socket, chromeId, repeatable = true) { cdp ->
+                reloaded = probe?.revive(cdp, socket, reading = true) == true || reloaded
                 val loaded = cdp.call("Page.getFrameTree").decodeCdp<FrameTreeResult>()
                 val url = loaded?.frameTree?.frame?.url
                 cdp.call("Accessibility.enable")
@@ -405,7 +410,7 @@ internal class BrowserServiceImpl(
                     pending = state.pending,
                 ) to state
             }
-        return snapshot.copy(shown = drawn(socket, state.visibility))
+        return snapshot.copy(shown = drawn(socket, state.visibility), reloaded = reloaded)
     }
 
     /**
@@ -449,59 +454,19 @@ internal class BrowserServiceImpl(
     }
 
     private suspend fun listOne(socket: HelperSocket): List<BrowserTarget> {
-        if (socket.name != CHROME_SOCKET) return listJson(socket)
-        val result = useCdp(socket.name, "/devtools/browser") { it.call("Target.getTargets") }
-        return chromeTargets(result, socket.name, socket.pid, socket.packageName)
-    }
-
-    /** WebViews' targets, from `/json/list`. */
-    private suspend fun listJson(socket: HelperSocket): List<BrowserTarget> = coroutineScope {
-        val devtools = withContext(io) { open(socket.name) }
-        val timedOut = AtomicBoolean(false)
-        val closer = launch {
-            delay(targetTimeoutMs)
-            timedOut.set(true)
-            devtools.close()
-        }
-        try {
-            withContext(io) { readTargets(socket, devtools, timedOut) }
-        } finally {
-            closer.cancel()
-            devtools.close()
-        }
-    }
-
-    private suspend fun readTargets(
-        socket: HelperSocket,
-        devtools: DevtoolsSocket,
-        timedOut: AtomicBoolean,
-    ): List<BrowserTarget> =
-        try {
-            listedTargets(
-                httpGet(devtools.input, devtools.output, "/json/list", MAX_BODY),
+        if (socket.name != CHROME_SOCKET) {
+            return listJsonTargets(
+                devtools = withContext(io) { open(socket.name) },
                 socket.name,
                 socket.pid,
                 socket.packageName,
-            )
-        } catch (e: SocketTimeoutException) {
-            throw ApiException(
-                503,
-                "cdp_timeout",
-                e.message ?: "DevTools did not answer in time",
-                cause = e,
-            )
-        } catch (e: IOException) {
-            coroutineContext.ensureActive()
-            if (timedOut.get()) {
-                throw ApiException(503, "cdp_timeout", "DevTools did not answer in time", cause = e)
-            }
-            throw ApiException(
-                502,
-                "cdp_error",
-                e.message?.takeIf { it.isNotBlank() } ?: DEVTOOLS_CLOSED,
-                cause = e,
+                io,
+                targetTimeoutMs,
             )
         }
+        val result = useCdp(socket.name, "/devtools/browser") { it.call("Target.getTargets") }
+        return chromeTargets(result, socket.name, socket.pid, socket.packageName)
+    }
 
     /**
      * Runs [block] on a page, retrying a server error. Once [block] has started, only a
@@ -522,13 +487,25 @@ internal class BrowserServiceImpl(
                     block(cdp)
                 }
             } catch (e: ApiException) {
-                if (e.status < HTTP_SERVER_ERROR || e.error == "helper_unavailable") throw e
-                if (started && !repeatable) throw e
+                if (!retryable(e, socket, started, repeatable)) throw e
                 last = e
                 if (attempt < PAGE_ATTEMPTS - 1) delay(PAGE_RETRY_MS)
             }
         }
         throw last ?: ApiException(502, "cdp_error", "DevTools did not answer")
+    }
+
+    private suspend fun retryable(
+        e: ApiException,
+        socket: String,
+        started: Boolean,
+        repeatable: Boolean,
+    ): Boolean {
+        if (e.status < HTTP_SERVER_ERROR || e.error == "helper_unavailable") return false
+        if (started) return repeatable
+        // A page that never answered: if Chrome as a whole does not, retrying is no use.
+        if (e.error == "cdp_timeout" && probe?.frozen(socket) == true) throw browserFrozen()
+        return true
     }
 
     private suspend fun <T> useCdp(
@@ -671,20 +648,6 @@ internal class BrowserServiceImpl(
         )
     }
 
-    /**
-     * With Chrome on screen, only the tab it is showing takes touch. The others report hidden.
-     * While Chrome itself is hidden every tab reports visible, which [requireOnScreen] catches.
-     */
-    private suspend fun requireShowing(cdp: CdpSession) {
-        if (tabShowing(cdp)) return
-        throw ApiException(
-            409,
-            "not_visible",
-            "This tab is not the one Chrome is showing, and Chrome only takes cdp touch input " +
-                "there. Use input touch, which brings the tab forward, or input cdp-mouse for a tap.",
-        )
-    }
-
     private fun browserPackage(socket: HelperSocket?, name: String): String? =
         socket?.packageName ?: if (name == CHROME_SOCKET) CHROME_PACKAGE else null
 
@@ -721,46 +684,9 @@ internal class BrowserServiceImpl(
             }
         }
 
-    private fun webUrl(url: String): String {
-        val trimmed = url.trim()
-        if (!acceptable(trimmed))
-            throw ApiException.badRequest("url must be http(s) or about:blank")
-        return trimmed
-    }
-
-    private fun acceptable(url: String): Boolean {
-        if (url.length > MAX_URL) return false
-        if (url.indexOf('\r') >= 0 || url.indexOf('\n') >= 0) return false
-        if (url == "about:blank") return true
-        return url.startsWith("https://") || url.startsWith("http://")
-    }
-
-    @Serializable
-    private data class HelperSocket(
-        val name: String,
-        val pid: Int? = null,
-        @SerialName("package") val packageName: String? = null,
-    )
-
-    @Serializable private data class CreatedTarget(val targetId: String? = null)
-
-    @Serializable private data class ClosedTarget(val success: Boolean? = null)
-
-    @Serializable private data class NavigateResult(val errorText: String? = null)
-
-    @Serializable private data class DocumentResult(val root: NodeId? = null)
-
-    @Serializable private data class NodeId(val nodeId: Int = 0)
-
-    @Serializable private data class QueryResult(val nodeId: Int = 0)
-
-    @Serializable private data class QuadResult(val quads: List<JsonElement> = emptyList())
-
     private companion object {
         const val HTTP_SERVER_ERROR = 500
         val NODE_REF = Regex("[A-Za-z0-9_-]{1,64}")
-        const val MAX_BODY = 4 * 1024 * 1024
-        const val MAX_URL = 2_000
         const val MAX_SELECTOR = 1_000
         const val MAX_EXPRESSION = 20_000
         const val MAX_CONSOLE_MS = 5_000L
@@ -780,6 +706,27 @@ internal class BrowserServiceImpl(
         data class Failed(val error: ApiException) : SocketList
     }
 }
+
+@Serializable
+private data class HelperSocket(
+    val name: String,
+    val pid: Int? = null,
+    @SerialName("package") val packageName: String? = null,
+)
+
+@Serializable private data class CreatedTarget(val targetId: String? = null)
+
+@Serializable private data class ClosedTarget(val success: Boolean? = null)
+
+@Serializable private data class NavigateResult(val errorText: String? = null)
+
+@Serializable private data class DocumentResult(val root: NodeId? = null)
+
+@Serializable private data class NodeId(val nodeId: Int = 0)
+
+@Serializable private data class QueryResult(val nodeId: Int = 0)
+
+@Serializable private data class QuadResult(val quads: List<JsonElement> = emptyList())
 
 internal const val AX_TREE_CACHE_CAP = 16
 

@@ -76,9 +76,11 @@ fun Application.phoneApiModule(
                 onEnd = {
                     services.lease.forget(Holder.Session(it))
                     services.tabs.end(Holder.Session(it))
+                    services.foreground.forget(Holder.Session(it))
                 },
                 holdsScreen = { services.lease.holds(Holder.Session(it)) },
                 tabCount = { services.tabs.count(Holder.Session(it)) },
+                tookScreen = { services.foreground.count(Holder.Session(it)) },
             )
             .also { it.start() },
 ) {

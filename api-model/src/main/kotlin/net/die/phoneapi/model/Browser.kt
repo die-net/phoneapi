@@ -204,6 +204,7 @@ public data class BrowserSnapshot(
     val compact: String,
     @Doc(SHOWN_DOC) val shown: Boolean? = null,
     @Doc(PENDING_DOC) val pending: List<String> = emptyList(),
+    @Doc(RELOADED_DOC) val reloaded: Boolean = false,
 )
 
 /** Which part of a page browser reads and finds work over. */
@@ -235,6 +236,9 @@ public const val SHOWN_DOC: String =
 
 public const val PENDING_DOC: String =
     "Signs the page is still waiting to load content: a busy region, loading placeholders, or a Load more control."
+
+public const val RELOADED_DOC: String =
+    "Chrome had unloaded this hidden tab to save memory, so PhoneAPI loaded it again first. Anything typed, scrolled, or opened on the page before is gone."
 
 public const val READ_FORMAT_DOC: String =
     "markdown (default) or text. Offsets depend on the format, so use the same one for reading and finding."
@@ -280,6 +284,7 @@ public data class BrowserReadResult(
     val sparse: Boolean = false,
     @Doc(PENDING_DOC) val pending: List<String> = emptyList(),
     @Doc(SHOWN_DOC) val shown: Boolean? = null,
+    @Doc(RELOADED_DOC) val reloaded: Boolean = false,
     @Doc("What was read: article, page (also when no article was found), or selector.")
     val extracted: String,
     @Doc("Changes when the rendered content changes, so offsets from another call still apply.")
@@ -355,4 +360,5 @@ public data class BrowserFindResult(
     @Doc("How many results there are in all. Only the first limit are returned.") val total: Int,
     val matches: List<TextMatch>? = null,
     val links: List<PageLink>? = null,
+    @Doc(RELOADED_DOC) val reloaded: Boolean = false,
 )

@@ -53,6 +53,20 @@ internal suspend fun tabShowing(cdp: CdpSession): Boolean {
 }
 
 /**
+ * With Chrome on screen, only the tab it is showing takes touch. The others report hidden. While
+ * Chrome itself is hidden every tab reports visible, which the caller checks first.
+ */
+internal suspend fun requireShowing(cdp: CdpSession) {
+    if (tabShowing(cdp)) return
+    throw ApiException(
+        409,
+        "not_visible",
+        "This tab is not the one Chrome is showing, and Chrome only takes cdp touch input " +
+            "there. Use input touch, which brings the tab forward, or input cdp-mouse for a tap.",
+    )
+}
+
+/**
  * Selects the tab, then waits for its text to hold still. Chrome coming forward can select another
  * tab after this one, so the tab has to still be showing at the end, or this tries again, up to
  * [attempts] times. True when it held.

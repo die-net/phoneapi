@@ -29,6 +29,8 @@ import net.die.phoneapi.model.TextMatch
 @Serializable
 internal data class PageExtract(
     val missing: Boolean = false,
+    /** Set by PhoneAPI, not the script: Chrome had unloaded the tab, so it was reloaded. */
+    val reloaded: Boolean = false,
     val title: String? = null,
     val url: String? = null,
     val readyState: String? = null,

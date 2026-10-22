@@ -18,3 +18,19 @@ internal fun parseBrowserTargetId(id: String): Pair<String, String> {
 }
 
 private const val SEPARATOR = '~'
+
+/** [url], trimmed, if PhoneAPI opens it in a tab: http(s) or about:blank. */
+internal fun webUrl(url: String): String {
+    val trimmed = url.trim()
+    if (!acceptable(trimmed)) throw ApiException.badRequest("url must be http(s) or about:blank")
+    return trimmed
+}
+
+private fun acceptable(url: String): Boolean {
+    if (url.length > MAX_URL) return false
+    if (url.indexOf('\r') >= 0 || url.indexOf('\n') >= 0) return false
+    if (url == "about:blank") return true
+    return url.startsWith("https://") || url.startsWith("http://")
+}
+
+private const val MAX_URL = 2_000
