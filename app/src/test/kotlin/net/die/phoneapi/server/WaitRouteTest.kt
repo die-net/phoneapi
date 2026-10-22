@@ -37,6 +37,7 @@ class WaitRouteTest {
             val node =
                 client.post("/v1/wait") {
                     bearer(observe)
+                    session(startSession(client, observe))
                     contentType(ContentType.Application.Json)
                     setBody(NODE_WAIT)
                 }
@@ -46,6 +47,7 @@ class WaitRouteTest {
             val allowed =
                 client.post("/v1/wait") {
                     bearer(browser)
+                    session(startSession(client, browser))
                     contentType(ContentType.Application.Json)
                     setBody(BROWSER_WAIT)
                 }
@@ -57,7 +59,9 @@ class WaitRouteTest {
 
     private companion object {
         const val NODE_WAIT = """{"all":[{"type":"node","selector":{"text":"Ok"}}],"timeoutMs":0}"""
+        // A session's browser wait names its tab unless the session can see exactly one.
         const val BROWSER_WAIT =
-            """{"all":[{"type":"browser.url","contains":"example"}],"timeoutMs":0}"""
+            """{"all":[{"type":"browser.url","target":"chrome_devtools_remote~t",""" +
+                """"contains":"example"}],"timeoutMs":0}"""
     }
 }

@@ -33,7 +33,9 @@ import net.die.phoneapi.model.OpenTabRequest
 import net.die.phoneapi.model.Scope
 import net.die.phoneapi.server.CdpPipe
 import net.die.phoneapi.server.ServerServices
+import net.die.phoneapi.server.browser
 import net.die.phoneapi.server.scoped
+import net.die.phoneapi.server.session
 import net.die.phoneapi.server.withScreen
 
 /**
@@ -41,111 +43,146 @@ import net.die.phoneapi.server.withScreen
  */
 fun Route.browserRoutes(services: ServerServices) {
     scoped(Scope.BROWSER) {
-        get("/v1/browser/targets") { call.respond(services.tabs.shared.targets()) }
+        get("/v1/browser/targets") {
+            call.respond(withScreen(call, services, false) { call.browser(services, it).targets() })
+        }
         post("/v1/browser/tabs") {
-            call.respond(services.tabs.shared.openTab(call.receive<OpenTabRequest>().url))
+            val url = call.receive<OpenTabRequest>().url
+            call.respond(
+                withScreen(call, services, needed = false, launching = true) {
+                    call.browser(services, it).openTab(url)
+                }
+            )
         }
         post("/v1/browser/targets/{id}/navigate") {
+            val url = call.receive<NavigateRequest>().url
             call.respond(
-                services.tabs.shared.navigate(call.targetId(), call.receive<NavigateRequest>().url)
+                withScreen(call, services, needed = false, launching = true) {
+                    call.browser(services, it).navigate(call.targetId(), url)
+                }
             )
         }
         post("/v1/browser/targets/{id}/close") {
-            call.respond(services.tabs.shared.closeTab(call.targetId()))
-        }
-        get("/v1/browser/targets/{id}/snapshot") {
-            val q = call.request.queryParameters
-            val options =
-                BrowserSnapshotOptions(
-                    maxNodes = q.int("maxNodes") ?: BrowserSnapshotOptions().maxNodes,
-                    maxChars = q.int("maxChars"),
-                    show = q.flag("show", default = false),
-                )
             call.respond(
-                withScreen(call, services, options.show) {
-                    services.tabs.shared.snapshot(call.targetId(), options)
+                withScreen(call, services, false) {
+                    call.browser(services, it).closeTab(call.targetId())
                 }
             )
         }
-        post("/v1/browser/targets/{id}/read") {
-            val request = call.receive<BrowserReadRequest>()
-            call.respond(
-                withScreen(call, services, request.show) {
-                    services.tabs.shared.read(call.targetId(), request)
-                }
-            )
-        }
-        post("/v1/browser/targets/{id}/find") {
-            call.respond(
-                services.tabs.shared.find(call.targetId(), call.receive<BrowserFindRequest>())
-            )
-        }
+        browserReadRoutes(services)
         browserInputRoutes(services)
-        post("/v1/browser/targets/{id}/evaluate") {
-            call.respond(
-                services.tabs.shared.evaluate(call.targetId(), call.receive<EvalRequest>())
-            )
-        }
-        post("/v1/browser/targets/{id}/console") {
-            call.respond(
-                services.tabs.shared.console(call.targetId(), call.receive<ConsoleRequest>())
-            )
-        }
+        // The raw socket can address any tab through Target.*, so it takes no session and stays
+        // on tabs no session owns.
         webSocket("/v1/browser/targets/{id}/cdp") { proxyCdp(this, services, call.targetId()) }
     }
 }
 
-/**
- * A REST call holds the screen only while it runs, so `auto` never finds it already holding: taps,
- * keys, and text go over DevTools, and swipes and gestures by touch.
- */
-private fun rest(input: BrowserInput, kind: BrowserInputKind): BrowserInput =
-    input.resolved(kind, holdsScreen = false)
+/** Snapshots, reading, finding, script, and console logs. Only `show` takes the screen. */
+private fun Route.browserReadRoutes(services: ServerServices) {
+    get("/v1/browser/targets/{id}/snapshot") {
+        val q = call.request.queryParameters
+        val options =
+            BrowserSnapshotOptions(
+                maxNodes = q.int("maxNodes") ?: BrowserSnapshotOptions().maxNodes,
+                maxChars = q.int("maxChars"),
+                show = q.flag("show", default = false),
+            )
+        call.respond(
+            withScreen(call, services, options.show) {
+                call.browser(services, it).snapshot(call.targetId(), options)
+            }
+        )
+    }
+    post("/v1/browser/targets/{id}/read") {
+        val request = call.receive<BrowserReadRequest>()
+        call.respond(
+            withScreen(call, services, request.show) {
+                call.browser(services, it).read(call.targetId(), request)
+            }
+        )
+    }
+    post("/v1/browser/targets/{id}/find") {
+        val request = call.receive<BrowserFindRequest>()
+        call.respond(
+            withScreen(call, services, false) {
+                call.browser(services, it).find(call.targetId(), request)
+            }
+        )
+    }
+    post("/v1/browser/targets/{id}/evaluate") {
+        val request = call.receive<EvalRequest>()
+        call.respond(
+            withScreen(call, services, needed = false, launching = true) {
+                call.browser(services, it).evaluate(call.targetId(), request)
+            }
+        )
+    }
+    post("/v1/browser/targets/{id}/console") {
+        val request = call.receive<ConsoleRequest>()
+        call.respond(
+            withScreen(call, services, false) {
+                call.browser(services, it).console(call.targetId(), request)
+            }
+        )
+    }
+}
+
+/** `auto` input as it resolves for the calling session, which holds the screen or not. */
+private fun ApplicationCall.resolved(
+    services: ServerServices,
+    input: BrowserInput,
+    kind: BrowserInputKind,
+): BrowserInput = input.resolved(kind, services.lease.holds(session()))
 
 /** Pointer, key, and text input. Touch, and cdp pointer input, take the screen. */
 private fun Route.browserInputRoutes(services: ServerServices) {
     post("/v1/browser/targets/{id}/tap") {
         val asked = call.receive<BrowserTapRequest>()
-        val request = asked.copy(input = rest(asked.input, BrowserInputKind.TAP))
+        val request = asked.copy(input = call.resolved(services, asked.input, BrowserInputKind.TAP))
+        val screen = request.input != BrowserInput.CDP_MOUSE
         call.respond(
-            withScreen(call, services, request.input != BrowserInput.CDP_MOUSE) {
-                services.tabs.shared.tap(call.targetId(), request)
+            withScreen(call, services, screen, launching = true) {
+                call.browser(services, it).tap(call.targetId(), request)
             }
         )
     }
     post("/v1/browser/targets/{id}/swipe") {
         val asked = call.receive<BrowserSwipeRequest>()
-        val request = asked.copy(input = rest(asked.input, BrowserInputKind.POINTER))
+        val input = call.resolved(services, asked.input, BrowserInputKind.POINTER)
+        val request = asked.copy(input = input)
         call.respond(
-            withScreen(call, services, request.input != BrowserInput.CDP_MOUSE) {
-                services.tabs.shared.swipe(call.targetId(), request)
+            withScreen(call, services, input != BrowserInput.CDP_MOUSE, launching = true) {
+                call.browser(services, it).swipe(call.targetId(), request)
             }
         )
     }
     post("/v1/browser/targets/{id}/gesture") {
         val asked = call.receive<BrowserGestureRequest>()
-        val request = asked.copy(input = rest(asked.input, BrowserInputKind.POINTER))
+        val input = call.resolved(services, asked.input, BrowserInputKind.POINTER)
+        val request = asked.copy(input = input)
         call.respond(
-            withScreen(call, services, request.input != BrowserInput.CDP_MOUSE) {
-                services.tabs.shared.gesture(call.targetId(), request)
+            withScreen(call, services, input != BrowserInput.CDP_MOUSE, launching = true) {
+                call.browser(services, it).gesture(call.targetId(), request)
             }
         )
     }
     post("/v1/browser/targets/{id}/key") {
         val asked = call.receive<BrowserKeyRequest>()
-        val request = asked.copy(input = rest(asked.input, BrowserInputKind.KEYS))
+        val input = call.resolved(services, asked.input, BrowserInputKind.KEYS)
+        val request = asked.copy(input = input)
         call.respond(
-            withScreen(call, services, request.input == BrowserInput.TOUCH) {
-                services.tabs.shared.key(call.targetId(), request)
+            withScreen(call, services, input == BrowserInput.TOUCH, launching = true) {
+                call.browser(services, it).key(call.targetId(), request)
             }
         )
     }
     post("/v1/browser/targets/{id}/text") {
         val asked = call.receive<BrowserTextRequest>()
-        val request = asked.copy(input = rest(asked.input, BrowserInputKind.KEYS))
+        val input = call.resolved(services, asked.input, BrowserInputKind.KEYS)
+        val request = asked.copy(input = input)
         call.respond(
-            withScreen(call, services, request.input == BrowserInput.TOUCH) {
-                services.tabs.shared.text(call.targetId(), request)
+            withScreen(call, services, input == BrowserInput.TOUCH, launching = true) {
+                call.browser(services, it).text(call.targetId(), request)
             }
         )
     }

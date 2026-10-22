@@ -17,9 +17,11 @@ class InputRouteTest {
         val control = api.tokens.issue("control", setOf(Scope.CONTROL))
         application { phoneApiModule(api.services) }
         apiClient().use { client ->
+            val session = startSession(client, control)
             val focused =
                 client.post("/v1/ime/show") {
                     bearer(control)
+                    session(session)
                     contentType(ContentType.Application.Json)
                     setBody("{}")
                 }
@@ -30,6 +32,7 @@ class InputRouteTest {
             val targeted =
                 client.post("/v1/ime/show") {
                     bearer(control)
+                    session(session)
                     contentType(ContentType.Application.Json)
                     setBody("""{"selector":{"ref":"e12"},"autoWake":false}""")
                 }

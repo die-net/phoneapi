@@ -102,6 +102,7 @@ fun Application.phoneApiModule(
         }
     }
     install(BearerAuth) { tokens = services.tokens }
+    attributes.put(SessionsKey, sessions)
     routing {
         deviceRoutes(services)
         openApiRoutes()
@@ -113,7 +114,7 @@ fun Application.phoneApiModule(
         browserRoutes(services)
         waitRoutes(services)
         streamRoutes(services)
-        sessionRoutes(sessions)
+        sessionRoutes(services, sessions)
     }
     installPhoneMcp(services, sessions)
 }

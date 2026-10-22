@@ -4,6 +4,8 @@ import io.ktor.client.HttpClient
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.header
+import io.ktor.client.request.post
+import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
 import io.ktor.server.testing.ApplicationTestBuilder
 import kotlinx.coroutines.CoroutineScope
@@ -11,6 +13,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.flow.emptyFlow
+import net.die.phoneapi.core.ApiJson
 import net.die.phoneapi.core.AppsService
 import net.die.phoneapi.core.BrowserService
 import net.die.phoneapi.core.InputService
@@ -59,6 +62,7 @@ import net.die.phoneapi.model.OrientationRequest
 import net.die.phoneapi.model.PointerFrame
 import net.die.phoneapi.model.Scope
 import net.die.phoneapi.model.ScreenState
+import net.die.phoneapi.model.SessionStarted
 import net.die.phoneapi.model.SwipeRequest
 import net.die.phoneapi.model.TapRequest
 import net.die.phoneapi.model.TextRequest
@@ -232,6 +236,17 @@ internal fun ApplicationTestBuilder.apiClient(): HttpClient = createClient {
 
 internal fun HttpRequestBuilder.bearer(secret: String) {
     header(HttpHeaders.Authorization, "Bearer $secret")
+}
+
+/** Starts a REST session for [secret], as a script does before acting on the phone. */
+internal suspend fun startSession(http: HttpClient, secret: String): String {
+    val body = http.post("/v1/sessions") { bearer(secret) }.bodyAsText()
+    return ApiJson.decodeFromString(SessionStarted.serializer(), body).id
+}
+
+/** Names the REST session a request is for. */
+internal fun HttpRequestBuilder.session(id: String) {
+    header(SESSION_HEADER, id)
 }
 
 internal fun allCapabilities() =

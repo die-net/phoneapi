@@ -142,29 +142,6 @@ class ScreenLeaseTest {
     }
 
     @Test
-    fun `rest call holds while running`() = runTest {
-        val lease = lease()
-        val rest = Holder.Rest(1)
-        lease.withScreen(rest) { assertTrue(lease.holds(rest)) }
-        assertNull(lease.state.value.holder)
-        assertEquals(0, cleanups)
-    }
-
-    @Test
-    fun `canceled rest call lets go`() = runTest {
-        val lease = lease()
-        val rest = Holder.Rest(2)
-        val call = async { lease.withScreen(rest) { delay(10_000) } }
-        runCurrent()
-        assertTrue(lease.holds(rest))
-        call.cancel()
-        runCurrent()
-        assertNull(lease.state.value.holder)
-        lease.withScreen(a) {}
-        assertTrue(lease.holds(a))
-    }
-
-    @Test
     fun `failed cleanup reaches next`() = runTest {
         val lease = lease()
         failures = listOf("lock: no keyguard")

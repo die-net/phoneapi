@@ -10,6 +10,7 @@ Usage: $(basename "$0") <command> [<options>]
     pair      - Mint a token and save the pairing file
     server    - Expose the on-device PhoneAPI server on localhost
     papi      - Call the HTTP/WebSocket API
+    session   - Show or end the session papi keeps (session id|end)
     helper    - Start the listener and shell helper over ADB
     help      - Display this text
 "
@@ -96,7 +97,6 @@ command:papi() {
     needs curl
 
     local method path body host port token scheme base ws_scheme
-    local -a args
 
     [[ $# -ge 2 ]] || usage "papi needs METHOD and PATH"
 
@@ -132,9 +132,79 @@ async def main():
 asyncio.run(main())
 PY
     fi
-    args=(-s -X "$method" -H "Authorization: Bearer $token" -w '\n%{http_code}\n')
+    # REST calls that act on the phone or its tabs need a session. papi keeps one, so a sequence
+    # of calls is one holder of the screen and its tabs, and makes it when the server first asks.
+    local session out status
+    session="$(papi_session)"
+    out="$(papi_curl "$method" "$path" "$body" "$session")"
+    status="${out##*$'\n'}"
+    if [[ -z ${PAPI_SESSION:-} ]]; then
+        if [[ $status == 404 && -n $session && $out == *"No such session"* ]]; then
+            echo "papi: the session ended; starting a new one, without the screen or the old tabs" >&2
+            status=428
+        fi
+        if [[ $status == 428 ]]; then
+            session="$(papi_new_session)"
+            out="$(papi_curl "$method" "$path" "$body" "$session")"
+        fi
+    fi
+    printf '%s\n' "$out"
+}
+
+# shellcheck disable=SC2317
+command:session() {
+    needs jq
+    needs curl
+
+    local session
+    load_pairing
+    session="$(papi_session)"
+    case "${1:-}" in
+        id)
+            [[ -n $session ]] || die "No session yet; papi starts one when a call needs it."
+            echo "$session"
+            ;;
+        end)
+            [[ -n $session ]] || die "No session to end."
+            papi_curl DELETE /v1/sessions/current "" "$session" >/dev/null
+            if [[ -z ${PAPI_SESSION:-} ]]; then rm -f "$(session_file)"; fi
+            echo "Ended the session." >&2
+            ;;
+        *) usage "session needs id or end" ;;
+    esac
+}
+
+# Where papi keeps its session id: next to the pairing file.
+session_file() {
+    echo "$(dirname "$PAIRING_FILE")/session"
+}
+
+# The session papi uses: PAPI_SESSION, or the one it keeps, or none yet.
+papi_session() {
+    if [[ -n ${PAPI_SESSION:-} ]]; then
+        echo "$PAPI_SESSION"
+    elif [[ -s $(session_file) ]]; then
+        cat "$(session_file)"
+    fi
+}
+
+# Starts a session, keeps its id, and prints it.
+papi_new_session() {
+    local out id
+    out="$(papi_curl POST /v1/sessions "" "")"
+    id="$(head -n 1 <<<"$out" | jq -r '.id // empty' 2>/dev/null)"
+    [[ -n $id ]] || die "papi: could not start a session: $out"
+    (umask 077 && echo "$id" >"$(session_file)")
+    echo "$id"
+}
+
+# One request: prints the body, then the HTTP status on its own line.
+papi_curl() {
+    local method=$1 path=$2 body=$3 session=$4
+    local -a args=(-s -X "$method" -H "Authorization: Bearer $PAIRING_TOKEN" -w '\n%{http_code}\n')
+    if [[ -n $session ]]; then args+=(-H "Mcp-Session-Id: $session"); fi
     if [[ -n $body ]]; then args+=(-H 'Content-Type: application/json' -d "$body"); fi
-    curl "${args[@]}" "$scheme://$base$path"
+    curl "${args[@]}" "$PAIRING_SCHEME://$PAIRING_HOST:$PAIRING_PORT$path"
 }
 
 # shellcheck disable=SC2317

@@ -139,12 +139,25 @@ fun Route.scoped(scope: Scope, build: Route.() -> Unit): Route {
     return child
 }
 
-/** Marks a [scoped] block. Identity equality keeps two blocks with the same scope from merging. */
-internal class ScopeRouteSelector(val scope: Scope) : RouteSelector() {
+/**
+ * Child routes any token may call, needing no particular scope: starting and ending one's own
+ * session. The route test checks them as it does [scoped] ones.
+ */
+fun Route.anyToken(build: Route.() -> Unit): Route {
+    val child = createChild(ScopeRouteSelector(null))
+    child.build()
+    return child
+}
+
+/**
+ * Marks a [scoped] or [anyToken] block, with a null [scope] for the latter. Identity equality keeps
+ * two blocks with the same scope from merging.
+ */
+internal class ScopeRouteSelector(val scope: Scope?) : RouteSelector() {
     override suspend fun evaluate(
         context: RoutingResolveContext,
         segmentIndex: Int,
     ): RouteSelectorEvaluation = RouteSelectorEvaluation.Transparent
 
-    override fun toString(): String = "(scope:${scope.name.lowercase()})"
+    override fun toString(): String = "(scope:${scope?.name?.lowercase() ?: "any"})"
 }

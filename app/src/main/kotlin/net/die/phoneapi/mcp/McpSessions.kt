@@ -20,17 +20,34 @@ import net.die.phoneapi.server.TokenGateway
 /**
  * One session: a holder of the screen and of tabs, and the token that started it. A session from
  * `initialize` has its own transport and server. One from `session_start` has neither: it is named
- * by the `session` argument on the calls of the session that started it, its [parentId].
+ * by the `session` argument on the calls of the session that started it, its [parentId]. One from
+ * `POST /v1/sessions` is [rest]: REST calls name it in `Mcp-Session-Id`, and an `initialize`
+ * carrying its id gives it a transport too.
  */
 internal class McpSession(
     val id: String,
     val tokenId: String,
     val tokenName: String,
-    val transport: StreamableHttpServerTransport?,
-    val server: Server?,
+    transport: StreamableHttpServerTransport?,
+    server: Server?,
     val startedAtMs: Long,
     val parentId: String? = null,
+    val rest: Boolean = false,
 ) {
+    @Volatile
+    var transport: StreamableHttpServerTransport? = transport
+        private set
+
+    @Volatile
+    var server: Server? = server
+        private set
+
+    /** Gives a REST session the MCP transport an `initialize` made for it. */
+    fun attach(transport: StreamableHttpServerTransport, server: Server) {
+        this.transport = transport
+        this.server = server
+    }
+
     @Volatile
     var lastActiveMs: Long = startedAtMs
         private set
@@ -131,6 +148,40 @@ class McpSessions(
     }
 
     internal fun get(id: String): McpSession? = sessions[id]
+
+    /** Starts a session for `POST /v1/sessions`, with no transport, and returns its id. */
+    fun startRest(tokenId: String, tokenName: String): String {
+        admit(tokenId)
+        val session =
+            McpSession(
+                id = newId(),
+                tokenId = tokenId,
+                tokenName = tokenName,
+                transport = null,
+                server = null,
+                startedAtMs = now(),
+                rest = true,
+            )
+        add(session)
+        return session.id
+    }
+
+    /**
+     * The holder a REST call from [tokenId] names with [id], if that is a live session of its
+     * token. Counts as a use of it.
+     */
+    fun forRest(id: String, tokenId: String): Holder.Session? {
+        val session = sessions[id]?.takeIf { it.tokenId == tokenId } ?: return null
+        session.touch(now())
+        return Holder.Session(id)
+    }
+
+    /** Whether [id] is a session made with `POST /v1/sessions`. */
+    fun isRest(id: String): Boolean = sessions[id]?.rest == true
+
+    /** What session [id] can do with sessions, as its own calls see it. */
+    fun controlFor(id: String): SessionControl? =
+        sessions[id]?.let { control(it.id, it.tokenId, it.tokenName) }
 
     internal fun clock(): Long = now()
 

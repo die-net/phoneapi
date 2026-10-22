@@ -19,6 +19,8 @@ import net.die.phoneapi.server.FakeApi
 import net.die.phoneapi.server.apiClient
 import net.die.phoneapi.server.bearer
 import net.die.phoneapi.server.phoneApiModule
+import net.die.phoneapi.server.session
+import net.die.phoneapi.server.startSession
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -71,10 +73,12 @@ class McpLeaseTest {
         application { phoneApiModule(api.services) }
         apiClient().use { http ->
             val session = initialize(http)
+            val script = startSession(http, token)
             call(http, session, "tap", """{"x":1,"y":2}""")
             val busy =
                 http.post("/v1/input/tap") {
                     bearer(token)
+                    session(script)
                     contentType(ContentType.Application.Json)
                     setBody("""{"x":1,"y":2}""")
                 }
@@ -87,6 +91,7 @@ class McpLeaseTest {
             val free =
                 http.post("/v1/input/tap") {
                     bearer(token)
+                    session(script)
                     contentType(ContentType.Application.Json)
                     setBody("""{"x":1,"y":2}""")
                 }
