@@ -13,7 +13,6 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.serializer
 import net.die.phoneapi.model.Capabilities
-import net.die.phoneapi.model.FindRequest
 import net.die.phoneapi.model.ImeShowRequest
 import net.die.phoneapi.model.IntentRequest
 import net.die.phoneapi.model.KeyRequest
@@ -129,7 +128,7 @@ private val TOOLS: List<McpTool> =
         McpTool(
             name = "ui_snapshot",
             description =
-                "Compact outline of the visible nodes on screen. Covers app windows, plus system windows such as dialogs and the notification shade when they are focused or large. The keyboard is listed without its contents. maxNodes and maxChars cap the output. When anything is left out, the first line ends with truncated and the next lines say how much. textOnly drops positions, ids, states, and actions. Password and one-time-code fields and card numbers are masked unless redact is false. Prefer this over screenshot. Take a new one after each action. Canvas content such as maps shows little, so use screenshot there. Right after an action the tree can still be the old screen: wait_for first.",
+                "Compact outline of the visible nodes on screen, with refs for ui_act. Covers app windows, plus system windows such as dialogs and the notification shade when they are focused or large. The keyboard is listed without its contents. Use it when you do not know what is on screen. To act on something whose label you know, tap or type_text with a text selector, with no snapshot first. To see what an action did, use wait_for with snapshot true rather than calling this again. Shows up to maxNodes lines (default 400); when anything is left out, the first line ends with truncated and the next lines say how much, so narrow with window or ui_find, or raise maxNodes. textOnly drops positions, ids, states, and actions. Password and one-time-code fields and card numbers are masked unless redact is false. Canvas content such as maps and Street View shows little, so use a screenshot there.",
             scope = Scope.OBSERVE,
             available = Capabilities::uiSnapshot,
             arguments = serializer<SnapshotArgs>(),
@@ -139,10 +138,10 @@ private val TOOLS: List<McpTool> =
         McpTool(
             name = "ui_find",
             description =
-                "Find nodes by selector and return each match's bounds and actions. Cheaper than ui_snapshot when you know what you want. Use index when several nodes match.",
+                "Find nodes by selector and return each match's bounds and actions. Much smaller than ui_snapshot when you know what you want. Use index when several nodes match. Secrets are masked as in ui_snapshot unless redact is false.",
             scope = Scope.OBSERVE,
             available = Capabilities::uiSnapshot,
-            arguments = serializer<FindRequest>(),
+            arguments = serializer<UiFindArgs>(),
             annotations = readOnly,
             call = { graph, _, request -> uiFind(graph, request) },
         ),
@@ -159,7 +158,7 @@ private val TOOLS: List<McpTool> =
         McpTool(
             name = "tap",
             description =
-                "Tap a point in screen pixels, or a node selector. Prefer a selector by id, text, or desc over a ref. Humanized by default. Uses the screen.",
+                "Tap a node selector or a point in screen pixels. A selector by text, id, or desc needs no snapshot first, so prefer it when you know the label; a ref needs one. Humanized by default. Wakes the screen itself. Follow with wait_for on what should appear, with snapshot true to see it. Uses the screen.",
             scope = Scope.CONTROL,
             available = Capabilities::inputInject,
             arguments = serializer<TapRequest>(),
@@ -179,7 +178,7 @@ private val TOOLS: List<McpTool> =
         McpTool(
             name = "type_text",
             description =
-                "Type into the focused field, or into selector first. mode auto taps the on-screen keyboard and falls back to setText. setText is fastest for long text. clear replaces the field's text. submit presses the IME action. no_editor means no editable field has focus.",
+                "Type into the focused field, or into selector first, so a text or id selector needs no tap or snapshot before it. mode auto taps the on-screen keyboard and falls back to setText. setText is fastest for long text. clear replaces the field's text. submit presses the IME action. no_editor means no editable field has focus.",
             scope = Scope.CONTROL,
             available = Capabilities::textKeyevent,
             arguments = serializer<TextRequest>(),
@@ -199,7 +198,7 @@ private val TOOLS: List<McpTool> =
         McpTool(
             name = "wait_for",
             description =
-                "Wait until all or any conditions match. Pass at least one. Use it after an action instead of sleeping or taking a screenshot. A condition's type is node, window, ime, idle, screen, keyguard, or browser.*. After open_intent or app_launch, wait for {type window, package} with {type node, selector {textContains}}. After browser_open, wait for browser.url and browser.settled on its target. idle is a fallback when no text is known. Browser conditions need the browser scope, and target when more than one page is open.",
+                "Wait until all or any conditions match, then optionally show the result: snapshot true adds a ui_snapshot outline, and screenshot true adds a screenshot for maps and other screens with an empty tree. So an action takes two calls, the action and one wait_for, rather than a snapshot before and after. Pass at least one condition. Use it after an action instead of sleeping. A condition's type is node, window, ime, idle, screen, keyguard, or browser.*. After open_intent or app_launch, wait for {type window, package} with {type node, selector {textContains}}. After browser_open, wait for browser.url and browser.settled on its target. To check a browser_tap, wait for browser.element with a CSS selector for the new state, such as an attribute selector, rather than running browser_eval. idle is a fallback when no text is known. Browser conditions need the browser scope, and target when more than one page is open.",
             scope = Scope.OBSERVE,
             available = always,
             arguments = serializer<WaitArgs>(),
@@ -258,7 +257,7 @@ private val TOOLS: List<McpTool> =
         McpTool(
             name = "open_intent",
             description =
-                "Start an intent, such as action android.intent.action.VIEW with an https URL as data. package and component are optional. Waits for the app to reach the foreground, not for its content, so follow with wait_for. Without a package, a URI that several apps handle shows a chooser and returns ok false: name a package. Uses the screen. Requires the shell helper.",
+                "Start an intent, such as action android.intent.action.VIEW with an https URL as data, to open a place in Maps or a deep link in an app. For a web page in Chrome, use browser_open instead: it returns the target id that browser tools need. package and component are optional. Waits for the app to reach the foreground, not for its content, so follow with wait_for, with snapshot or screenshot true to see the content. Without a package, a URI that several apps handle shows a chooser and returns ok false: name a package. Wakes the screen itself. Uses the screen. Requires the shell helper.",
             scope = Scope.CONTROL,
             available = Capabilities::appsManage,
             arguments = serializer<IntentRequest>(),
@@ -267,7 +266,8 @@ private val TOOLS: List<McpTool> =
         ),
         McpTool(
             name = "device_wake",
-            description = "Turn the screen on. Leaves the keyguard up.",
+            description =
+                "Turn the screen on. Leaves the keyguard up. Not needed before other calls: actions, snapshots, and intents wake the screen themselves.",
             scope = Scope.CONTROL,
             available = always,
             arguments = serializer<EmptyArgs>(),
@@ -317,7 +317,7 @@ private val TOOLS: List<McpTool> =
         McpTool(
             name = "browser_open",
             description =
-                "Open a tab and return its target. With Chrome hidden, the tab opens in the background and the screen is untouched. With Chrome on screen, Chrome switches to the new tab, and the result has tookScreen true. url must be http(s) or about:blank. A page that hands off to an installed app loads as a website in the tab. Follow with wait_for on browser.url and browser.settled.",
+                "Open a tab and return its target, for every other browser tool. Prefer it over open_intent for web pages. With Chrome hidden, the tab opens in the background and the screen is untouched. With Chrome on screen, Chrome switches to the new tab, and the result has tookScreen true. url must be http(s) or about:blank. A page that hands off to an installed app loads as a website in the tab. Follow with wait_for on browser.url and browser.settled. To only read or search a page, browser_read or browser_find with url opens it for you.",
             scope = Scope.BROWSER,
             available = Capabilities::browserCdp,
             arguments = serializer<UrlArgs>(),
@@ -357,7 +357,7 @@ private val TOOLS: List<McpTool> =
         McpTool(
             name = "browser_read",
             description =
-                "Read a page's text as markdown, a slice at a time. Works in the background. scope article (default) is the main content without navigation, footers, and ads. page is all visible text. selector reads one element, such as a table. The header gives the total length, a version, and nextOffset for the next slice, and flags a page that looks blocked or still loading. outline returns only headings with their offsets, cheaply. Pass url instead of target to open a new tab and read it in one call. A tab that is not on screen is not drawn, so content that loads when drawn may be missing; the header says so, and show brings the tab forward first.",
+                "Read a page's text as markdown, a slice at a time. Works in the background. scope article (default) is the main content without navigation, footers, and ads. page is all visible text. selector reads one element, such as a table. The header gives the total length, a version, and nextOffset for the next slice, and flags a page that looks blocked or still loading. outline returns only headings with their offsets, cheaply. Pass url instead of target to open a new tab and read it in one call, and close true to close the tab afterwards, so a one-look read is a single call. A tab that is not on screen is not drawn, so content that loads when drawn may be missing; the header says so, and show brings the tab forward first.",
             scope = Scope.BROWSER,
             available = Capabilities::browserCdp,
             arguments = serializer<BrowserReadArgs>(),
@@ -367,17 +367,17 @@ private val TOOLS: List<McpTool> =
         McpTool(
             name = "browser_find",
             description =
-                "Find text or links in a page's content, with offsets browser_read takes when given the same scope, selector, and format. Works in the background. kind text returns each match with context and its nearest heading. kind links returns each link's text, URL, and whether it is same-origin, filtered by query and hrefContains.",
+                "Find text or links in a page's content, with offsets browser_read takes when given the same scope, selector, and format. Works in the background. kind text returns each match with context and its nearest heading. To look for several things, or for something whose wording you can only guess, pass queries: up to 20, each searched on its own, with a no-matches line for the ones not there. Listing likely wordings and synonyms in one call costs far less than a find per guess. Matching is a plain substring that ignores case, so list wordings, not capitalizations, and use regex with \\b for whole words. kind links returns each link's text, URL, and whether it is same-origin, filtered by query and hrefContains, each URL once and without tracking parameters. Pass url instead of target to open the page in a new tab first, and close true to close the tab afterwards.",
             scope = Scope.BROWSER,
             available = Capabilities::browserCdp,
             arguments = serializer<BrowserFindArgs>(),
-            annotations = readOnly,
-            call = { graph, _, request -> browserFind(graph, request) },
+            annotations = changes,
+            call = { graph, scopes, request -> browserFind(graph, scopes, request) },
         ),
         McpTool(
             name = "browser_tap",
             description =
-                "Tap a snapshot ref or a CSS selector in a browser target. The default input auto is touch while you hold the screen, and cdp-mouse otherwise, so tapping a background tab does not take a free screen. input touch brings the tab to the front and uses the screen. input cdp sends touch events over DevTools without bringing the tab forward, but Chrome only takes them on the tab it is showing, with Chrome on screen. input cdp-mouse clicks with a mouse, which works with Chrome hidden and the screen off, but the page sees a mouse rather than a finger. All three are trusted input, unlike a click from browser_eval.",
+                "Tap a snapshot ref or a CSS selector in a browser target. A selector waits up to waitMs (default 5000) for its element to appear, and the element is scrolled into view, so no wait or scroll is needed first. To check the tap worked, wait_for browser.element with a selector for the new state. The default input auto is touch while you hold the screen, and cdp-mouse otherwise, so tapping a background tab does not take a free screen. input touch brings the tab to the front and uses the screen. input cdp sends touch events over DevTools without bringing the tab forward, but Chrome only takes them on the tab it is showing, with Chrome on screen. input cdp-mouse clicks with a mouse, which works with Chrome hidden and the screen off, but the page sees a mouse rather than a finger. All three are trusted input, unlike a click from browser_eval.",
             scope = Scope.BROWSER,
             available = Capabilities::browserCdp,
             arguments = serializer<BrowserTapArgs>(),
@@ -447,7 +447,7 @@ private val TOOLS: List<McpTool> =
         McpTool(
             name = "screenshot",
             description =
-                "PNG of the screen. Prefer ui_snapshot, and use this when the tree is empty or unhelpful, such as maps and images. scale is 0.1 to 1, default 0.5. Divide image coordinates by scale to get tap coordinates.",
+                "PNG of the screen. Prefer ui_snapshot, and use this when the tree is empty or unhelpful, such as maps and images. After an action, wait_for with screenshot true waits and shows the screen in one call. scale is 0.1 to 1, default 0.5. Divide image coordinates by scale to get tap coordinates.",
             scope = Scope.OBSERVE,
             available = Capabilities::screenshotHelper,
             arguments = serializer<ScaleArgs>(),

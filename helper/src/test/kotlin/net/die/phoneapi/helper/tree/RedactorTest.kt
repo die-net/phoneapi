@@ -85,4 +85,21 @@ class RedactorTest {
         assertTrue(Redactor.luhn("378282246310005"))
         assertFalse(Redactor.luhn("4111111111111112"))
     }
+
+    @Test
+    fun `masks find matches`() {
+        val redactor = Redactor()
+        val out =
+            redactor.nodes(
+                listOf(
+                    node("e1", "edit", "hunter2", states = listOf("editable", "password")),
+                    node("e2", text = "Card 4111 1111 1111 1111"),
+                    node("e3", text = "Sign in"),
+                )
+            )
+        assertEquals(2, redactor.count)
+        assertFalse(out[0].text!!.contains("hunter2"))
+        assertFalse(out[1].text!!.contains("4111 1111 1111 1111"))
+        assertEquals("Sign in", out[2].text)
+    }
 }

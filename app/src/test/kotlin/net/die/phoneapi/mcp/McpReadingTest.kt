@@ -5,6 +5,7 @@ import net.die.phoneapi.model.BrowserReadResult
 import net.die.phoneapi.model.BrowserSnapshot
 import net.die.phoneapi.model.PageHeading
 import net.die.phoneapi.model.PageLink
+import net.die.phoneapi.model.QueryMatches
 import net.die.phoneapi.model.TextMatch
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
@@ -94,6 +95,42 @@ class McpReadingTest {
         assertEquals(
             """@9 "a link" https://example.com/b same-origin""",
             linksText(links).lines()[2],
+        )
+        assertEquals(
+            "# 4 links in page content (version 1); showing 1, @ is where each one's text " +
+                "starts; 2 repeats of a URL above left out",
+            linksText(links.copy(repeats = 2)).lines()[1],
+        )
+    }
+
+    @Test
+    fun `gives each query a section`() {
+        val match = TextMatch(12, null, "a ", "gate", " b")
+        val found =
+            BrowserFindResult(
+                extracted = "article",
+                version = "1",
+                totalChars = 50,
+                total = 3,
+                queries =
+                    listOf(
+                        QueryMatches("gate", 2, listOf(match)),
+                        QueryMatches("boarding", 0),
+                        QueryMatches("door", 1, listOf(match.copy(match = "door"))),
+                    ),
+            )
+        assertEquals(
+            listOf(
+                "#",
+                "# 3 queries in article content (50 chars, version 1), 3 matches in all; @ is " +
+                    "each one's offset",
+                """## "gate": 2 matches, showing 1""",
+                "@12 …a «gate» b…",
+                """## "boarding": no matches""",
+                """## "door": 1 match""",
+                "@12 …a «door» b…",
+            ),
+            matchesText(found).lines(),
         )
     }
 

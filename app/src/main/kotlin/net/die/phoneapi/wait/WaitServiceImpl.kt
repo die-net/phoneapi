@@ -171,7 +171,8 @@ internal class WaitServiceImpl(
             matchedAny = outcome.matchedAny,
             snapshot =
                 if (request.snapshot) {
-                    tree.snapshot(SnapshotOptions(format = request.snapshotFormat))
+                    val options = request.snapshotOptions ?: SnapshotOptions()
+                    tree.snapshot(options.copy(format = request.snapshotFormat))
                 } else {
                     null
                 },
@@ -189,6 +190,10 @@ internal class WaitServiceImpl(
         }
         if (request.settleMs !in 0..MAX_SETTLE_MS) {
             throw ApiException.badRequest("settleMs must be 0..$MAX_SETTLE_MS")
+        }
+        val options = request.snapshotOptions ?: return
+        if ((options.maxNodes ?: 1) < 1 || (options.maxChars ?: 1) < 1) {
+            throw ApiException.badRequest("maxNodes and maxChars must be at least 1")
         }
     }
 

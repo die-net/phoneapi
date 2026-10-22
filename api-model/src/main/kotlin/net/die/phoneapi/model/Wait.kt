@@ -219,6 +219,10 @@ public data class WaitRequest(
     val settleMs: Long = 0,
     @Doc("Include a fresh UI snapshot in the result.") val snapshot: Boolean = false,
     val snapshotFormat: SnapshotFormat = SnapshotFormat.COMPACT,
+    @Doc(
+        "How to cut and mask that snapshot, as for GET /v1/ui/snapshot. Its format is snapshotFormat's."
+    )
+    val snapshotOptions: SnapshotOptions? = null,
 )
 
 @Serializable

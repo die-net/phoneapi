@@ -15,8 +15,10 @@ import net.die.phoneapi.model.BrowserReadRequest
 import net.die.phoneapi.model.BrowserReadResult
 import net.die.phoneapi.model.EvalResult
 import net.die.phoneapi.model.FindKind
+import net.die.phoneapi.model.MAX_FIND_QUERIES
 import net.die.phoneapi.model.PageHeading
 import net.die.phoneapi.model.PageLink
+import net.die.phoneapi.model.QueryMatches
 import net.die.phoneapi.model.ReadFormat
 import net.die.phoneapi.model.ReadScope
 import net.die.phoneapi.model.TextMatch
@@ -162,9 +164,14 @@ private class PageRenderer(private val markdown: Boolean) {
         return line + "\n" + cells.joinToString(" | ", prefix = "| ", postfix = " |") { "---" }
     }
 
+    /** Where the last link run ended in the inline text, and where its own text ended. */
+    private var linkRunEnd = -1
+    private var linkTextEnd = -1
+
     private fun inline(runs: List<PageRun>): Inline {
         val text = StringBuilder()
         val found = ArrayList<RenderedLink>()
+        linkRunEnd = -1
         for (run in runs) appendRun(run, text, found)
         return Inline(text.toString().trimEnd(), found)
     }
@@ -174,18 +181,43 @@ private class PageRenderer(private val markdown: Boolean) {
      * markdown marks, and records where a link's text starts.
      */
     private fun appendRun(run: PageRun, text: StringBuilder, found: MutableList<RenderedLink>) {
+        val runStart = text.length
         val raw = if (text.isEmpty() || text.last() == ' ') run.t.trimStart() else run.t
         val core = raw.trim()
         if (core.isEmpty()) {
             if (raw.isNotEmpty() && text.isNotEmpty() && text.last() != ' ') text.append(' ')
+            if (runStart == linkRunEnd) linkRunEnd = text.length
             return
         }
         val mark = if (markdown) MARKS[run.s].orEmpty() else ""
         if (raw.first() == ' ') text.append(' ')
         text.append(mark)
-        run.h?.let { found += RenderedLink(core, it, text.length) }
-        text.append(core).append(mark)
+        run.h?.let { recordLink(it, core, text, found, runStart) }
+        text.append(core)
+        linkTextEnd = text.length
+        text.append(mark)
         if (raw.last() == ' ') text.append(' ')
+        linkRunEnd = if (run.h != null) text.length else -1
+    }
+
+    /**
+     * Records a link whose text [core] starts at the end of [text]. A link split into runs by
+     * styling, such as a bold word in it, is recorded once.
+     */
+    private fun recordLink(
+        href: String,
+        core: String,
+        text: StringBuilder,
+        found: MutableList<RenderedLink>,
+        runStart: Int,
+    ) {
+        val last = found.lastOrNull()
+        if (last?.href == href && runStart == linkRunEnd) {
+            val space = if (' ' in text.substring(linkTextEnd)) " " else ""
+            found[found.lastIndex] = last.copy(text = last.text + space + core)
+        } else {
+            found += RenderedLink(core, href, text.length)
+        }
     }
 
     private data class Inline(val text: String, val links: List<RenderedLink>)
@@ -208,6 +240,18 @@ internal fun checkFind(request: BrowserFindRequest) {
     }
     if (request.contextChars !in 0..MAX_CONTEXT_CHARS) {
         throw ApiException.badRequest("contextChars must be 0 to $MAX_CONTEXT_CHARS")
+    }
+    if (request.queries.isNotEmpty()) {
+        if (request.kind != FindKind.TEXT) {
+            throw ApiException.badRequest("queries is only for kind text")
+        }
+        if (request.query != null) throw ApiException.badRequest("Pass query or queries, not both")
+        if (request.queries.size > MAX_FIND_QUERIES) {
+            throw ApiException.badRequest("At most $MAX_FIND_QUERIES queries per find")
+        }
+        if (request.queries.any { it.isEmpty() }) {
+            throw ApiException.badRequest("queries must not be empty strings")
+        }
     }
     checkSelector(request.selector)
 }
@@ -309,15 +353,33 @@ internal fun findInPage(extract: PageExtract, request: BrowserFindRequest): Brow
     }
 }
 
-@Suppress("SwallowedException") // The error message says what is wrong with the pattern.
 private fun findText(
     page: RenderedPage,
     request: BrowserFindRequest,
     base: BrowserFindResult,
 ): BrowserFindResult {
-    val query =
-        request.query?.takeIf { it.isNotEmpty() }
-            ?: throw ApiException.badRequest("query is required to find text")
+    if (request.queries.isEmpty()) {
+        val query =
+            request.query?.takeIf { it.isNotEmpty() }
+                ?: throw ApiException.badRequest("query or queries is required to find text")
+        val (total, matches) = textMatches(page, query, request)
+        return base.copy(total = total, matches = matches)
+    }
+    val queries =
+        request.queries.map { query ->
+            val (total, matches) = textMatches(page, query, request)
+            QueryMatches(query, total, matches)
+        }
+    return base.copy(total = queries.sumOf { it.total }, queries = queries)
+}
+
+/** How many times [query] is in [page], and the first `limit` of them with context. */
+@Suppress("SwallowedException") // The error message says what is wrong with the pattern.
+private fun textMatches(
+    page: RenderedPage,
+    query: String,
+    request: BrowserFindRequest,
+): Pair<Int, List<TextMatch>> {
     val pattern =
         try {
             Regex(if (request.regex) query else Regex.escape(query), RegexOption.IGNORE_CASE)
@@ -340,9 +402,13 @@ private fun findText(
                 after = text.substring(end, (end + request.contextChars).coerceAtMost(text.length)),
             )
         }
-    return base.copy(total = hits.size, matches = matches)
+    return hits.size to matches
 }
 
+/**
+ * The links whose text has query and whose URL has hrefContains, each URL once, without tracking
+ * parameters. A product's image, title, and price often link to the same place.
+ */
 private fun findLinks(
     page: RenderedPage,
     request: BrowserFindRequest,
@@ -352,17 +418,108 @@ private fun findLinks(
     val origin = pageUrl?.let(::origin)
     val text = request.query
     val href = request.hrefContains
+    val seen = HashSet<String>()
+    var repeats = 0
     val found =
-        page.links.filter { link ->
-            (text == null || link.text.contains(text, ignoreCase = true)) &&
-                (href == null || link.href.contains(href, ignoreCase = true))
-        }
+        page.links
+            .asSequence()
+            .map { it.copy(href = withoutTracking(it.href)) }
+            .filter { link ->
+                (text == null || link.text.contains(text, ignoreCase = true)) &&
+                    (href == null || link.href.contains(href, ignoreCase = true))
+            }
+            .filter { link -> seen.add(link.href).also { if (!it) repeats++ } }
+            .toList()
     val links =
         found.take(request.limit).map {
             PageLink(it.text, it.href, it.offset, origin != null && origin(it.href) == origin)
         }
-    return base.copy(total = found.size, links = links)
+    return base.copy(total = found.size, links = links, repeats = repeats)
 }
+
+/**
+ * [href] without the query parameters that only track a click, such as utm_source, and on Amazon
+ * also its /ref= path segment and its search and placement parameters. What is left still opens the
+ * same page.
+ */
+internal fun withoutTracking(href: String): String {
+    val hash = href.indexOf('#')
+    val fragment = if (hash < 0) "" else href.substring(hash)
+    val beforeHash = if (hash < 0) href else href.substring(0, hash)
+    val mark = beforeHash.indexOf('?')
+    var path = if (mark < 0) beforeHash else beforeHash.substring(0, mark)
+    val query = if (mark < 0) null else beforeHash.substring(mark + 1)
+    val amazon = host(path)?.let { AMAZON_HOST.containsMatchIn(it) } == true
+    if (amazon) path = AMAZON_REF.replace(path, "")
+    val kept =
+        query
+            ?.split('&')
+            ?.filter { param ->
+                val name = param.substringBefore('=').lowercase()
+                param.isNotEmpty() && !tracking(name) && !(amazon && amazonTracking(name))
+            }
+            .orEmpty()
+    val rebuilt = if (kept.isEmpty()) path else path + "?" + kept.joinToString("&")
+    return rebuilt + fragment
+}
+
+private fun host(url: String): String? =
+    try {
+        URI(url).host?.lowercase()
+    } catch (_: URISyntaxException) {
+        null
+    }
+
+private fun tracking(name: String): Boolean =
+    name in TRACKING_PARAMS || TRACKING_PREFIXES.any { name.startsWith(it) }
+
+private fun amazonTracking(name: String): Boolean =
+    name in AMAZON_PARAMS || AMAZON_PREFIXES.any { name.startsWith(it) }
+
+private val TRACKING_PARAMS =
+    setOf(
+        "fbclid",
+        "gclid",
+        "gbraid",
+        "wbraid",
+        "dclid",
+        "msclkid",
+        "yclid",
+        "twclid",
+        "igshid",
+        "srsltid",
+        "mc_cid",
+        "mc_eid",
+        "_hsenc",
+        "_hsmi",
+        "mkt_tok",
+        "_gl",
+    )
+
+private val TRACKING_PREFIXES = listOf("utm_")
+
+private val AMAZON_PARAMS =
+    setOf(
+        "ref",
+        "ref_",
+        "_encoding",
+        "content-id",
+        "crid",
+        "dib",
+        "dib_tag",
+        "qid",
+        "sprefix",
+        "sr",
+        "linkcode",
+        "tag",
+        "linkid",
+    )
+
+private val AMAZON_PREFIXES = listOf("pd_rd_", "pf_rd_", "sp_")
+
+private val AMAZON_HOST = Regex("""(^|\.)amazon\.[a-z.]+$""")
+
+private val AMAZON_REF = Regex("""/ref=[^/]*""")
 
 private fun origin(url: String): String? =
     try {

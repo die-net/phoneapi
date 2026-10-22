@@ -36,6 +36,10 @@ class McpScreenTest {
                 args("""{"all":[{"type":"browser.url"}],"any":[{"type":"ime"}]}"""),
             )
         )
+        val browserWait = """"all":[{"type":"browser.url"}]"""
+        assertTrue(takesScreen("wait_for", args("""{$browserWait,"snapshot":true}""")))
+        assertTrue(takesScreen("wait_for", args("""{$browserWait,"screenshot":true}""")))
+        assertFalse(takesScreen("wait_for", args("""{$browserWait,"snapshot":false}""")))
         assertFalse(takesScreen("device_info", null))
     }
 

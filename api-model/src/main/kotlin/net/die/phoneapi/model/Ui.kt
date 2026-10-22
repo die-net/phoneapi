@@ -110,9 +110,17 @@ public data class FindRequest(
     val selector: NodeSelector,
     val limit: Int = 20,
     val includeInvisible: Boolean = false,
+    /** Mask secrets in the matches as [SnapshotOptions.redact] does, and count them. */
+    val redact: Boolean = false,
 )
 
-@Serializable public data class FindResult(val seq: Long, val matches: List<UiNode>)
+@Serializable
+public data class FindResult(
+    val seq: Long,
+    val matches: List<UiNode>,
+    /** How many secrets were masked when `redact` was set. */
+    val redacted: Int = 0,
+)
 
 @Serializable
 public enum class ActionMode {
