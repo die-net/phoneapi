@@ -1,5 +1,6 @@
 package net.die.phoneapi.mcp
 
+import io.modelcontextprotocol.kotlin.sdk.types.CallToolRequest
 import io.modelcontextprotocol.kotlin.sdk.types.CallToolResult
 import io.modelcontextprotocol.kotlin.sdk.types.TextContent
 import kotlin.coroutines.cancellation.CancellationException
@@ -9,9 +10,12 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
+import net.die.phoneapi.core.ApiJson
 import net.die.phoneapi.lease.Holder
 import net.die.phoneapi.lease.ScreenLease
 import net.die.phoneapi.model.ApiException
+import net.die.phoneapi.model.BrowserInput
+import net.die.phoneapi.model.BrowserInputKind
 
 /** Tools that always take the screen: they act on it or show what is on it. */
 internal val SCREEN_TOOLS =
@@ -60,16 +64,45 @@ internal fun takesScreen(tool: String, args: JsonObject?): Boolean =
         "wait_for" -> conditionTypes(args).any { !it.startsWith("browser.") }
         "browser_tap",
         "browser_swipe",
-        "browser_gesture" -> input(args) != "cdp-mouse"
+        "browser_gesture" -> input(args) !in setOf("cdp-mouse")
         "browser_key",
-        "browser_type" -> input(args) == "touch"
+        "browser_type" -> input(args) in setOf("touch", "auto")
         "browser_read",
         "browser_snapshot" -> (args?.get("show") as? JsonPrimitive)?.booleanOrNull == true
         else -> false
     }
 
+/** The browser input tools, and the kind of input each sends. */
+private val INPUT_KINDS =
+    mapOf(
+        "browser_tap" to BrowserInputKind.TAP,
+        "browser_swipe" to BrowserInputKind.POINTER,
+        "browser_gesture" to BrowserInputKind.POINTER,
+        "browser_key" to BrowserInputKind.KEYS,
+        "browser_type" to BrowserInputKind.KEYS,
+    )
+
+/**
+ * Replaces `input` `auto`, or no input, with what it means for a caller that [holdsScreen] or not,
+ * so [takesScreen] and the tool see the input that will be used.
+ */
+internal fun resolveInput(
+    tool: String,
+    request: CallToolRequest,
+    holdsScreen: Boolean,
+): CallToolRequest {
+    val kind = INPUT_KINDS[tool] ?: return request
+    val args = request.params.arguments ?: JsonObject(emptyMap())
+    val asked = input(args)
+    if (asked != "auto") return request
+    val resolved = BrowserInput.AUTO.resolved(kind, holdsScreen)
+    val wire = ApiJson.encodeToJsonElement(BrowserInput.serializer(), resolved)
+    val params = request.params.copy(arguments = JsonObject(args + ("input" to wire)))
+    return request.copy(params = params)
+}
+
 private fun input(args: JsonObject?): String =
-    (args?.get("input") as? JsonPrimitive)?.contentOrNull?.lowercase() ?: "touch"
+    (args?.get("input") as? JsonPrimitive)?.contentOrNull?.lowercase() ?: "auto"
 
 private fun conditionTypes(args: JsonObject?): List<String> =
     listOf("all", "any").flatMap { key ->

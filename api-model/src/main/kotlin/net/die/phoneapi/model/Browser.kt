@@ -26,9 +26,15 @@ public data class BrowserTarget(
 
 @Serializable public data class NavigateRequest(val url: String)
 
-/** How browser input is delivered. [TOUCH] is the default. */
+/** How browser input is delivered. [AUTO] is the default. */
 @Serializable
 public enum class BrowserInput {
+    /**
+     * [TOUCH] for a caller that holds the screen. Otherwise [CDP_MOUSE] for a tap and [CDP] for
+     * keys and text, so the call does not take a free screen, and [TOUCH] for a swipe or gesture,
+     * which needs it.
+     */
+    @SerialName("auto") AUTO,
     /** Bring the tab forward and inject a hardware event. */
     @SerialName("touch") TOUCH,
     /**
@@ -41,11 +47,28 @@ public enum class BrowserInput {
      * A mouse click over DevTools. Reaches a background tab, even with Chrome hidden and the screen
      * off, but the page sees a mouse rather than a finger. Taps only.
      */
-    @SerialName("cdp-mouse") CDP_MOUSE,
+    @SerialName("cdp-mouse") CDP_MOUSE;
+
+    /** What this input means for [kind] of input, for a caller that [holdsScreen] or not. */
+    public fun resolved(kind: BrowserInputKind, holdsScreen: Boolean): BrowserInput =
+        when {
+            this != AUTO -> this
+            holdsScreen || kind == BrowserInputKind.POINTER -> TOUCH
+            kind == BrowserInputKind.TAP -> CDP_MOUSE
+            else -> CDP
+        }
+}
+
+/** The kinds of browser input, which [BrowserInput.AUTO] resolves differently. */
+public enum class BrowserInputKind {
+    TAP,
+    /** Swipes and gestures, which only touch can deliver to a background tab. */
+    POINTER,
+    KEYS,
 }
 
 public const val BROWSER_INPUT_DOC: String =
-    "touch brings the tab to the front and uses the screen. cdp sends touch events over DevTools without bringing the tab forward, but only to the tab Chrome is showing, on screen. Keys and text with cdp reach a background tab. cdp-mouse taps with a mouse click, which reaches a background tab even with Chrome hidden and the screen off, but the page sees a mouse, not a finger. Defaults to touch."
+    "touch brings the tab to the front and uses the screen. cdp sends touch events over DevTools without bringing the tab forward, but only to the tab Chrome is showing, on screen. Keys and text with cdp reach a background tab. cdp-mouse taps with a mouse click, which reaches a background tab even with Chrome hidden and the screen off, but the page sees a mouse, not a finger. auto (default) is touch for a caller that holds the screen, and otherwise cdp-mouse for a tap and cdp for keys and text, so it does not take a free screen; a swipe or gesture uses touch."
 
 public const val BROWSER_WAKE_DOC: String =
     "Turn the screen on first when input is touch. cdp and cdp-mouse never wake it. Defaults to true."
@@ -63,7 +86,7 @@ public data class BrowserTapRequest(
     )
     val humanize: Boolean = true,
     @Doc(BROWSER_WAKE_DOC) val autoWake: Boolean = true,
-    @Doc(BROWSER_INPUT_DOC) val input: BrowserInput = BrowserInput.TOUCH,
+    @Doc(BROWSER_INPUT_DOC) val input: BrowserInput = BrowserInput.AUTO,
 )
 
 /**
@@ -90,7 +113,7 @@ public data class BrowserSwipeRequest(
     )
     val humanize: Boolean = true,
     @Doc(BROWSER_WAKE_DOC) val autoWake: Boolean = true,
-    @Doc(BROWSER_INPUT_DOC) val input: BrowserInput = BrowserInput.TOUCH,
+    @Doc(BROWSER_INPUT_DOC) val input: BrowserInput = BrowserInput.AUTO,
 )
 
 /**
@@ -105,7 +128,7 @@ public data class BrowserGestureRequest(
     )
     val humanize: Boolean = true,
     @Doc(BROWSER_WAKE_DOC) val autoWake: Boolean = true,
-    @Doc(BROWSER_INPUT_DOC) val input: BrowserInput = BrowserInput.TOUCH,
+    @Doc(BROWSER_INPUT_DOC) val input: BrowserInput = BrowserInput.AUTO,
 )
 
 /** A key aimed at a browser target. Names match [KeyRequest]. */
@@ -115,7 +138,7 @@ public data class BrowserKeyRequest(
     val longPress: Boolean = false,
     val metaState: Int = 0,
     @Doc(BROWSER_WAKE_DOC) val autoWake: Boolean = true,
-    @Doc(BROWSER_INPUT_DOC) val input: BrowserInput = BrowserInput.TOUCH,
+    @Doc(BROWSER_INPUT_DOC) val input: BrowserInput = BrowserInput.AUTO,
 )
 
 /**
@@ -134,7 +157,7 @@ public data class BrowserTextRequest(
     val minDelayMs: Long = 40,
     val maxDelayMs: Long = 140,
     @Doc(BROWSER_WAKE_DOC) val autoWake: Boolean = true,
-    @Doc(BROWSER_INPUT_DOC) val input: BrowserInput = BrowserInput.TOUCH,
+    @Doc(BROWSER_INPUT_DOC) val input: BrowserInput = BrowserInput.AUTO,
 )
 
 /** Evaluate [expression] in an isolated world so the page's JavaScript is untouched. */

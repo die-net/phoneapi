@@ -51,6 +51,7 @@ internal class PageInput(
         request: BrowserTapRequest,
     ): ActionResult =
         when (request.input) {
+            BrowserInput.AUTO,
             BrowserInput.TOUCH -> touchTap(cdp, id, wanted, pkg, request.humanize)
             BrowserInput.CDP -> cdpTap(cdp, id, wanted, request.humanize)
             BrowserInput.CDP_MOUSE -> mouseTap(cdp, id, wanted, request.humanize)
@@ -90,6 +91,7 @@ internal class PageInput(
                 sampleRateHz = refreshHz().takeIf { it > 0f } ?: DEFAULT_REFRESH_HZ,
             )
         return when (request.input) {
+            BrowserInput.AUTO,
             BrowserInput.TOUCH -> {
                 foreground(cdp)
                 val ends = swipeEnds(cdp, id, request)
@@ -139,6 +141,7 @@ internal class PageInput(
         request: BrowserGestureRequest,
     ): ActionResult =
         when (request.input) {
+            BrowserInput.AUTO,
             BrowserInput.TOUCH -> {
                 foreground(cdp)
                 val metrics = cdp.call("Page.getLayoutMetrics")
@@ -164,6 +167,7 @@ internal class PageInput(
     /** Resolves a CDP key before the socket opens. Device keys stay on `input=touch`. */
     fun prepareKey(request: BrowserKeyRequest): DomKey? =
         when (request.input) {
+            BrowserInput.AUTO,
             BrowserInput.TOUCH -> null
             BrowserInput.CDP -> domKey(request.key, request.metaState)
             BrowserInput.CDP_MOUSE -> throw mouseOnlyTaps("key")
@@ -171,6 +175,7 @@ internal class PageInput(
 
     suspend fun key(cdp: CdpSession, request: BrowserKeyRequest, pageKey: DomKey?): ActionResult =
         when (request.input) {
+            BrowserInput.AUTO,
             BrowserInput.TOUCH -> {
                 foreground(cdp)
                 pressKey(
@@ -207,9 +212,10 @@ internal class PageInput(
         request: BrowserTextRequest,
         focus: TapTarget?,
     ): ActionResult {
-        if (request.input == BrowserInput.TOUCH) foreground(cdp)
+        if (request.input in TOUCH_INPUTS) foreground(cdp)
         if (focus != null) focusField(cdp, id, focus, pkg, request.input)
         return when (request.input) {
+            BrowserInput.AUTO,
             BrowserInput.TOUCH ->
                 typeText(
                     TextRequest(
@@ -329,6 +335,7 @@ internal class PageInput(
         input: BrowserInput,
     ) {
         when (input) {
+            BrowserInput.AUTO,
             BrowserInput.TOUCH -> {
                 val boxes = quads(cdp, id, focus)
                 val rect =

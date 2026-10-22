@@ -342,7 +342,7 @@ private val MCP_TOOLS: List<McpTool> =
         McpTool(
             name = "browser_tap",
             description =
-                "Tap a snapshot ref or a CSS selector in a browser target. Default input touch brings the tab to the front and uses the screen. input cdp sends touch events over DevTools without bringing the tab forward, but Chrome only takes them on the tab it is showing, with Chrome on screen. input cdp-mouse clicks with a mouse, which works with Chrome hidden and the screen off, but the page sees a mouse rather than a finger. All three are trusted input, unlike a click from browser_eval.",
+                "Tap a snapshot ref or a CSS selector in a browser target. The default input auto is touch while you hold the screen, and cdp-mouse otherwise, so tapping a background tab does not take a free screen. input touch brings the tab to the front and uses the screen. input cdp sends touch events over DevTools without bringing the tab forward, but Chrome only takes them on the tab it is showing, with Chrome on screen. input cdp-mouse clicks with a mouse, which works with Chrome hidden and the screen off, but the page sees a mouse rather than a finger. All three are trusted input, unlike a click from browser_eval.",
             scope = Scope.BROWSER,
             available = Capabilities::browserCdp,
             arguments = serializer<BrowserTapArgs>(),
@@ -352,7 +352,7 @@ private val MCP_TOOLS: List<McpTool> =
         McpTool(
             name = "browser_swipe",
             description =
-                "Swipe a browser target. from and to are CSS viewport pixels, or pass a direction. Default input touch brings the tab to the front and uses the screen. input cdp swipes over DevTools without bringing the tab forward, but only on the tab Chrome is showing, with Chrome on screen. With Chrome hidden there is no trusted way to scroll, since Chrome holds wheel and scroll input too. Scrolling from browser_eval works but is untrusted.",
+                "Swipe a browser target. from and to are CSS viewport pixels, or pass a direction. The default input auto is touch, which brings the tab to the front and uses the screen. input cdp swipes over DevTools without bringing the tab forward, but only on the tab Chrome is showing, with Chrome on screen. With Chrome hidden there is no trusted way to scroll, since Chrome holds wheel and scroll input too. Scrolling from browser_eval works but is untrusted.",
             scope = Scope.BROWSER,
             available = Capabilities::browserCdp,
             arguments = serializer<BrowserSwipeArgs>(),
@@ -362,7 +362,7 @@ private val MCP_TOOLS: List<McpTool> =
         McpTool(
             name = "browser_gesture",
             description =
-                "Play pointer paths on a browser target, in CSS viewport pixels. Default input touch brings the tab to the front and uses the screen. input cdp plays them over DevTools without bringing the tab forward, but only on the tab Chrome is showing, with Chrome on screen.",
+                "Play pointer paths on a browser target, in CSS viewport pixels. The default input auto is touch, which brings the tab to the front and uses the screen. input cdp plays them over DevTools without bringing the tab forward, but only on the tab Chrome is showing, with Chrome on screen.",
             scope = Scope.BROWSER,
             available = Capabilities::browserCdp,
             arguments = serializer<BrowserGestureArgs>(),
@@ -372,7 +372,7 @@ private val MCP_TOOLS: List<McpTool> =
         McpTool(
             name = "browser_key",
             description =
-                "Press a key on a browser target. Default input touch brings the tab to the front and injects a hardware key. input cdp sends it to the target in the background. Device keys such as HOME need input touch.",
+                "Press a key on a browser target. The default input auto is touch while you hold the screen, and cdp otherwise. input touch brings the tab to the front and injects a hardware key. input cdp sends it to the target in the background. Device keys such as HOME need input touch.",
             scope = Scope.BROWSER,
             available = Capabilities::browserCdp,
             arguments = serializer<BrowserKeyArgs>(),
@@ -382,7 +382,7 @@ private val MCP_TOOLS: List<McpTool> =
         McpTool(
             name = "browser_type",
             description =
-                "Type text into a field in a browser target. ref or selector focuses the field first. Default input touch brings the tab to the front and uses the hardware text modes. input cdp inserts the text in the background.",
+                "Type text into a field in a browser target. ref or selector focuses the field first. The default input auto is touch while you hold the screen, and cdp otherwise. input touch brings the tab to the front and uses the hardware text modes. input cdp inserts the text in the background.",
             scope = Scope.BROWSER,
             available = Capabilities::browserCdp,
             arguments = serializer<BrowserTextArgs>(),

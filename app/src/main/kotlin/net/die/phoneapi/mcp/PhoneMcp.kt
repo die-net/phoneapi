@@ -145,7 +145,8 @@ private fun phoneServer(services: ServerServices, scopes: Set<Scope>, holder: Ho
                 description = tool.description,
                 inputSchema = tool.schema,
                 toolAnnotations = tool.annotations,
-            ) { request ->
+            ) { asked ->
+                val request = resolveInput(tool.name, asked, services.lease.holds(holder))
                 val screen = takesScreen(tool.name, request.params.arguments)
                 leased(services.lease, holder, screen) { tool.call(services, scopes, request) }
             }
