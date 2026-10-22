@@ -80,8 +80,8 @@ public data class DeviceInfo(
     val uiAutomationConnected: Boolean,
     val capabilities: Capabilities,
     /**
-     * Whether Android's cached-app freezer is on, as `use_freezer` in `dumpsys activity settings`
-     * said when the helper last started. Null when that is not known, as before Android 11.
+     * Whether Android's cached-app freezer is on, as `use_freezer` in `dumpsys activity` said when
+     * the helper last started. Null when that is not known, as before Android 11.
      */
     val appFreezer: Boolean? = null,
     /**

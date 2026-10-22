@@ -1,6 +1,6 @@
 # Sharing the phone
 
-Phase 1, below, is built: MCP sessions, the screen lease with its queue and cleanup, the viewer's Take over, REST calls as one-call holders, the security limits, and browser input defaulting to `auto`. Phase 2, tab ownership and keeping background tabs working, is still a design. [api.md](api.md) describes what exists.
+Phase 1, below, is built: MCP sessions, the screen lease with its queue and cleanup, the viewer's Take over, REST calls as one-call holders, the security limits, and browser input defaulting to `auto`. Phase 2 is built too: tab ownership with the caps and startup sweep, the placeholder tab that keeps other sessions' tabs off the screen, recovering unloaded tabs, `browser_frozen`, Chrome's Custom Tabs binding, and `took_screen`. It was checked on the Android 16 emulator, not yet on a phone. Where the build differs from the design below, the section says so. [api.md](api.md) describes what exists.
 
 Several clients can drive one phone at once: two agent conversations, an agent and a person in `/viewer`, or a script on REST. Without rules, one taps while the other types, one navigates a tab the other is reading, or one sees what the other left on screen. This design lets them share the phone without that, and lets background Chrome tabs be used freely while someone else has the screen.
 
@@ -146,10 +146,12 @@ Three things stop a hidden tab, measured on the Android 16 emulator on 2026-10-2
 
 So PhoneAPI:
 
-- Probes a tab with a cheap evaluation and a short timeout, about 2 seconds, before a call that needs its script, rather than waiting out the 15-second DevTools timeout.
-- When the tab does not answer but the browser does, it was unloaded. PhoneAPI reloads it in the background and says so in the result, since anything typed or scrolled is gone, rather than acting on the fresh page as if nothing happened. Input calls fail instead with `tab_reloaded`, so a session does not type into a page it has not looked at again.
+- Asks Chrome whether the tab has a renderer before a call that needs it, rather than waiting out the 15-second DevTools timeout.
+- When it has none, it was unloaded. PhoneAPI reloads it in the background and says so in the result, since anything typed or scrolled is gone, rather than acting on the fresh page as if nothing happened. Input calls fail instead with `tab_reloaded`, so a session does not type into a page it has not looked at again.
 - When the browser does not answer either, Android has frozen Chrome, and the call fails with `browser_frozen`. PhoneAPI keeps that from happening while its helper runs, as in [Android's app freezer](#androids-app-freezer).
-- Says in reads that a tab hidden for more than a few minutes is frozen, so content it would load since then is missing, next to `shown` and `pending`.
+- Says in reads that a tab hidden for more than a few minutes is frozen, so content it would load since then is missing, next to `shown` and `pending`. Not built: PhoneAPI does not track how long a tab has been hidden.
+
+As built, the check is `Inspector.enable` on the page's own connection. Chrome answers it from the browser process and, for a tab with no renderer, sends `Inspector.targetCrashed` first. A script probe with a timeout cannot tell an unloaded tab from a page whose main thread is busy: on the emulator, a page in an 8-second loop answered neither script nor, on a fresh connection, `Runtime.getIsolateId`, and the first build reloaded it. With `Inspector.enable`, that read waited for the loop and kept the page. When `Inspector.enable` gets no answer in 2 seconds, PhoneAPI checks Chrome's browser endpoint on a socket that gives up reading after 2 seconds. A read of an unloaded tab returned the reloaded page in about a second on the emulator, with Chrome's renderers killed to stand in for memory pressure. An unloaded tab answered neither script nor `Page.getFrameTree` there, so "answers page-level commands" above holds for `Page.reload` and `Page.navigate`, not every page command. When Android has frozen Chrome, the page connection's handshake waits out the 15-second read timeout before the browser check, so `browser_frozen` takes about 17 seconds rather than four 15-second retries. Checked with `am freeze --sticky com.android.chrome`.
 
 ### Android's app freezer
 
@@ -163,7 +165,7 @@ Checked on the Android 16 emulator, with the freezer at its default, on 2026-10-
 
 This needs no system setting and touches only Chrome. Turning the freezer off for the whole phone, with `settings put global cached_apps_freezer disabled` or the "Suspend execution for cached apps" developer option, stays a manual fallback for a device where the binding falls short. PhoneAPI does not offer it as a setting unless that turns out to be needed. `browser_frozen` says what happened, and names the developer option.
 
-The freezer's effective state is `use_freezer` under "Freezer settings" in `dumpsys activity`, which the helper can read. `GET /v1/device` reports it, and whether PhoneAPI holds Chrome's binding.
+The freezer's effective state is `use_freezer` under "Freezer settings" in `dumpsys activity`, which the helper can read. `dumpsys activity settings` leaves that section out, and the whole dump is hundreds of kilobytes, so the helper reads it through `grep -m 1`. `GET /v1/device` reports it as `appFreezer`, read when the helper starts, and whether PhoneAPI holds Chrome's binding as `chromeKept`. On the emulator, Chrome's Custom Tabs service listed PhoneAPI as its client from a foreground-service process.
 
 ### Content that loads when drawn
 
@@ -187,12 +189,14 @@ If a call from a session without the screen still brings an app or Chrome forwar
 - The session's call fails with `took_screen`, naming what came forward, even if the action itself worked. PhoneAPI also sends a `screen.taken` event on `/v1/events`, logs a warning, and counts it per session in `GET /v1/sessions`.
 - If nobody held the screen, the session now holds it. It caused what is showing, so it is the one that can look and clean up, such as stopping navigation that Maps started. Cleanup runs when it releases.
 - If another holder had the screen, PhoneAPI brings the holder's app back to the front, and the holder's next result that needs the screen says something came forward briefly. Whatever the launched app did is not undone.
-- If two sessions without the screen had calls in progress, both fail with `took_screen` and neither gets the screen. Cleanup runs instead, or the holder's app comes back.
+- If two sessions without the screen had calls in progress, both fail with `took_screen` and neither gets the screen. As built, the app that was in front comes back, rather than cleanup running.
 - Chrome switching to another holder's tab, as a popup makes it do, does not change the foreground app, so it is handled as in [Background tabs stay in the background](#background-tabs-stay-in-the-background).
 
 On the emulator, tabs that were not on screen launched no app in 18 tries: an `intent:` link, an app link, and a custom scheme, each by mouse click, by script, and by script with a user gesture, from a tab behind another and with Chrome in the background. App links opened inside the tab instead. From the tab on screen, the same clicks launched YouTube.
 
 Android and Chrome should block nearly all of these, so `took_screen` is a tripwire for workflows to fix, not something agents handle in normal use.
+
+As built, PhoneAPI checks the resumed activity in `dumpsys activity activities`, about 8 ms on the emulator, before and after `browser_open`, `browser_navigate`, `browser_eval`, and browser input from a session without the screen, the calls through which a page could launch something. Reads cannot. It checks again 2 seconds after the call. A change found then cannot fail the call, so it reaches the session as a note on its next screen call, along with the event, log line, and count. Nothing is checked while a person in the viewer holds the screen, since the viewer's input makes no screen calls.
 
 ## Progress
 
@@ -237,10 +241,10 @@ On MCP these are tool errors, like other `ApiException`s.
 
 ## Phases
 
-1. Stateful `/mcp` with the token check, idle expiry, the session caps, hashed ids in the log, ending sessions on revocation, the admin session routes, and retiring `phoneapi mcp`. The `Origin` check on WebSocket upgrades. Holders, the screen lease with its queue, and cleanup. REST calls as one-call holders. The viewer's socket as a holder, with **Take over**. Browser input defaulting to `auto`.
-2. Tab ownership, including opener inheritance and the startup sweep. Recovering unloaded tabs, `browser_frozen`, and holding Chrome's Custom Tabs binding while the helper runs. The placeholder tab and keeping Chrome in the background. `took_screen`. The tab caps.
+1. Stateful `/mcp` with the token check, idle expiry, the session caps, hashed ids in the log, ending sessions on revocation, the admin session routes, and retiring `phoneapi mcp`. The `Origin` check on WebSocket upgrades. Holders, the screen lease with its queue, and cleanup. REST calls as one-call holders. The viewer's socket as a holder, with **Take over**. Browser input defaulting to `auto`. Built.
+2. Tab ownership, including opener inheritance and the startup sweep. Recovering unloaded tabs, `browser_frozen`, and holding Chrome's Custom Tabs binding while the helper runs. The placeholder tab and keeping Chrome in the background. `took_screen`. The tab caps. Built.
 
-Legwork's phases 3 and 4 need phase 1. Phase 2 can follow. `shown`, `pending`, and `show` on reads and snapshots needed neither phase and are already built.
+Legwork's phases 3 and 4 need phase 1. Phase 2 can follow. `shown`, `pending`, and `show` on reads and snapshots needed neither phase.
 
 ## To check on the phone
 
@@ -259,6 +263,8 @@ Still to check on the phone:
 - How many hidden tabs Chrome keeps loaded on the Moto G Power before it unloads them, to check the cap of 8.
 - Whether a release build logs anything from the SDK, such as session ids.
 - That binding Chrome's Custom Tabs service works on a real Android 12 or later phone, and does not change anything visible on Kira's Android 11 phone.
+- That Chrome 155 still sends `Inspector.targetCrashed` on `Inspector.enable` for a tab it unloaded, and that the placeholder tab and switching back behave on the phone as on the emulator.
+- Whether `dumpsys activity` on Android 11 prints "Freezer settings" for `appFreezer`, and how long `dumpsys activity activities` takes there, which `took_screen` runs around each call that could launch an app.
 - That `show` brings a background tab on screen, including when Chrome is behind another app, and that `shown` and `pending` match what is on screen.
 
 ## Open questions

@@ -76,12 +76,16 @@ class ChromeKeeper(private val context: Context) {
     }
 }
 
-/** `dumpsys activity settings`, for whether Android's cached-app freezer is on. */
-internal val FREEZER_ARGS = listOf("dumpsys", "activity", "settings")
+/**
+ * Whether Android's cached-app freezer is on, from `dumpsys activity`. Its "Freezer settings" are
+ * in the settings part of the whole dump, which `dumpsys activity settings` leaves out. The whole
+ * dump is hundreds of kilobytes, so grep stops it at the line.
+ */
+internal val FREEZER_ARGS = listOf("sh", "-c", "dumpsys activity | grep -m 1 use_freezer=")
 
 /**
- * The freezer's effective state from `dumpsys activity settings`: `use_freezer=true` or `false`
- * under "Freezer settings". Null when the section is missing, as before Android 11.
+ * The freezer's effective state from `dumpsys activity`: `use_freezer=true` or `false` under
+ * "Freezer settings". Null when the section is missing, as before Android 11.
  */
 internal fun freezerOn(dumpsys: String): Boolean? =
     USE_FREEZER.find(dumpsys)?.groupValues?.get(1)?.toBooleanStrictOrNull()

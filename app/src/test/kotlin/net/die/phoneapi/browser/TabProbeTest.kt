@@ -35,27 +35,35 @@ class TabProbeTest {
         )
 
     @Test
-    fun `answering tab is left alone`() {
-        val page = StallingSocket(harness.switched() + value(1, "0"))
+    fun `live tab is left alone`() {
+        val page = StallingSocket(harness.switched() + empty(1))
         val reloaded = onPage(page) { probe().revive(it, CHROME_SOCKET, reading = true) }
         assertFalse(reloaded)
-        assertEquals(listOf("Runtime.evaluate"), page.methods())
+        assertEquals(listOf("Inspector.enable"), page.methods())
     }
 
     @Test
     fun `unloaded tab reloads on read`() {
-        // No answer to the probe, then the reload and the fresh page's readyState. Replies are
-        // queued ahead, so commands after the first may not be written yet when this returns.
-        val page = StallingSocket(harness.switched() + empty(2) + value(3, "\"complete\""))
+        // Chrome reports the crash before answering, then the reload and the fresh readyState.
+        // Replies are queued ahead, so later commands may not be written yet.
+        val page = StallingSocket(harness.switched() + crashed() + value(3, "\"complete\""))
         val reloaded = onPage(page) { probe().revive(it, CHROME_SOCKET, reading = true) }
         assertTrue(reloaded)
     }
 
     @Test
     fun `unloaded tab refuses input`() {
-        val page = StallingSocket(harness.switched() + empty(2))
+        val page = StallingSocket(harness.switched() + crashed())
         val error = onPage(page) { failure { probe().revive(it, CHROME_SOCKET, reading = false) } }
         assertEquals("tab_reloaded", error)
+    }
+
+    @Test
+    fun `silent page with live browser`() {
+        // The page does not answer, but Chrome does: not a crash, so the call goes ahead.
+        val page = StallingSocket(harness.switched())
+        val reloaded = onPage(page) { probe().revive(it, CHROME_SOCKET, reading = true) }
+        assertFalse(reloaded)
     }
 
     @Test
@@ -97,6 +105,12 @@ class TabProbeTest {
         }
 
     private fun empty(id: Int) = harness.serverTextFrame("""{"id":$id,"result":{}}""")
+
+    /** `Inspector.targetCrashed`, then the replies to `Inspector.enable` and `Page.reload`. */
+    private fun crashed() =
+        harness.serverTextFrame("""{"method":"Inspector.targetCrashed","params":{}}""") +
+            empty(1) +
+            empty(2)
 
     private fun value(id: Int, json: String) =
         harness.serverTextFrame("""{"id":$id,"result":{"result":{"value":$json}}}""")
