@@ -20,6 +20,8 @@ class DeviceInfoProvider(
     private val isUiAutomationConnected: () -> Boolean,
     private val helperStatus: () -> HelperStatus,
     private val helperRecoveredAtMs: () -> Long?,
+    private val appFreezer: () -> Boolean? = { null },
+    private val chromeKept: () -> Boolean = { false },
 ) {
     private val cachedVersion: String by lazy { readVersion() }
 
@@ -35,6 +37,8 @@ class DeviceInfoProvider(
             helper = helperStatus(),
             helperRecoveredAtMs = helperRecoveredAtMs(),
             uiAutomationConnected = isUiAutomationConnected(),
+            appFreezer = appFreezer(),
+            chromeKept = chromeKept(),
             capabilities = capabilities(),
         )
     }
