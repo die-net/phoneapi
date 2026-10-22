@@ -19,6 +19,7 @@ import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.model.BrowserFindRequest
 import net.die.phoneapi.model.BrowserGestureRequest
 import net.die.phoneapi.model.BrowserInput
+import net.die.phoneapi.model.BrowserInputKind
 import net.die.phoneapi.model.BrowserKeyRequest
 import net.die.phoneapi.model.BrowserReadRequest
 import net.die.phoneapi.model.BrowserSnapshotOptions
@@ -88,10 +89,18 @@ fun Route.browserRoutes(services: ServerServices) {
     }
 }
 
+/**
+ * A REST call holds the screen only while it runs, so `auto` never finds it already holding: taps,
+ * keys, and text go over DevTools, and swipes and gestures by touch.
+ */
+private fun rest(input: BrowserInput, kind: BrowserInputKind): BrowserInput =
+    input.resolved(kind, holdsScreen = false)
+
 /** Pointer, key, and text input. Touch, and cdp pointer input, take the screen. */
 private fun Route.browserInputRoutes(services: ServerServices) {
     post("/v1/browser/targets/{id}/tap") {
-        val request = call.receive<BrowserTapRequest>()
+        val asked = call.receive<BrowserTapRequest>()
+        val request = asked.copy(input = rest(asked.input, BrowserInputKind.TAP))
         call.respond(
             withScreen(call, services, request.input != BrowserInput.CDP_MOUSE) {
                 services.browser.tap(call.targetId(), request)
@@ -99,7 +108,8 @@ private fun Route.browserInputRoutes(services: ServerServices) {
         )
     }
     post("/v1/browser/targets/{id}/swipe") {
-        val request = call.receive<BrowserSwipeRequest>()
+        val asked = call.receive<BrowserSwipeRequest>()
+        val request = asked.copy(input = rest(asked.input, BrowserInputKind.POINTER))
         call.respond(
             withScreen(call, services, request.input != BrowserInput.CDP_MOUSE) {
                 services.browser.swipe(call.targetId(), request)
@@ -107,7 +117,8 @@ private fun Route.browserInputRoutes(services: ServerServices) {
         )
     }
     post("/v1/browser/targets/{id}/gesture") {
-        val request = call.receive<BrowserGestureRequest>()
+        val asked = call.receive<BrowserGestureRequest>()
+        val request = asked.copy(input = rest(asked.input, BrowserInputKind.POINTER))
         call.respond(
             withScreen(call, services, request.input != BrowserInput.CDP_MOUSE) {
                 services.browser.gesture(call.targetId(), request)
@@ -115,7 +126,8 @@ private fun Route.browserInputRoutes(services: ServerServices) {
         )
     }
     post("/v1/browser/targets/{id}/key") {
-        val request = call.receive<BrowserKeyRequest>()
+        val asked = call.receive<BrowserKeyRequest>()
+        val request = asked.copy(input = rest(asked.input, BrowserInputKind.KEYS))
         call.respond(
             withScreen(call, services, request.input == BrowserInput.TOUCH) {
                 services.browser.key(call.targetId(), request)
@@ -123,7 +135,8 @@ private fun Route.browserInputRoutes(services: ServerServices) {
         )
     }
     post("/v1/browser/targets/{id}/text") {
-        val request = call.receive<BrowserTextRequest>()
+        val asked = call.receive<BrowserTextRequest>()
+        val request = asked.copy(input = rest(asked.input, BrowserInputKind.KEYS))
         call.respond(
             withScreen(call, services, request.input == BrowserInput.TOUCH) {
                 services.browser.text(call.targetId(), request)

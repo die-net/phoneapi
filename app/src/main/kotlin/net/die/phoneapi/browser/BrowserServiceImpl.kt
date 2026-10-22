@@ -293,7 +293,8 @@ internal class BrowserServiceImpl(
         block: suspend (CdpSession, String?) -> ActionResult,
     ): ActionResult {
         // A cdp event reaches the tab with the screen off, so only touch input wakes it.
-        val woke = prepare(autoWake && input == BrowserInput.TOUCH)
+        // Callers resolve AUTO; one that reaches here is touch.
+        val woke = prepare(autoWake && input in TOUCH_INPUTS)
         try {
             before()
             val (socket, chromeId) = parseBrowserTargetId(id)
@@ -781,6 +782,9 @@ internal class BrowserServiceImpl(
 }
 
 internal const val AX_TREE_CACHE_CAP = 16
+
+/** Input that brings the tab forward and injects hardware events. */
+internal val TOUCH_INPUTS = setOf(BrowserInput.TOUCH, BrowserInput.AUTO)
 
 private class AxTreeCache(cap: Int) {
     private val limit = cap.coerceAtLeast(1)

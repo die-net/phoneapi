@@ -176,7 +176,7 @@ Target ids look like `chrome_devtools_remote~<pageId>`. Chrome must publish DevT
 | `GET` | `/v1/browser/targets/{id}/snapshot` | browser | Compact AX outline → `BrowserSnapshot`. `maxNodes` (default 400, up to 5000) and `maxChars` cap it; cuts are reported as for the UI snapshot. `show` brings the tab on screen first. `shown` and `pending` as for `read` |
 | `POST` | `/v1/browser/targets/{id}/read` | browser | `BrowserReadRequest` → `BrowserReadResult`: the page's text as markdown or plain text, a slice at a time, or its outline. `shown` says whether Chrome was drawing the tab, and `pending` lists signs of content still to load. `show` brings the tab on screen first and waits for its text to stop growing |
 | `POST` | `/v1/browser/targets/{id}/find` | browser | `BrowserFindRequest` → `BrowserFindResult`: text matches or links, at the offsets `read` uses |
-| `POST` | `/v1/browser/targets/{id}/tap` | browser | Ref or CSS. `input` `touch` (default), `cdp`, or `cdp-mouse` (`BrowserTapRequest`) |
+| `POST` | `/v1/browser/targets/{id}/tap` | browser | Ref or CSS. `input` `auto` (default), `touch`, `cdp`, or `cdp-mouse` (`BrowserTapRequest`) |
 | `POST` | `/v1/browser/targets/{id}/swipe` | browser | CSS pixels or a direction. `input` `touch` or `cdp` (`BrowserSwipeRequest`) |
 | `POST` | `/v1/browser/targets/{id}/gesture` | browser | Pointer paths in CSS pixels. `input` `touch` or `cdp` (`BrowserGestureRequest`) |
 | `POST` | `/v1/browser/targets/{id}/key` | browser | Key name. `input` `touch` or `cdp` (`BrowserKeyRequest`) |
@@ -243,7 +243,7 @@ For stdio hosts (Cursor, etc.), run `phoneapi mcp` (with the helper up). It inst
 | `device_wake` / `device_unlock` / `device_lock` | control | Power / keyguard |
 | `device_orientation` | control | Auto-rotate, or lock the screen to the current or a named rotation |
 | `browser_targets` / `browser_open` / `browser_navigate` / `browser_close` | browser | Tab list, navigation, and closing a tab |
-| `browser_snapshot` / `browser_tap` / `browser_swipe` / `browser_gesture` | browser | AX outline and pointer input. `input` `touch` (default), `cdp`, or `cdp-mouse` (tap only) |
+| `browser_snapshot` / `browser_tap` / `browser_swipe` / `browser_gesture` | browser | AX outline and pointer input. `input` `auto` (default), `touch`, `cdp`, or `cdp-mouse` (tap only) |
 | `browser_key` / `browser_type` | browser | Key presses and typing. `cdp` stays on a background tab; device keys such as HOME need `touch` |
 | `browser_read` | browser | Page text as markdown, sliced by `offset` and `maxChars` (default 8000), or `outline` for headings with offsets. `scope` `article` (default, via Readability) or `page`, or a CSS `selector`. `url` opens a new tab and reads it in one call. A tab that is not on screen is not drawn, so content that loads when drawn may be missing: the header says `hidden` and lists `pending` signs, and `show` brings the tab forward first |
 | `browser_find` | browser | `kind` `text` (matches with context and nearest heading) or `links` (text, URL, same-origin), at offsets `browser_read` takes |
@@ -271,7 +271,7 @@ When node ids are not stable, tool descriptions say so. Raw CDP, streams, and to
 | Swipe `direction` | `up`, `down`, `left`, `right` |
 | Screen `orientation` | `auto`, `lock`, `0`, `90`, `180`, `270`. `0` is the device's natural orientation. `display.autoRotate` reports the system setting; `display.rotation` is the current quarter-turn (`0`–`3`). An app can still force its own orientation. |
 | Text `mode` | `auto`, `keyboard`, `keyevent`, `setText` |
-| Browser `input` | `touch` (default; bring the tab forward and inject a hardware event), `cdp` (dispatch over DevTools; touch needs the tab showing in Chrome on screen, keys and text reach a background tab), `cdp-mouse` (a mouse click that reaches a background tab, taps only). Swipe and gesture coordinates are CSS viewport pixels. |
+| Browser `input` | `auto` (default; `touch` for an MCP session that holds the screen, and otherwise `cdp-mouse` for a tap and `cdp` for keys and text, so it does not take a free screen; swipes and gestures use `touch`; a REST call never holds the screen beforehand, so it gets the DevTools modes), `touch` (bring the tab forward and inject a hardware event), `cdp` (dispatch over DevTools; touch needs the tab showing in Chrome on screen, keys and text reach a background tab), `cdp-mouse` (a mouse click that reaches a background tab, taps only). Swipe and gesture coordinates are CSS viewport pixels. |
 | Node `action` | `click`, `longClick`, `focus`, `clearFocus`, `select`, `setText`, `scrollForward`, `scrollBackward`, `expand`, `collapse`, `dismiss`, `showOnScreen`, `imeEnter`, plus other platform / app-listed names. `imeEnter` needs Android 11. |
 
 Full request and response schemas live in OpenAPI and under `api-model` (`DeviceInfo`, `UiSnapshot`, `TapRequest`, `WaitRequest`, `BrowserTarget`, `ApiError`, …).

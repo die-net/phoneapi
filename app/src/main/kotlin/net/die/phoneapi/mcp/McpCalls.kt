@@ -529,7 +529,7 @@ internal data class BrowserTapArgs(
     val selector: String? = null,
     val humanize: Boolean = true,
     @Doc(BROWSER_WAKE_DOC) val autoWake: Boolean = true,
-    @Doc(BROWSER_INPUT_DOC) val input: BrowserInput = BrowserInput.TOUCH,
+    @Doc(BROWSER_INPUT_DOC) val input: BrowserInput = BrowserInput.AUTO,
 )
 
 @Serializable
@@ -545,7 +545,7 @@ internal data class BrowserSwipeArgs(
     val fling: Boolean = true,
     val humanize: Boolean = true,
     @Doc(BROWSER_WAKE_DOC) val autoWake: Boolean = true,
-    @Doc(BROWSER_INPUT_DOC) val input: BrowserInput = BrowserInput.TOUCH,
+    @Doc(BROWSER_INPUT_DOC) val input: BrowserInput = BrowserInput.AUTO,
 )
 
 @Serializable
@@ -555,7 +555,7 @@ internal data class BrowserGestureArgs(
     @Doc("Jitter the path and vary the finger contact. Defaults to true.")
     val humanize: Boolean = true,
     @Doc(BROWSER_WAKE_DOC) val autoWake: Boolean = true,
-    @Doc(BROWSER_INPUT_DOC) val input: BrowserInput = BrowserInput.TOUCH,
+    @Doc(BROWSER_INPUT_DOC) val input: BrowserInput = BrowserInput.AUTO,
 )
 
 @Serializable
@@ -565,7 +565,7 @@ internal data class BrowserKeyArgs(
     val longPress: Boolean = false,
     val metaState: Int = 0,
     @Doc(BROWSER_WAKE_DOC) val autoWake: Boolean = true,
-    @Doc(BROWSER_INPUT_DOC) val input: BrowserInput = BrowserInput.TOUCH,
+    @Doc(BROWSER_INPUT_DOC) val input: BrowserInput = BrowserInput.AUTO,
 )
 
 @Serializable
@@ -580,7 +580,7 @@ internal data class BrowserTextArgs(
     val minDelayMs: Long = 40,
     val maxDelayMs: Long = 140,
     @Doc(BROWSER_WAKE_DOC) val autoWake: Boolean = true,
-    @Doc(BROWSER_INPUT_DOC) val input: BrowserInput = BrowserInput.TOUCH,
+    @Doc(BROWSER_INPUT_DOC) val input: BrowserInput = BrowserInput.AUTO,
 )
 
 @Serializable

@@ -1,8 +1,11 @@
 package net.die.phoneapi.mcp
 
+import io.modelcontextprotocol.kotlin.sdk.types.CallToolRequest
+import io.modelcontextprotocol.kotlin.sdk.types.CallToolRequestParams
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -35,6 +38,30 @@ class McpScreenTest {
         )
         assertFalse(takesScreen("device_info", null))
     }
+
+    @Test
+    fun `auto input follows the holder`() {
+        assertEquals("cdp-mouse", resolved("browser_tap", "{}", holds = false))
+        assertEquals("touch", resolved("browser_tap", """{"input":"auto"}""", holds = true))
+        assertEquals("cdp", resolved("browser_type", "{}", holds = false))
+        assertEquals("touch", resolved("browser_swipe", "{}", holds = false))
+        assertEquals("cdp", resolved("browser_tap", """{"input":"cdp"}""", holds = true))
+        val untouched = request("browser_read", "{}")
+        assertEquals(untouched, resolveInput("browser_read", untouched, holdsScreen = false))
+        val rest = resolveInput("browser_tap", request("browser_tap", "{}"), holdsScreen = false)
+        assertFalse(takesScreen("browser_tap", rest.params.arguments))
+    }
+
+    private fun resolved(tool: String, json: String, holds: Boolean): String? =
+        resolveInput(tool, request(tool, json), holds)
+            .params
+            .arguments
+            ?.get("input")
+            ?.jsonPrimitive
+            ?.content
+
+    private fun request(tool: String, json: String) =
+        CallToolRequest(CallToolRequestParams(name = tool, arguments = args(json)))
 
     private fun args(json: String): JsonObject = Json.parseToJsonElement(json).jsonObject
 
