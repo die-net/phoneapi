@@ -202,12 +202,14 @@ Auth: Bearer header, the `phoneapi` cookie, or `access_token` on the upgrade URL
 | Path | Scope | Summary |
 | --- | --- | --- |
 | `/v1/events` | observe | JSON event frames (see Conventions) |
-| `/v1/input/pointer` | control | Live pointer contacts (`PointerFrame` JSON text frames) |
+| `/v1/input/pointer` | control | The viewer's input: live pointer contacts (`PointerFrame` JSON text frames), keys, text, orientation, and taking the screen over. The socket is a holder of the screen lease |
 | `/v1/browser/targets/{id}/cdp` | browser | Raw CDP |
 | `/v1/stream/video` | stream | H.264; query `maxSize`, `fps`, `bitRate` |
 | `/v1/stream/audio` | stream | Device audio (submix capability) |
 
 `/v1/input/pointer` frames are `{"op":"down"|"move"|"up","id":0,"x":1,"y":2,"tMs":0}` or `{"op":"cancel"}`. `id` is the contact, 0 through 9. `tMs` is milliseconds since that gesture's first `down`, shared by every contact. `x` and `y` are screen pixels. The first `down` is `ACTION_DOWN`; another finger is `ACTION_POINTER_DOWN`. A `move` carries the latest point of every finger still down. The last `up` is `ACTION_UP`. `cancel`, a bad frame, or the socket closing while a contact is down injects `ACTION_CANCEL` and releases the touch. An 11th `down`, or a `move`/`up` for an id that is not down, is ignored. Closing with nothing down injects nothing.
+
+The socket also takes `{"op":"key","key":"HOME"}` (a `KeyRequest`), `{"op":"text","text":"hi"}` (a `TextRequest`), `{"op":"orientation","orientation":"90"}` (an `OrientationRequest`), and `{"op":"take"}`. It holds the screen lease for the person using it: the first `down`, key, text, or orientation takes the screen if no one has it. While someone else has it, input is dropped, a whole gesture at a time. `take` takes the screen at once, even from an MCP session, which gets it back without cleanup when the socket lets go. The socket lets the screen go after 30 s without input, and when it closes. The server sends `{"op":"lease","holder":"none"|"you"|"agent"|"person"|"script","heldMs":12000}` when the holder changes, with `"takenFrom":"agent"` after a take over, and `{"op":"error","message":"..."}` when a key, text, or orientation fails.
 
 `GET /viewer?access_token=` (stream) sets the `phoneapi` cookie and redirects to `/viewer`. The page then uses that cookie. It closes the video socket while the page is hidden and opens it again when the page is visible. While visible, it reopens the video socket after a close, and after 5 s with no picture, backing off to one attempt every 10 s. The video socket sends at least one frame a second, even from a still screen, and closes with `The shell helper stopped` if the helper dies. It opens the audio socket only while the browser will play sound. One button cycles `POST /v1/device/orientation` through `auto`, `0`, `90`, `180`, and `270`.
 

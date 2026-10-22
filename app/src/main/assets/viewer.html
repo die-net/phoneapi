@@ -14,6 +14,9 @@
     #keys button:active { background: #333; }
     #keys svg { width: 1.25rem; height: 1.25rem; fill: currentColor; }
     p { margin: 0.4rem 0.5rem 0.6rem; max-width: 40rem; text-align: center; }
+    [hidden] { display: none !important; }
+    #lease { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 0.5rem; margin: 0.4rem 0.5rem 0; max-width: 40rem; color: #f0c674; text-align: center; }
+    #lease button { padding: 0.3rem 0.8rem; background: #3a2f12; color: #f0c674; border: 1px solid #806a2a; border-radius: 4px; font: inherit; }
   </style>
 </head>
 <body>
@@ -31,6 +34,7 @@
   <button type="button" data-key="QUICK_SETTINGS" title="Quick settings" aria-label="Quick settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17v2h6v-2zm0-12v2h10V5zm10 16v-2h8v-2h-8v-2h-2v6zM7 9v2H3v2h4v2h2V9zm14 4v-2H11v2zm-6-4h2V7h4V5h-4V3h-2z"/></svg></button>
   <button type="button" id="orientation" title="Orientation" aria-label="Orientation"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16.48 2.52c3.27 1.55 5.61 4.72 5.97 8.48h1.5C23.44 4.84 18.29 0 12 0l-.66.03 3.81 3.81zm-6.25-.77c-.59-.59-1.54-.59-2.12 0L1.75 8.11c-.59.59-.59 1.54 0 2.12l12.02 12.02c.59.59 1.54.59 2.12 0l6.36-6.36c.59-.59.59-1.54 0-2.12L10.23 1.75zm4.6 19.44L2.81 9.17l6.36-6.36 12.02 12.02zm-7.31.29C4.25 19.94 1.91 16.76 1.55 13H.05c.5 6.16 5.66 11 11.95 11l.66-.03-3.81-3.81z"/></svg></button>
 </nav>
+<div id="lease" hidden><span id="lease-text"></span><button type="button" id="take">Take over</button></div>
 <p id="status">Connecting</p>
 <script>
 const status = document.getElementById("status");
@@ -430,27 +434,53 @@ function screenPoint(event) {
   return { x: frameX * scaleX, y: frameY * scaleY };
 }
 
-function postInput(path, body) {
-  inputQueue = inputQueue.then(() => sendInput(path, body)).catch(() => {});
+// Who holds the screen, from the input socket. While someone else does, input is dropped.
+const leaseBox = document.getElementById("lease");
+const leaseText = document.getElementById("lease-text");
+const takeButton = document.getElementById("take");
+const HOLDERS = { agent: "an agent", person: "another viewer", script: "a script" };
+let lease = { holder: "none", since: 0, takenFrom: null };
+let leaseTimer = null;
+
+function onSocketMessage(data) {
+  let message;
+  try {
+    message = JSON.parse(data);
+  } catch (ignored) {
+    return;
+  }
+  if (message.op === "lease") {
+    lease = {
+      holder: message.holder,
+      since: performance.now() - (message.heldMs || 0),
+      takenFrom: message.takenFrom || null,
+    };
+    showLease();
+  } else if (message.op === "error" && message.message) {
+    status.textContent = message.message;
+  }
 }
 
-async function sendInput(path, body) {
-  const response = await fetch(path, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (response.ok) return true;
-  let detail = "Input HTTP " + response.status;
-  try {
-    const error = await response.json();
-    if (error.message) detail = error.message;
-  } catch (ignored) {
-    // A non-JSON body keeps the status code.
+function showLease() {
+  const other = HOLDERS[lease.holder];
+  const tookOver = lease.holder === "you" && lease.takenFrom;
+  leaseBox.hidden = !other && !tookOver;
+  takeButton.hidden = !other;
+  if (other) {
+    const minutes = Math.floor((performance.now() - lease.since) / 60000);
+    const held = minutes >= 1 ? " for " + minutes + " min" : "";
+    leaseText.textContent = "In use by " + other + held + ". Input is ignored until you take over.";
+  } else if (tookOver) {
+    leaseText.textContent = "You took over from an agent. It gets the screen back 30 s after your last input.";
   }
-  status.textContent = detail;
-  return false;
+  if (other && leaseTimer === null) leaseTimer = setInterval(showLease, 15000);
+  if (!other && leaseTimer !== null) {
+    clearInterval(leaseTimer);
+    leaseTimer = null;
+  }
 }
+
+takeButton.addEventListener("click", () => sendPointer({ op: "take" }));
 
 const ORIENTATIONS = ["auto", "0", "90", "180", "270"];
 let orientation = "auto";
@@ -478,7 +508,7 @@ async function cycleOrientation() {
   }
   const index = ORIENTATIONS.indexOf(orientation);
   const next = ORIENTATIONS[(index < 0 ? 0 : index + 1) % ORIENTATIONS.length];
-  if (!(await sendInput("/v1/device/orientation", { orientation: next }))) return;
+  sendPointer({ op: "orientation", orientation: next });
   showOrientation(next);
   if (display) {
     display.autoRotate = next === "auto";
@@ -493,6 +523,7 @@ function connectPointer() {
   }
   const next = socket("/v1/input/pointer");
   pointerSocket = next;
+  next.onmessage = (event) => onSocketMessage(event.data);
   next.onclose = () => {
     if (pointerSocket !== next) return;
     contacts.clear();
@@ -604,7 +635,7 @@ document.addEventListener("keydown", (event) => {
   if (event.metaKey || event.ctrlKey || event.altKey || event.isComposing) return;
   if (event.key === "Backspace") {
     event.preventDefault();
-    postInput("/v1/input/key", { key: "DEL", autoWake: true });
+    sendPointer({ op: "key", key: "DEL", autoWake: true });
     return;
   }
   let text = "";
@@ -612,12 +643,12 @@ document.addEventListener("keydown", (event) => {
   else if (event.key.length === 1) text = event.key;
   if (!text) return;
   event.preventDefault();
-  postInput("/v1/input/text", { text: text, autoWake: true });
+  sendPointer({ op: "text", text: text, autoWake: true });
 });
 
 document.addEventListener("compositionend", (event) => {
   if (!event.data) return;
-  postInput("/v1/input/text", { text: event.data, autoWake: true });
+  sendPointer({ op: "text", text: event.data, autoWake: true });
 });
 
 document.getElementById("keys").addEventListener("pointerdown", (event) => {
@@ -630,7 +661,7 @@ document.getElementById("keys").addEventListener("pointerdown", (event) => {
     return;
   }
   if (!button.dataset.key) return;
-  postInput("/v1/input/key", { key: button.dataset.key, autoWake: true });
+  sendPointer({ op: "key", key: button.dataset.key, autoWake: true });
 });
 
 loadDisplay();
