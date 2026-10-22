@@ -84,22 +84,21 @@ Snapshots, injected input, screenshots, logcat, browser routes, and streams need
 
 ## Usage
 
-Start the helper (`phoneapi helper`), then connect an MCP client in either of these ways. The stdio bridge still needs `adb`, `jq`, and `curl` on the host (see [Requirements](#requirements)).
-
-- Stdio bridge — run `phoneapi mcp`. The same `mcpServers` entry works in Cursor and in Claude Code (Claude Code: project `.mcp.json`, or user scope in `~/.claude.json`):
+Start the helper (`phoneapi helper`) and `phoneapi server`, then point an MCP client at `http://127.0.0.1:<port>/mcp` with the bearer token, both from the pairing file. In Claude Code (project `.mcp.json`, or user scope in `~/.claude.json`):
 
 ```json
 {
   "mcpServers": {
     "phone": {
-      "command": "/absolute/path/to/phoneapi",
-      "args": ["mcp"]
+      "type": "http",
+      "url": "http://127.0.0.1:<port>/mcp",
+      "headers": { "Authorization": "Bearer <token>" }
     }
   }
 }
 ```
 
-- Streamable HTTP — run `phoneapi server`, then point the client at `http://127.0.0.1:<port>/mcp` with the same bearer token from the pairing file.
+Cursor takes the same entry without `type`. Each client gets its own session, and clients share the phone's screen one at a time, as [docs/sharing.md](docs/sharing.md) describes.
 
 Then ask the agent something concrete, for example:
 

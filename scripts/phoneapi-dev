@@ -17,7 +17,6 @@ USAGE="\
 Usage: $(basename "$0") <command> [<options>]
     pair      - Mint a token and save the pairing file
     server    - Expose the on-device PhoneAPI server on localhost
-    mcp       - Run as a stdio MCP client
     papi      - Call the HTTP/WebSocket API
     helper    - Start the listener and shell helper over ADB
     setup     - Build, install, pair, and start the helper

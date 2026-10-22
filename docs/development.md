@@ -55,7 +55,6 @@ The APK is `app/build/outputs/apk/debug/app-debug.apk`.
 scripts/phoneapi-dev pair --name laptop   # mint a token into .dev/pairing.json
 scripts/phoneapi-dev server               # adb-forward the API to localhost
 scripts/phoneapi-dev helper               # start listener + shell helper
-scripts/phoneapi-dev mcp                  # stdio MCP bridge
 ```
 
 Open the app for screen reading and taps, wireless debugging, and the computers that have access.
