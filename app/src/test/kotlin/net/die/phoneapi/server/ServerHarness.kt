@@ -66,6 +66,8 @@ import net.die.phoneapi.model.UiSnapshot
 import net.die.phoneapi.model.UnlockRequest
 import net.die.phoneapi.model.WaitRequest
 import net.die.phoneapi.model.WaitResult
+import net.die.phoneapi.tabs.TabStore
+import net.die.phoneapi.tabs.Tabs
 
 internal class MemoryTokens : TokenGateway {
     private val bySecret = LinkedHashMap<String, TokenInfo>()
@@ -117,6 +119,17 @@ internal class FakeApi(leaseWaitMs: Long = ScreenLease.WAIT_MS) {
     var orientation: OrientationRequest? = null
     val pointerSessions = Channel<List<PointerFrame>>(capacity = Channel.UNLIMITED)
     @Volatile var cleanups = 0
+
+    val tabStore = MemoryTabStore()
+    val lease: ScreenLease =
+        ScreenLease(
+            CoroutineScope(Dispatchers.Default),
+            cleanup = {
+                cleanups++
+                emptyList()
+            },
+            waitMs = leaseWaitMs,
+        )
 
     val services: ServerServices =
         ServerServices(
@@ -179,15 +192,8 @@ internal class FakeApi(leaseWaitMs: Long = ScreenLease.WAIT_MS) {
             cdp = CdpPipes { _ -> IdlePipe },
             viewerText = { "http://127.0.0.1:1/viewer?access_token=TOKEN" },
             logcat = LogcatFeed { _ -> emptyFlow() },
-            lease =
-                ScreenLease(
-                    CoroutineScope(Dispatchers.Default),
-                    cleanup = {
-                        cleanups++
-                        emptyList()
-                    },
-                    waitMs = leaseWaitMs,
-                ),
+            lease = lease,
+            tabs = Tabs(FakeBrowser, lease, inFront = { false }, store = tabStore),
         )
 
     private object IdlePipe : CdpPipe {
@@ -288,7 +294,12 @@ private object FakeApps : AppsService {
 private object FakeBrowser : BrowserService {
     override suspend fun targets(): List<BrowserTarget> = emptyList()
 
-    override suspend fun openTab(url: String) = BrowserTarget(id = "t", type = "page", socket = "s")
+    override suspend fun openTab(url: String) =
+        BrowserTarget(
+            id = "chrome_devtools_remote~t",
+            type = "page",
+            socket = "chrome_devtools_remote",
+        )
 
     override suspend fun navigate(id: String, url: String) =
         BrowserTarget(id = id, type = "page", url = url, socket = "s")
@@ -340,3 +351,13 @@ private object FakePower : PowerService {
 }
 
 private val VIEWER_HTML = "<html>viewer</html>".encodeToByteArray()
+
+internal class MemoryTabStore : TabStore {
+    var ids: Set<String> = emptySet()
+
+    override fun load(): Set<String> = ids
+
+    override fun save(ids: Set<String>) {
+        this.ids = ids
+    }
+}

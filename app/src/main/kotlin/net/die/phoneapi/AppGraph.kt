@@ -9,6 +9,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import net.die.phoneapi.apps.AppsServiceImpl
 import net.die.phoneapi.apps.RESUMED_ACTIVITY_ARGS
@@ -62,6 +63,8 @@ import net.die.phoneapi.server.VideoFeed
 import net.die.phoneapi.stream.AudioStream
 import net.die.phoneapi.stream.StreamLease
 import net.die.phoneapi.stream.VideoStream
+import net.die.phoneapi.tabs.FileTabStore
+import net.die.phoneapi.tabs.Tabs
 import net.die.phoneapi.tree.HelperUiService
 import net.die.phoneapi.tree.TreeSession
 import net.die.phoneapi.wait.WaitServiceImpl
@@ -180,6 +183,14 @@ class AppGraph(
             bus = bus,
         )
     val browser: BrowserService = browserService()
+    private val screenLease = ScreenLease(scope, cleanup = ScreenCleanup(input, power)::run)
+    private val tabs =
+        Tabs(
+            browser,
+            screenLease,
+            inFront = { pkg -> appInFront(pkg) },
+            store = FileTabStore(File(filesDir, "session-tabs")),
+        )
     val waits: WaitService =
         WaitServiceImpl(
             prepare = power::prepareForAction,
@@ -221,7 +232,8 @@ class AppGraph(
             cdp = HelperCdpPipes(::openDevtools, ioDispatcher),
             viewerText = { viewerLink() },
             logcat = HelperLogcatFeed(helper, bus, ioDispatcher),
-            lease = ScreenLease(scope, cleanup = ScreenCleanup(input, power)::run),
+            lease = screenLease,
+            tabs = tabs,
         )
 
     val server = ApiServer(services, socketName = context.packageName)
@@ -307,7 +319,10 @@ class AppGraph(
         state.start()
         network.start()
         tree.start(scope)
-        helper.onReady = { proxy -> tree.attach(proxy) }
+        helper.onReady = { proxy ->
+            tree.attach(proxy)
+            scope.launch { tabs.sweep() }
+        }
         HelperStatusNotifier(context, helper).start(scope)
         helperSupervisor.start()
     }

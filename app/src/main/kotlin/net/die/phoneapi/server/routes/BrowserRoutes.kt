@@ -41,17 +41,17 @@ import net.die.phoneapi.server.withScreen
  */
 fun Route.browserRoutes(services: ServerServices) {
     scoped(Scope.BROWSER) {
-        get("/v1/browser/targets") { call.respond(services.browser.targets()) }
+        get("/v1/browser/targets") { call.respond(services.tabs.shared.targets()) }
         post("/v1/browser/tabs") {
-            call.respond(services.browser.openTab(call.receive<OpenTabRequest>().url))
+            call.respond(services.tabs.shared.openTab(call.receive<OpenTabRequest>().url))
         }
         post("/v1/browser/targets/{id}/navigate") {
             call.respond(
-                services.browser.navigate(call.targetId(), call.receive<NavigateRequest>().url)
+                services.tabs.shared.navigate(call.targetId(), call.receive<NavigateRequest>().url)
             )
         }
         post("/v1/browser/targets/{id}/close") {
-            call.respond(services.browser.closeTab(call.targetId()))
+            call.respond(services.tabs.shared.closeTab(call.targetId()))
         }
         get("/v1/browser/targets/{id}/snapshot") {
             val q = call.request.queryParameters
@@ -63,7 +63,7 @@ fun Route.browserRoutes(services: ServerServices) {
                 )
             call.respond(
                 withScreen(call, services, options.show) {
-                    services.browser.snapshot(call.targetId(), options)
+                    services.tabs.shared.snapshot(call.targetId(), options)
                 }
             )
         }
@@ -71,19 +71,25 @@ fun Route.browserRoutes(services: ServerServices) {
             val request = call.receive<BrowserReadRequest>()
             call.respond(
                 withScreen(call, services, request.show) {
-                    services.browser.read(call.targetId(), request)
+                    services.tabs.shared.read(call.targetId(), request)
                 }
             )
         }
         post("/v1/browser/targets/{id}/find") {
-            call.respond(services.browser.find(call.targetId(), call.receive<BrowserFindRequest>()))
+            call.respond(
+                services.tabs.shared.find(call.targetId(), call.receive<BrowserFindRequest>())
+            )
         }
         browserInputRoutes(services)
         post("/v1/browser/targets/{id}/evaluate") {
-            call.respond(services.browser.evaluate(call.targetId(), call.receive<EvalRequest>()))
+            call.respond(
+                services.tabs.shared.evaluate(call.targetId(), call.receive<EvalRequest>())
+            )
         }
         post("/v1/browser/targets/{id}/console") {
-            call.respond(services.browser.console(call.targetId(), call.receive<ConsoleRequest>()))
+            call.respond(
+                services.tabs.shared.console(call.targetId(), call.receive<ConsoleRequest>())
+            )
         }
         webSocket("/v1/browser/targets/{id}/cdp") { proxyCdp(this, services, call.targetId()) }
     }
@@ -103,7 +109,7 @@ private fun Route.browserInputRoutes(services: ServerServices) {
         val request = asked.copy(input = rest(asked.input, BrowserInputKind.TAP))
         call.respond(
             withScreen(call, services, request.input != BrowserInput.CDP_MOUSE) {
-                services.browser.tap(call.targetId(), request)
+                services.tabs.shared.tap(call.targetId(), request)
             }
         )
     }
@@ -112,7 +118,7 @@ private fun Route.browserInputRoutes(services: ServerServices) {
         val request = asked.copy(input = rest(asked.input, BrowserInputKind.POINTER))
         call.respond(
             withScreen(call, services, request.input != BrowserInput.CDP_MOUSE) {
-                services.browser.swipe(call.targetId(), request)
+                services.tabs.shared.swipe(call.targetId(), request)
             }
         )
     }
@@ -121,7 +127,7 @@ private fun Route.browserInputRoutes(services: ServerServices) {
         val request = asked.copy(input = rest(asked.input, BrowserInputKind.POINTER))
         call.respond(
             withScreen(call, services, request.input != BrowserInput.CDP_MOUSE) {
-                services.browser.gesture(call.targetId(), request)
+                services.tabs.shared.gesture(call.targetId(), request)
             }
         )
     }
@@ -130,7 +136,7 @@ private fun Route.browserInputRoutes(services: ServerServices) {
         val request = asked.copy(input = rest(asked.input, BrowserInputKind.KEYS))
         call.respond(
             withScreen(call, services, request.input == BrowserInput.TOUCH) {
-                services.browser.key(call.targetId(), request)
+                services.tabs.shared.key(call.targetId(), request)
             }
         )
     }
@@ -139,7 +145,7 @@ private fun Route.browserInputRoutes(services: ServerServices) {
         val request = asked.copy(input = rest(asked.input, BrowserInputKind.KEYS))
         call.respond(
             withScreen(call, services, request.input == BrowserInput.TOUCH) {
-                services.browser.text(call.targetId(), request)
+                services.tabs.shared.text(call.targetId(), request)
             }
         )
     }
@@ -150,6 +156,8 @@ private suspend fun proxyCdp(
     services: ServerServices,
     id: String,
 ) {
+    // A tab a live MCP session owns is not REST's to drive.
+    services.tabs.accessShared(id)
     services.cdp.open(id).use { pipe ->
         try {
             pipe.handshake()

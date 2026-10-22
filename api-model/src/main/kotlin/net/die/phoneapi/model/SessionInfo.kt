@@ -11,4 +11,5 @@ public data class SessionInfo(
     @Doc("Milliseconds since the session started.") val ageMs: Long,
     @Doc("Milliseconds since its last request.") val idleMs: Long,
     @Doc("Whether it holds the screen.") val holdsScreen: Boolean = false,
+    @Doc("Browser tabs it owns, opened or claimed.") val tabs: Int = 0,
 )
