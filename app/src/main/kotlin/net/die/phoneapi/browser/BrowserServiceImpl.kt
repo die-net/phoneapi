@@ -380,6 +380,8 @@ internal class BrowserServiceImpl(
     override suspend fun timersStalled(id: String): Boolean =
         timers?.let { it.stalled(id) && it.confirm(id) } == true
 
+    override suspend fun watchTimers(id: String) = timers?.watch(id) ?: Unit
+
     override suspend fun find(id: String, request: BrowserFindRequest): BrowserFindResult {
         checkFind(request)
         val extract = extractPage(id, request.scope, request.selector)
@@ -641,38 +643,6 @@ internal class BrowserServiceImpl(
         return buildJsonObject { put("nodeId", nodeId) }
     }
 
-    private fun tapTarget(request: BrowserTapRequest): TapTarget {
-        if (request.waitMs !in 0..MAX_TAP_WAIT_MS) {
-            throw ApiException.badRequest("waitMs must be 0..$MAX_TAP_WAIT_MS")
-        }
-        val target =
-            optionalTarget(request.ref, request.selector)
-                ?: throw ApiException.badRequest("Pass a ref or a CSS selector")
-        return if (target is TapTarget.Css) target.copy(waitMs = request.waitMs) else target
-    }
-
-    private fun optionalTarget(ref: String?, selector: String?): TapTarget? {
-        val css = selector?.trim()?.ifEmpty { null }
-        val id = ref?.trim()?.ifEmpty { null }
-        if (css != null && id != null) {
-            throw ApiException.badRequest("Pass a ref or a CSS selector, not both")
-        }
-        if (css != null) return TapTarget.Css(cssSelector(css))
-        if (id != null) return TapTarget.Ref(nodeRef(id))
-        return null
-    }
-
-    private fun cssSelector(selector: String): String {
-        if (
-            selector.length > MAX_SELECTOR ||
-                selector.indexOf('\r') >= 0 ||
-                selector.indexOf('\n') >= 0
-        ) {
-            throw ApiException.badRequest("selector must be 1..$MAX_SELECTOR characters")
-        }
-        return selector
-    }
-
     private suspend fun contentOnScreen(pkg: String?): Rect {
         try {
             return contentBounds(pkg)
@@ -701,14 +671,6 @@ internal class BrowserServiceImpl(
 
     private fun browserPackage(socket: HelperSocket?, name: String): String? =
         socket?.packageName ?: if (name == CHROME_SOCKET) CHROME_PACKAGE else null
-
-    private fun nodeRef(ref: String): String {
-        val trimmed = ref.trim().removeSurrounding("[", "]")
-        if (!NODE_REF.matches(trimmed)) {
-            throw ApiException.badRequest("ref must be a node id from the browser snapshot")
-        }
-        return trimmed
-    }
 
     private suspend fun <T> useSocket(
         name: String,
@@ -739,9 +701,6 @@ internal class BrowserServiceImpl(
         const val HTTP_SERVER_ERROR = 500
         /** Server errors that trying again cannot fix. */
         val FINAL_ERRORS = setOf("helper_unavailable", "browser_frozen")
-        val NODE_REF = Regex("[A-Za-z0-9_-]{1,64}")
-        const val MAX_SELECTOR = 1_000
-        const val MAX_TAP_WAIT_MS = 30_000L
         const val ELEMENT_POLL_MS = 200L
         const val MAX_EXPRESSION = 20_000
         const val MAX_CONSOLE_MS = 5_000L
@@ -760,6 +719,48 @@ internal class BrowserServiceImpl(
 
         data class Failed(val error: ApiException) : SocketList
     }
+}
+
+private val NODE_REF = Regex("[A-Za-z0-9_-]{1,64}")
+private const val MAX_SELECTOR = 1_000
+private const val MAX_TAP_WAIT_MS = 30_000L
+
+private fun tapTarget(request: BrowserTapRequest): TapTarget {
+    if (request.waitMs !in 0..MAX_TAP_WAIT_MS) {
+        throw ApiException.badRequest("waitMs must be 0..$MAX_TAP_WAIT_MS")
+    }
+    val target =
+        optionalTarget(request.ref, request.selector)
+            ?: throw ApiException.badRequest("Pass a ref or a CSS selector")
+    return if (target is TapTarget.Css) target.copy(waitMs = request.waitMs) else target
+}
+
+private fun optionalTarget(ref: String?, selector: String?): TapTarget? {
+    val css = selector?.trim()?.ifEmpty { null }
+    val id = ref?.trim()?.ifEmpty { null }
+    if (css != null && id != null) {
+        throw ApiException.badRequest("Pass a ref or a CSS selector, not both")
+    }
+    if (css != null) return TapTarget.Css(cssSelector(css))
+    if (id != null) return TapTarget.Ref(nodeRef(id))
+    return null
+}
+
+private fun cssSelector(selector: String): String {
+    if (
+        selector.length > MAX_SELECTOR || selector.indexOf('\r') >= 0 || selector.indexOf('\n') >= 0
+    ) {
+        throw ApiException.badRequest("selector must be 1..$MAX_SELECTOR characters")
+    }
+    return selector
+}
+
+private fun nodeRef(ref: String): String {
+    val trimmed = ref.trim().removeSurrounding("[", "]")
+    if (!NODE_REF.matches(trimmed)) {
+        throw ApiException.badRequest("ref must be a node id from the browser snapshot")
+    }
+    return trimmed
 }
 
 @Serializable

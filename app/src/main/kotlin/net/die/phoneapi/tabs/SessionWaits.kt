@@ -29,8 +29,9 @@ internal class SessionWaits(
         val tabs = (all + any).mapNotNull { targeted(it)?.target }.distinct()
         val watching = browser
         if (watching == null || tabs.isEmpty()) return base.wait(scopedRequest, scopes)
-        // A tab whose timers stopped will not change, so the wait fails at once, or as soon as
-        // the check from the last input on it comes due, rather than running out its timeout.
+        // A tab whose timers stopped will not change, so the wait fails as soon as a check shows
+        // it, rather than running out its timeout. Input starts checks; so does the wait.
+        tabs.forEach { watching.watchTimers(it) }
         return coroutineScope {
             val waiting = async { base.wait(scopedRequest, scopes) }
             while (waiting.isActive) {

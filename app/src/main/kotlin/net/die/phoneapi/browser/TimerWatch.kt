@@ -55,6 +55,14 @@ internal class TimerWatch(
         }
     }
 
+    /**
+     * Starts a check on [id], a Chrome tab, unless one is under way or has found its timers
+     * stopped. Other browsers' tabs are not checked, as for input.
+     */
+    fun watch(id: String) {
+        if (parseBrowserTargetId(id).first == CHROME_SOCKET && !states.containsKey(id)) arm(id)
+    }
+
     /** Whether [id]'s last check shows its timers stopped: overdue, or never fired. */
     fun stalled(id: String): Boolean =
         when (val state = states[id]) {

@@ -135,6 +135,12 @@ interface BrowserService {
      */
     suspend fun timersStalled(id: String): Boolean = false
 
+    /**
+     * Starts a check of [id]'s timers in the background, as background input does, unless one is
+     * under way or has found them stopped, so a wait can fail on a tab no input has checked.
+     */
+    suspend fun watchTimers(id: String) {}
+
     suspend fun snapshot(
         id: String,
         options: BrowserSnapshotOptions = BrowserSnapshotOptions(),
