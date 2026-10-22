@@ -25,7 +25,8 @@ fun Route.waitRoutes(services: ServerServices) {
             val request = call.receive<WaitRequest>()
             val scopes = call.token.scopes
             requireWaitAccess(request, scopes)
-            val screen = (request.all + request.any).any { !isBrowserCondition(it) }
+            val screen =
+                request.snapshot || (request.all + request.any).any { !isBrowserCondition(it) }
             call.respond(
                 withScreen(call, services, screen) {
                     call.waits(services, it).wait(request, scopes)

@@ -61,16 +61,22 @@ internal val SOMETIMES_SCREEN_TOOLS =
 internal fun takesScreen(tool: String, args: JsonObject?): Boolean =
     when (tool) {
         in SCREEN_TOOLS -> true
-        "wait_for" -> conditionTypes(args).any { !it.startsWith("browser.") }
+        "wait_for" ->
+            conditionTypes(args).any { !it.startsWith("browser.") } ||
+                flag(args, "snapshot") ||
+                flag(args, "screenshot")
         "browser_tap",
         "browser_swipe",
         "browser_gesture" -> input(args) !in setOf("cdp-mouse")
         "browser_key",
         "browser_type" -> input(args) in setOf("touch", "auto")
         "browser_read",
-        "browser_snapshot" -> (args?.get("show") as? JsonPrimitive)?.booleanOrNull == true
+        "browser_snapshot" -> flag(args, "show")
         else -> false
     }
+
+private fun flag(args: JsonObject?, name: String): Boolean =
+    (args?.get(name) as? JsonPrimitive)?.booleanOrNull == true
 
 /**
  * Tools that, without the screen, could still make a page launch an app, so the foreground watch

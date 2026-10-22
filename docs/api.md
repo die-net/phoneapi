@@ -53,7 +53,7 @@ A REST call that acts on the phone or its tabs runs as a session, as an MCP clie
 
 ### Screen lease
 
-One client at a time holds the screen, as [sharing.md](sharing.md) describes. Calls that act on the screen or show what is on it take the lease: input, IME, apps and intents, wake, unlock, lock, orientation, the UI tree, screenshots, waits with any condition that is not `browser.*`, browser input with `input` `touch` (and `cdp` for pointer input), and browser reads and snapshots with `show`. Reading a tab, and `cdp` keys, text, and `cdp-mouse` taps, need no lease.
+One client at a time holds the screen, as [sharing.md](sharing.md) describes. Calls that act on the screen or show what is on it take the lease: input, IME, apps and intents, wake, unlock, lock, orientation, the UI tree, screenshots, waits with any condition that is not `browser.*` or with a `snapshot`, browser input with `input` `touch` (and `cdp` for pointer input), and browser reads and snapshots with `show`. Reading a tab, and `cdp` keys, text, and `cdp-mouse` taps, need no lease.
 
 - A session keeps the screen from its first such call until the session ends, it calls `screen_release`, or it makes no screen call for 30 s while someone else waits. Then cleanup runs and the waiter gets the screen; the session keeps its tabs, and its next screen call waits again and gets a note. REST sessions follow the same rules.
 - A call that needs the screen while someone else has it waits up to 60 s, then fails with 409 `screen_busy`, saying how long the screen has been held.
@@ -73,7 +73,7 @@ One client at a time holds the screen, as [sharing.md](sharing.md) describes. Ca
 | `maxNodes` | — | Most node lines in the compact outline |
 | `maxChars` | — | Most characters of compact outline, cut at a line |
 | `textOnly` | `false` | Leave positions, resource ids, states, and actions out of the compact outline |
-| `redact` | `false` | Mask password and one-time-code fields and card numbers; `redacted` counts them. MCP `ui_snapshot` defaults to `true` |
+| `redact` | `false` | Mask password and one-time-code fields and card numbers; `redacted` counts them. MCP `ui_snapshot`, `ui_find`, and `wait_for` default to `true` |
 | `includeInvisible` | `false` | |
 | `all` | `false` | All windows, not only actionable |
 | `autoWake` | `true` | Wake before capture |
@@ -82,7 +82,7 @@ Compact text looks like `[e12] button "Sign in"`. When anything is left out, the
 
 ### Wait
 
-`POST /v1/wait` body `WaitRequest`: `all` and/or `any` lists of conditions, `timeoutMs` (default 10000), optional `settleMs`, optional fresh `snapshot` / `snapshotFormat` in the result.
+`POST /v1/wait` body `WaitRequest`: `all` and/or `any` lists of conditions, `timeoutMs` (default 10000), optional `settleMs`, optional fresh `snapshot` / `snapshotFormat` in the result, cut and masked by `snapshotOptions` (`windowId`, `maxDepth`, `maxNodes`, `maxChars`, `textOnly`, `redact`, as for the snapshot above). MCP `wait_for` takes those as `window`, `maxNodes` (default 400), `maxChars`, `textOnly`, and `redact` (default `true`), and `screenshot` adds a PNG to the result, so one call waits for an action's result and shows it.
 
 Condition `type` values include `node`, `window`, `ime`, `idle`, `screen`, `keyguard`, and `browser.url`, `browser.lifecycle`, `browser.networkIdle`, `browser.element`, `browser.request`, `browser.dialog`, `browser.newTarget`, `browser.log`, `browser.settled`. Browser conditions need the **browser** scope.
 
@@ -144,7 +144,7 @@ Authenticated errors are JSON:
 | Method | Path | Scope | Summary |
 | --- | --- | --- | --- |
 | `GET` | `/v1/ui/snapshot` | observe | Accessibility / UiAutomation tree → `UiSnapshot` |
-| `POST` | `/v1/ui/find` | observe | Match `NodeSelector` → `FindResult` |
+| `POST` | `/v1/ui/find` | observe | Match `NodeSelector` → `FindResult`. `redact` masks secrets as for the snapshot and counts them in `redacted` |
 | `POST` | `/v1/ui/nodes/{ref}/action` | control | `NodeActionRequest` (`mode` `real` or `semantic`) |
 | `GET` | `/v1/screenshot` | observe | PNG; `?scale=` 0.1–1 |
 
@@ -196,8 +196,8 @@ A session, from MCP or REST, owns the tabs it opens, popups they open, and unown
 | `POST` | `/v1/browser/targets/{id}/close` | browser | Close the tab without bringing it forward → `ActionResult` |
 | `GET` | `/v1/browser/targets/{id}/snapshot` | browser | Compact AX outline → `BrowserSnapshot`. `maxNodes` (default 400, up to 5000) and `maxChars` cap it; cuts are reported as for the UI snapshot. `show` brings the tab on screen first. `shown` and `pending` as for `read` |
 | `POST` | `/v1/browser/targets/{id}/read` | browser | `BrowserReadRequest` → `BrowserReadResult`: the page's text as markdown or plain text, a slice at a time, or its outline. `shown` says whether Chrome was drawing the tab, and `pending` lists signs of content still to load. `show` brings the tab on screen first and waits for its text to stop growing |
-| `POST` | `/v1/browser/targets/{id}/find` | browser | `BrowserFindRequest` → `BrowserFindResult`: text matches or links, at the offsets `read` uses |
-| `POST` | `/v1/browser/targets/{id}/tap` | browser | Ref or CSS. `input` `auto` (default), `touch`, `cdp`, or `cdp-mouse` (`BrowserTapRequest`) |
+| `POST` | `/v1/browser/targets/{id}/find` | browser | `BrowserFindRequest` → `BrowserFindResult`: text matches or links, at the offsets `read` uses. `queries` (up to 20) searches for each on its own, with results in `queries`. Links come once per URL, without tracking parameters such as `utm_*` and Amazon's `pd_rd_*` and `/ref=`, and `repeats` counts those left out |
+| `POST` | `/v1/browser/targets/{id}/tap` | browser | Ref or CSS. A selector waits up to `waitMs` (default 5000, up to 30000) for an element with a box. `input` `auto` (default), `touch`, `cdp`, or `cdp-mouse` (`BrowserTapRequest`) |
 | `POST` | `/v1/browser/targets/{id}/swipe` | browser | CSS pixels or a direction. `input` `touch` or `cdp` (`BrowserSwipeRequest`) |
 | `POST` | `/v1/browser/targets/{id}/gesture` | browser | Pointer paths in CSS pixels. `input` `touch` or `cdp` (`BrowserGestureRequest`) |
 | `POST` | `/v1/browser/targets/{id}/key` | browser | Key name. `input` `touch` or `cdp` (`BrowserKeyRequest`) |
@@ -245,7 +245,7 @@ The socket also takes `{"op":"key","key":"HOME"}` (a `KeyRequest`), `{"op":"text
 - POSTs are answered with JSON. `GET` is refused with 405, since PhoneAPI sends nothing unprompted. `DELETE` ends the session, which cancels its calls in progress; those get 404.
 - A session ends after 20 minutes without a request, and when its token is revoked or replaced. A token can have 16 sessions open and the phone 32; past either, `initialize` fails with 429 `too_many_sessions`.
 - Sessions live in the app's memory, so restarting the app ends them all.
-- The `initialize` result's `instructions` give the model a short overview of sharing the phone: which calls wait for the screen, `screen_release`, and `session_start` for subagents and parallel tasks.
+- The `initialize` result's `instructions` give the model a short overview of sharing the phone: which calls wait for the screen, `screen_release`, and `session_start` for subagents and parallel tasks. They also say how to work in few calls: an action and one `wait_for` with `snapshot` or `screenshot` per step, selectors rather than a snapshot first, and `browser_open`, `url`, and `close` for pages.
 
 Run `phoneapi server` and point a Streamable HTTP client at `http://127.0.0.1:<port>/mcp` with the bearer token. There is no stdio bridge: `phoneapi mcp` was retired when sessions arrived.
 
@@ -256,14 +256,14 @@ Run `phoneapi server` and point a Streamable HTTP client at `http://127.0.0.1:<p
 | `device_info` | observe | Device + helper + capabilities |
 | `screen_release` | observe | Let the screen go for now, with cleanup; tabs stay the session's |
 | `session_start` / `session_end` | observe | A separate session for a subagent or parallel task, with its own turn at the screen and its own tabs. Every other tool takes `session` with the id `session_start` returns; without it a call acts as the caller's own session |
-| `ui_snapshot` | observe | Compact UI outline |
-| `ui_find` | observe | Find by selector |
+| `ui_snapshot` | observe | Compact UI outline, up to `maxNodes` (default 400) |
+| `ui_find` | observe | Find by selector, masked unless `redact` is false |
 | `ui_act` | control | Action on a ref; `mode` `real` or `semantic` |
 | `tap` | control | Point or selector; humanized by default |
 | `swipe` | control | From/to or direction inside selector |
 | `type_text` | control | `mode` auto / keyboard / keyevent / setText |
 | `press_key` | control | Key names |
-| `wait_for` | observe | Same conditions as `/v1/wait` |
+| `wait_for` | observe | Same conditions as `/v1/wait`. `snapshot` adds a capped, masked outline and `screenshot` a PNG |
 | `keyboard_hide` / `keyboard_show` | control | Soft keyboard |
 | `app_launch` / `app_stop` / `app_clear` | control | Package control (`stop`/`clear` need helper) |
 | `open_intent` | control | Start an intent (needs helper) |
@@ -272,8 +272,8 @@ Run `phoneapi server` and point a Streamable HTTP client at `http://127.0.0.1:<p
 | `browser_targets` / `browser_open` / `browser_navigate` / `browser_close` | browser | Tab list, navigation, and closing a tab |
 | `browser_snapshot` / `browser_tap` / `browser_swipe` / `browser_gesture` | browser | AX outline and pointer input. `input` `auto` (default), `touch`, `cdp`, or `cdp-mouse` (tap only) |
 | `browser_key` / `browser_type` | browser | Key presses and typing. `cdp` stays on a background tab; device keys such as HOME need `touch` |
-| `browser_read` | browser | Page text as markdown, sliced by `offset` and `maxChars` (default 8000), or `outline` for headings with offsets. `scope` `article` (default, via Readability) or `page`, or a CSS `selector`. `url` opens a new tab and reads it in one call. A tab that is not on screen is not drawn, so content that loads when drawn may be missing: the header says `hidden` and lists `pending` signs, and `show` brings the tab forward first |
-| `browser_find` | browser | `kind` `text` (matches with context and nearest heading) or `links` (text, URL, same-origin), at offsets `browser_read` takes |
+| `browser_read` | browser | Page text as markdown, sliced by `offset` and `maxChars` (default 8000), or `outline` for headings with offsets. `scope` `article` (default, via Readability) or `page`, or a CSS `selector`. `url` opens a new tab and reads it in one call, and `close` closes the tab afterwards. A tab that is not on screen is not drawn, so content that loads when drawn may be missing: the header says `hidden` and lists `pending` signs, and `show` brings the tab forward first |
+| `browser_find` | browser | `kind` `text` (matches with context and nearest heading) or `links` (text, URL, same-origin, each URL once), at offsets `browser_read` takes. `queries` searches for up to 20 things at once. `url` and `close` as for `browser_read` |
 | `browser_eval` / `browser_console` | browser | JS and logs |
 | `screenshot` | observe | PNG last resort (`scale` default 0.5) |
 | `logcat_tail` | observe | Recent lines via helper |

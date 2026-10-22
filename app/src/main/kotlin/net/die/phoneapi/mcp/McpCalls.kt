@@ -2,6 +2,7 @@ package net.die.phoneapi.mcp
 
 import io.modelcontextprotocol.kotlin.sdk.types.CallToolRequest
 import io.modelcontextprotocol.kotlin.sdk.types.CallToolResult
+import io.modelcontextprotocol.kotlin.sdk.types.ContentBlock
 import io.modelcontextprotocol.kotlin.sdk.types.ImageContent
 import io.modelcontextprotocol.kotlin.sdk.types.TextContent
 import java.util.Base64
@@ -30,6 +31,7 @@ import net.die.phoneapi.model.BrowserSwipeRequest
 import net.die.phoneapi.model.BrowserTapRequest
 import net.die.phoneapi.model.BrowserTextRequest
 import net.die.phoneapi.model.ConsoleRequest
+import net.die.phoneapi.model.DEFAULT_TAP_WAIT_MS
 import net.die.phoneapi.model.EvalRequest
 import net.die.phoneapi.model.FindRequest
 import net.die.phoneapi.model.ImeShowRequest
@@ -37,6 +39,7 @@ import net.die.phoneapi.model.IntentRequest
 import net.die.phoneapi.model.KeyRequest
 import net.die.phoneapi.model.LaunchRequest
 import net.die.phoneapi.model.NodeActionRequest
+import net.die.phoneapi.model.NodeSelector
 import net.die.phoneapi.model.OrientationRequest
 import net.die.phoneapi.model.Point
 import net.die.phoneapi.model.SHOW_DOC
@@ -44,6 +47,7 @@ import net.die.phoneapi.model.Scope
 import net.die.phoneapi.model.SnapshotFormat
 import net.die.phoneapi.model.SwipeDirection
 import net.die.phoneapi.model.SwipeRequest
+import net.die.phoneapi.model.TAP_WAIT_DOC
 import net.die.phoneapi.model.TapRequest
 import net.die.phoneapi.model.TextMode
 import net.die.phoneapi.model.TextRequest
@@ -84,7 +88,12 @@ internal suspend fun uiSnapshot(
 
 internal suspend fun uiFind(services: ServerServices, request: CallToolRequest): CallToolResult =
     runTool {
-        jsonText(services.ui.find(request.args<FindRequest>()))
+        val args = request.args<UiFindArgs>()
+        jsonText(
+            services.ui.find(
+                FindRequest(args.selector, args.limit, args.includeInvisible, args.redact)
+            )
+        )
     }
 
 internal suspend fun uiAct(services: ServerServices, request: CallToolRequest): CallToolResult =
@@ -128,7 +137,7 @@ internal suspend fun waitFor(
     services: ServerServices,
     scopes: Set<Scope>,
     request: CallToolRequest,
-): CallToolResult = runTool {
+): CallToolResult = runContent {
     val args = request.args<WaitArgs>()
     val wait =
         WaitRequest(
@@ -138,13 +147,22 @@ internal suspend fun waitFor(
             settleMs = args.settleMs,
             snapshot = args.snapshot,
             snapshotFormat = SnapshotFormat.COMPACT,
+            snapshotOptions =
+                SnapshotOptions(
+                    windowId = args.window?.let(::windowId),
+                    maxNodes = args.maxNodes,
+                    maxChars = args.maxChars,
+                    textOnly = args.textOnly,
+                    redact = args.redact,
+                ),
         )
     requireWaitAccess(wait, scopes)
     val result = services.waits.wait(wait, scopes)
     val header =
         "matched=${result.matched} timedOut=${result.timedOut} elapsedMs=${result.elapsedMs}"
     val body = result.snapshot?.compact
-    if (body.isNullOrBlank()) header else "$header\n$body"
+    val text = TextContent(text = if (body.isNullOrBlank()) header else "$header\n$body")
+    if (args.screenshot) listOf(text, screenshotContent(services, args.scale)) else listOf(text)
 }
 
 internal suspend fun sessionStart(services: ServerServices): CallToolResult = runTool {
@@ -301,6 +319,7 @@ internal suspend fun browserTap(
                 humanize = args.humanize,
                 autoWake = args.autoWake,
                 input = args.input,
+                waitMs = args.waitMs,
             ),
         )
     )
@@ -413,22 +432,17 @@ internal suspend fun browserConsole(
 internal suspend fun screenshot(
     services: ServerServices,
     request: CallToolRequest,
-): CallToolResult =
-    try {
-        val scale = request.args<ScaleArgs>().scale
-        val png = services.screenshots(scale)
-        if (png.size > MAX_PNG_BYTES) {
-            throw ApiException.badRequest("Screenshot is too large; pass a smaller scale")
-        }
-        val data = Base64.getEncoder().encodeToString(png)
-        CallToolResult(content = listOf(ImageContent(data = data, mimeType = "image/png")))
-    } catch (e: CancellationException) {
-        throw e
-    } catch (e: ApiException) {
-        toolFailure(toolError(e))
-    } catch (e: SerializationException) {
-        toolFailure("bad_request: ${e.message.orEmpty()}")
+): CallToolResult = runContent {
+    listOf(screenshotContent(services, request.args<ScaleArgs>().scale))
+}
+
+private suspend fun screenshotContent(services: ServerServices, scale: Float): ImageContent {
+    val png = services.screenshots(scale)
+    if (png.size > MAX_PNG_BYTES) {
+        throw ApiException.badRequest("Screenshot is too large; pass a smaller scale")
     }
+    return ImageContent(data = Base64.getEncoder().encodeToString(png), mimeType = "image/png")
+}
 
 internal suspend fun logcatTail(
     services: ServerServices,
@@ -464,9 +478,14 @@ private fun tailLines(stdout: String, lines: Int): String =
         .takeLast(lines)
         .joinToString("\n")
 
-internal suspend fun runTool(block: suspend () -> String): CallToolResult =
+internal suspend fun runTool(block: suspend () -> String): CallToolResult = runContent {
+    listOf(TextContent(text = block()))
+}
+
+/** Runs [block], turning API and argument errors into tool errors. */
+internal suspend fun runContent(block: suspend () -> List<ContentBlock>): CallToolResult =
     try {
-        toolOk(block())
+        CallToolResult(content = block(), isError = false)
     } catch (e: CancellationException) {
         throw e
     } catch (e: ApiException) {
@@ -474,9 +493,6 @@ internal suspend fun runTool(block: suspend () -> String): CallToolResult =
     } catch (e: SerializationException) {
         toolFailure("bad_request: ${e.message.orEmpty()}")
     }
-
-private fun toolOk(text: String): CallToolResult =
-    CallToolResult(content = listOf(TextContent(text = text)), isError = false)
 
 private fun toolFailure(text: String): CallToolResult =
     CallToolResult(content = listOf(TextContent(text = text)), isError = true)
@@ -500,8 +516,10 @@ internal data class SnapshotArgs(
     val window: String? = null,
     @Doc("Stop this many levels down. Leaving nodes out marks the outline truncated.")
     val maxDepth: Int? = null,
-    @Doc("Most nodes to show. The rest are counted, and a line after the header says so.")
-    val maxNodes: Int? = null,
+    @Doc(
+        "Most nodes to show. Defaults to 400. The rest are counted, and a line after the header says so."
+    )
+    val maxNodes: Int = DEFAULT_SNAPSHOT_NODES,
     @Doc("Most characters of outline to show, cut at a line. Cuts are reported like maxNodes.")
     val maxChars: Int? = null,
     @Doc("Leave out positions, resource ids, states, and actions, for reading rather than acting.")
@@ -514,6 +532,17 @@ internal data class SnapshotArgs(
     @Doc("Include every window, such as the status bar and the keyboard's contents.")
     val all: Boolean = false,
     val autoWake: Boolean = true,
+)
+
+@Serializable
+internal data class UiFindArgs(
+    val selector: NodeSelector,
+    @Doc("Most matches to return. Defaults to 20.") val limit: Int = 20,
+    @Doc("Also match nodes that are off screen or hidden.") val includeInvisible: Boolean = false,
+    @Doc(
+        "Mask the text of password and one-time-code fields, and card numbers, as ui_snapshot does. redacted counts them. Defaults to true."
+    )
+    val redact: Boolean = true,
 )
 
 @Serializable
@@ -564,6 +593,7 @@ internal data class BrowserTapArgs(
     val humanize: Boolean = true,
     @Doc(BROWSER_WAKE_DOC) val autoWake: Boolean = true,
     @Doc(BROWSER_INPUT_DOC) val input: BrowserInput = BrowserInput.AUTO,
+    @Doc(TAP_WAIT_DOC) val waitMs: Long = DEFAULT_TAP_WAIT_MS,
 )
 
 @Serializable
@@ -650,8 +680,26 @@ internal data class WaitArgs(
     @Doc("Give up after this many milliseconds.") val timeoutMs: Long = 10_000,
     @Doc("After a match, keep waiting until the UI is quiet for this many milliseconds.")
     val settleMs: Long = 0,
-    @Doc("Include a fresh UI snapshot in the result.") val snapshot: Boolean = false,
+    @Doc(
+        "Include a fresh ui_snapshot outline in the result, so one call both waits for an action's result and shows it. Cut and masked as ui_snapshot is, by the arguments below."
+    )
+    val snapshot: Boolean = false,
+    @Doc(
+        "Include a screenshot in the result, for maps, Street View, photos, and other screens whose tree is empty."
+    )
+    val screenshot: Boolean = false,
+    @Doc("Screenshot scale from 0.1 to 1. Defaults to 0.5.") val scale: Float = ScreenshotScale.MCP,
+    @Doc("Snapshot only this window, such as 3 or w3.") val window: String? = null,
+    @Doc("Most snapshot nodes to show. Defaults to 400. A line after the header counts the rest.")
+    val maxNodes: Int = DEFAULT_SNAPSHOT_NODES,
+    @Doc("Most characters of snapshot to show, cut at a line.") val maxChars: Int? = null,
+    @Doc("Leave positions, resource ids, states, and actions out of the snapshot.")
+    val textOnly: Boolean = false,
+    @Doc("Mask secrets in the snapshot as ui_snapshot does. Defaults to true.")
+    val redact: Boolean = true,
 )
 
+/** The most nodes an MCP snapshot shows unless asked for more, as for browser_snapshot. */
+private const val DEFAULT_SNAPSHOT_NODES = 400
 private const val MAX_PNG_BYTES = 1_500_000
 private const val MAX_LOG_LINES = 400

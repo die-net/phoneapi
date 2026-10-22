@@ -17,6 +17,9 @@ internal class Redactor {
         window.root?.let { window.copy(root = node(it)) } ?: window
     }
 
+    /** Masks find matches, which come without the siblings that label web form fields. */
+    fun nodes(nodes: List<UiNode>): List<UiNode> = nodes.map { node(it) }
+
     /**
      * [label] is the text just before [node] in its parent, which is how web forms label fields.
      */

@@ -99,18 +99,21 @@ class SnapshotEngine(
         return withContext(io) {
             val seq = this@SnapshotEngine.seq.value
             val ref = selector.ref
-            if (ref != null) {
-                return@withContext FindResult(
-                    seq,
-                    listOfNotNull(findByRef(windows(), ref, matcher)),
-                )
-            }
-            val wanted = selector.index?.let { it + 1 } ?: request.limit.coerceIn(1, MAX_FIND)
-            val matches = mutex.withLock {
-                search(windows(), matcher, wanted, request.includeInvisible)
-            }
-            val picked = selector.index?.let { i -> listOfNotNull(matches.getOrNull(i)) } ?: matches
-            FindResult(seq, picked)
+            val picked =
+                if (ref != null) {
+                    listOfNotNull(findByRef(windows(), ref, matcher))
+                } else {
+                    val wanted =
+                        selector.index?.let { it + 1 } ?: request.limit.coerceIn(1, MAX_FIND)
+                    val matches = mutex.withLock {
+                        search(windows(), matcher, wanted, request.includeInvisible)
+                    }
+                    selector.index?.let { i -> listOfNotNull(matches.getOrNull(i)) } ?: matches
+                }
+            if (!request.redact) return@withContext FindResult(seq, picked)
+            val redactor = Redactor()
+            val shown = redactor.nodes(picked)
+            FindResult(seq, shown, redacted = redactor.count)
         }
     }
 

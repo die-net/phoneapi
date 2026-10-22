@@ -93,7 +93,13 @@ public data class BrowserTapRequest(
     val humanize: Boolean = true,
     @Doc(BROWSER_WAKE_DOC) val autoWake: Boolean = true,
     @Doc(BROWSER_INPUT_DOC) val input: BrowserInput = BrowserInput.AUTO,
+    @Doc(TAP_WAIT_DOC) val waitMs: Long = DEFAULT_TAP_WAIT_MS,
 )
+
+public const val TAP_WAIT_DOC: String =
+    "How long to wait for selector to match an element with a box, in milliseconds, 0 to 30000. Defaults to 5000. The element is scrolled into view either way."
+
+public const val DEFAULT_TAP_WAIT_MS: Long = 5_000
 
 /**
  * Swipe a browser target. [from] and [to] are CSS viewport pixels. Pass those, or a [direction]
@@ -319,9 +325,9 @@ public enum class FindKind {
 public data class BrowserFindRequest(
     @Doc("text (default) finds query in the content. links lists links in the content.")
     val kind: FindKind = FindKind.TEXT,
-    @Doc("For text, what to find, ignoring case. Required. For links, text the link must contain.")
-    val query: String? = null,
-    @Doc("Treat query as a regular expression, in Java syntax, ignoring case.")
+    @Doc(FIND_QUERY_DOC) val query: String? = null,
+    @Doc(FIND_QUERIES_DOC) val queries: List<String> = emptyList(),
+    @Doc("Treat query or queries as regular expressions, in Java syntax, ignoring case.")
     val regex: Boolean = false,
     @Doc("For links, a string the URL must contain, ignoring case.")
     val hrefContains: String? = null,
@@ -330,7 +336,24 @@ public data class BrowserFindRequest(
     @Doc(READ_FORMAT_DOC) val format: ReadFormat = ReadFormat.MARKDOWN,
     @Doc("Characters of context on each side of a text match, 0 to 2000. Defaults to 150.")
     val contextChars: Int = 150,
-    @Doc("Most results, 1 to 200. Defaults to 10.") val limit: Int = 10,
+    @Doc("Most results, 1 to 200, for each query when there are several. Defaults to 10.")
+    val limit: Int = 10,
+)
+
+public const val FIND_QUERY_DOC: String =
+    "For text, what to find: a plain substring that ignores case, so gate also matches navigate; use regex with \\bgate\\b for whole words. text needs query or queries. For links, text the link must contain."
+
+public const val FIND_QUERIES_DOC: String =
+    """For text, up to 20 things to find in one call, each searched on its own, with its own matches, and a plain no-matches line when it is not there. Give the likely wordings and synonyms of what you want, such as ["gate", "departure gate", "boarding"], rather than one find per guess; a miss costs almost nothing. Each is a plain substring that ignores case, so capitalizations need no entries of their own. Use query or queries, not both."""
+
+/** The most queries one find takes. */
+public const val MAX_FIND_QUERIES: Int = 20
+
+@Serializable
+public data class QueryMatches(
+    val query: String,
+    @Doc("How many matches there are in all. Only the first limit are returned.") val total: Int,
+    val matches: List<TextMatch> = emptyList(),
 )
 
 @Serializable
@@ -359,6 +382,12 @@ public data class BrowserFindResult(
     val totalChars: Int,
     @Doc("How many results there are in all. Only the first limit are returned.") val total: Int,
     val matches: List<TextMatch>? = null,
+    @Doc("With queries, each one's matches, in the order asked. total is their sum.")
+    val queries: List<QueryMatches>? = null,
     val links: List<PageLink>? = null,
+    @Doc(
+        "Links left out of links and total because an earlier link has the same URL once tracking parameters are dropped."
+    )
+    val repeats: Int = 0,
     @Doc(RELOADED_DOC) val reloaded: Boolean = false,
 )

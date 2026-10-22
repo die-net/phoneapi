@@ -4,7 +4,8 @@ import net.die.phoneapi.model.Scope
 
 /**
  * The overview a client gets at `initialize`: that the phone is shared, which calls wait for the
- * screen, and how to keep parallel work apart. Lines about tools [scopes] leave out are left out.
+ * screen, how to keep parallel work apart, and how to work in few calls. Lines about tools [scopes]
+ * leave out are left out.
  */
 internal fun mcpInstructions(scopes: Set<Scope>): String = buildList {
     add(
@@ -33,5 +34,30 @@ internal fun mcpInstructions(scopes: Set<Scope>): String = buildList {
         "- If you run subagents or parallel tasks that use the phone, give each its own session " +
             "with session_start, and have it pass that id as session on every call it makes."
     )
+    add("")
+    add(
+        "Every call is a round trip that re-reads your whole context, so the number of calls " +
+            "costs more than the size of each result. To keep calls few:"
+    )
+    add(
+        "- One step is two calls: the action, then one wait_for on what should appear, with " +
+            "snapshot true to see the result, or screenshot true for maps, Street View, and " +
+            "other screens whose tree is empty. Do not take a ui_snapshot before and after."
+    )
+    add(
+        "- Act by selector when you know the label: tap and type_text take text, id, or desc " +
+            "selectors, so they need no ui_snapshot first. Use ui_snapshot when you do not know " +
+            "what is on screen, and ui_find to look for one thing."
+    )
+    add("- Actions and intents wake the screen themselves; device_wake is rarely needed.")
+    if (Scope.BROWSER in scopes) {
+        add(
+            "- For a web page, use browser_open, which returns the target, rather than " +
+                "open_intent. To read or search a page once, browser_read or browser_find with " +
+                "url and close true does it in one call. browser_find takes several queries at " +
+                "once. browser_tap waits for its selector and scrolls to it, and wait_for with " +
+                "browser.element checks the result, so browser_eval is rarely needed."
+        )
+    }
 }
     .joinToString("\n")

@@ -53,7 +53,7 @@ One MCP client is usually one session, so its subagents share a turn at the scre
 
 This is also the shape MCP's stateless revision (2026-07-28) asks for: it drops protocol sessions, and servers that need state across calls mint handles that clients pass as tool arguments. PhoneAPI's MCP SDK (0.15.0) does not speak that revision yet, so such clients still cannot connect, but the tools would carry over.
 
-`initialize` returns `instructions`, a short overview for the model: the phone is shared, which calls wait for the screen and for how long, that reading tabs and `cdp` input need no screen, `screen_release`, and `session_start` for parallel work. Clients decide whether the model sees them. Claude Code does. Legwork's hub serves its own tools and does not pass an upstream's instructions on yet, so there the tool descriptions have to carry it alone.
+`initialize` returns `instructions`, a short overview for the model: the phone is shared, which calls wait for the screen and for how long, that reading tabs and `cdp` input need no screen, `screen_release`, `session_start` for parallel work, and how to keep calls few. Clients decide whether the model sees them. Claude Code does. Legwork's hub serves its own tools and does not pass an upstream's instructions on yet, so there the tool descriptions have to carry it alone.
 
 The model carries the id, so it can forget it or pass a stale one. A forgotten id makes the call act as the caller's own session, and a stale one fails loudly. The id sits in the model's context and the client's logs, where the header kept it out of sight, but it is useless with any other token.
 
@@ -138,7 +138,7 @@ One exclusive lease per phone. The first call that needs the screen takes it. An
 
 - Device and app tools: `tap`, `swipe`, `type_text`, `press_key`, `ui_act`, `keyboard_*`, `app_*`, `open_intent`, `device_wake`, `device_unlock`, `device_lock`, `device_orientation`.
 - Observing the screen: `ui_snapshot`, `ui_find`, `screenshot`. These would show another holder's screen.
-- `wait_for` with any condition that is not `browser.*`.
+- `wait_for` with any condition that is not `browser.*`, or with `snapshot` or `screenshot`.
 - Browser input with `input` `touch`, which brings the tab forward. Pointer input with `input` `cdp` too: Chrome only takes cdp touch on the tab it is showing, so it already needs Chrome in front.
 - Anything else that brings Chrome or a tab to the front.
 

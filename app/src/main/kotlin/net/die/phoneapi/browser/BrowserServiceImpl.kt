@@ -60,7 +60,8 @@ import net.die.phoneapi.model.TimedPoint
 internal sealed interface TapTarget {
     data class Ref(val id: String) : TapTarget
 
-    data class Css(val selector: String) : TapTarget
+    /** [waitMs] is how long to wait for [selector] to match an element with a box. */
+    data class Css(val selector: String, val waitMs: Long = 0) : TapTarget
 }
 
 internal class BrowserServiceImpl(
@@ -529,8 +530,22 @@ internal class BrowserServiceImpl(
     ): JsonArray =
         when (target) {
             is TapTarget.Ref -> refQuads(cdp, targetId, target.id)
-            is TapTarget.Css -> boxed(cdp, cssNode(cdp, target.selector))
+            is TapTarget.Css -> cssQuads(cdp, target)
         }
+
+    /** Polls until [target] matches an element with a box, or its wait is up. */
+    private suspend fun cssQuads(cdp: CdpSession, target: TapTarget.Css): JsonArray {
+        val deadline = System.currentTimeMillis() + target.waitMs
+        while (true) {
+            try {
+                return boxed(cdp, cssNode(cdp, target.selector))
+            } catch (e: ApiException) {
+                val missing = e.error == "not_found" || e.error == "offscreen"
+                if (!missing || System.currentTimeMillis() + ELEMENT_POLL_MS > deadline) throw e
+            }
+            delay(ELEMENT_POLL_MS)
+        }
+    }
 
     private suspend fun refQuads(cdp: CdpSession, targetId: String, ref: String): JsonArray {
         val backend = cachedBackend(targetId, ref)
@@ -598,9 +613,15 @@ internal class BrowserServiceImpl(
         return buildJsonObject { put("nodeId", nodeId) }
     }
 
-    private fun tapTarget(request: BrowserTapRequest): TapTarget =
-        optionalTarget(request.ref, request.selector)
-            ?: throw ApiException.badRequest("Pass a ref or a CSS selector")
+    private fun tapTarget(request: BrowserTapRequest): TapTarget {
+        if (request.waitMs !in 0..MAX_TAP_WAIT_MS) {
+            throw ApiException.badRequest("waitMs must be 0..$MAX_TAP_WAIT_MS")
+        }
+        val target =
+            optionalTarget(request.ref, request.selector)
+                ?: throw ApiException.badRequest("Pass a ref or a CSS selector")
+        return if (target is TapTarget.Css) target.copy(waitMs = request.waitMs) else target
+    }
 
     private fun optionalTarget(ref: String?, selector: String?): TapTarget? {
         val css = selector?.trim()?.ifEmpty { null }
@@ -692,6 +713,8 @@ internal class BrowserServiceImpl(
         val FINAL_ERRORS = setOf("helper_unavailable", "browser_frozen")
         val NODE_REF = Regex("[A-Za-z0-9_-]{1,64}")
         const val MAX_SELECTOR = 1_000
+        const val MAX_TAP_WAIT_MS = 30_000L
+        const val ELEMENT_POLL_MS = 200L
         const val MAX_EXPRESSION = 20_000
         const val MAX_CONSOLE_MS = 5_000L
         const val MAX_SNAPSHOT_NODES = 5_000

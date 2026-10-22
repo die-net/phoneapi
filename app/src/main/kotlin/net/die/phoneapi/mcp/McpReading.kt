@@ -6,12 +6,15 @@ import kotlinx.coroutines.delay
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import net.die.phoneapi.browser.checkFind
 import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.model.BrowserFindRequest
 import net.die.phoneapi.model.BrowserFindResult
 import net.die.phoneapi.model.BrowserReadRequest
 import net.die.phoneapi.model.BrowserReadResult
 import net.die.phoneapi.model.EvalRequest
+import net.die.phoneapi.model.FIND_QUERIES_DOC
+import net.die.phoneapi.model.FIND_QUERY_DOC
 import net.die.phoneapi.model.FindKind
 import net.die.phoneapi.model.READ_FORMAT_DOC
 import net.die.phoneapi.model.READ_SCOPE_DOC
@@ -20,6 +23,7 @@ import net.die.phoneapi.model.ReadFormat
 import net.die.phoneapi.model.ReadScope
 import net.die.phoneapi.model.SHOW_DOC
 import net.die.phoneapi.model.Scope
+import net.die.phoneapi.model.TextMatch
 import net.die.phoneapi.model.WaitCondition
 import net.die.phoneapi.model.WaitRequest
 import net.die.phoneapi.model.schema.Doc
@@ -43,16 +47,21 @@ internal data class BrowserReadArgs(
     val offset: Int = 0,
     @Doc("Most characters to return, 1 to 100000. Defaults to 8000.") val maxChars: Int = 8_000,
     @Doc(SHOW_DOC) val show: Boolean = false,
+    @Doc(CLOSE_DOC) val close: Boolean = false,
 )
 
 @Serializable
 internal data class BrowserFindArgs(
-    val target: String,
+    @Doc("Browser target id. Pass this or url.") val target: String? = null,
+    @Doc(
+        "An http(s) URL to open in a new tab and search once it settles, instead of target. The result names the new target, unless close is true."
+    )
+    val url: String? = null,
     @Doc("text (default) finds query in the content. links lists links, with their URLs.")
     val kind: FindKind = FindKind.TEXT,
-    @Doc("For text, what to find, ignoring case. Required. For links, text the link must contain.")
-    val query: String? = null,
-    @Doc("Treat query as a regular expression, in Java syntax, ignoring case.")
+    @Doc(FIND_QUERY_DOC) val query: String? = null,
+    @Doc(FIND_QUERIES_DOC) val queries: List<String> = emptyList(),
+    @Doc("Treat query or queries as regular expressions, in Java syntax, ignoring case.")
     val regex: Boolean = false,
     @Doc("For links, a string the URL must contain, ignoring case.")
     val hrefContains: String? = null,
@@ -61,8 +70,13 @@ internal data class BrowserFindArgs(
     @Doc(READ_FORMAT_DOC) val format: ReadFormat = ReadFormat.MARKDOWN,
     @Doc("Characters of context on each side of a text match, 0 to 2000. Defaults to 150.")
     val contextChars: Int = 150,
-    @Doc("Most results, 1 to 200. Defaults to 10.") val limit: Int = 10,
+    @Doc("Most results, 1 to 200, for each query when there are several. Defaults to 10.")
+    val limit: Int = 10,
+    @Doc(CLOSE_DOC) val close: Boolean = false,
 )
+
+private const val CLOSE_DOC =
+    "Close the tab after this call, when this is the last look you need. Saves a browser_close call."
 
 internal suspend fun browserRead(
     services: ServerServices,
@@ -83,16 +97,50 @@ internal suspend fun browserRead(
             maxChars = args.maxChars,
             show = args.show,
         )
-    val opened = args.url?.let { url -> openAndSettle(services, scopes, url) }
+    val opened = args.url?.let { url -> openAndSettle(services, scopes, url, args.close) }
     val target = opened?.target ?: args.target.orEmpty()
-    val result = services.browser.read(target, read)
     val text =
-        if (args.outline) outlineText(result, args.maxChars, args.show)
-        else readText(result, args.show)
+        closingAfter(services, target, args.close) {
+            val result = services.browser.read(target, read)
+            if (args.outline) outlineText(result, args.maxChars, args.show)
+            else readText(result, args.show)
+        }
     opened?.let { "${it.line}\n$text" } ?: text
 }
 
 private data class Opened(val target: String, val line: String)
+
+/**
+ * Runs [block] on [target], then closes the tab when [close] is set, even when [block] failed. A
+ * close that fails adds a line saying so.
+ */
+private suspend fun closingAfter(
+    services: ServerServices,
+    target: String,
+    close: Boolean,
+    block: suspend () -> String,
+): String {
+    if (!close) return block()
+    val text =
+        try {
+            block()
+        } catch (e: ApiException) {
+            closeQuietly(services, target)
+            throw e
+        }
+    val closed = closeQuietly(services, target)
+    return if (closed == null) "$text\n# closed target=$target"
+    else "$text\n# close failed: $closed; close it with browser_close"
+}
+
+/** Closes [target], returning why it failed, or null when it closed. */
+private suspend fun closeQuietly(services: ServerServices, target: String): String? =
+    try {
+        services.browser.closeTab(target)
+        null
+    } catch (e: ApiException) {
+        e.message ?: e.error
+    }
 
 /**
  * Opens [url] in a new tab and waits up to [OPEN_SETTLE_MS] for it to load and settle. A settle
@@ -103,6 +151,7 @@ private suspend fun openAndSettle(
     services: ServerServices,
     scopes: Set<Scope>,
     url: String,
+    closing: Boolean = false,
 ): Opened {
     val tab = services.browser.openTab(url)
     val deadline = System.currentTimeMillis() + OPEN_SETTLE_MS
@@ -120,7 +169,7 @@ private suspend fun openAndSettle(
             append(" (not ").append(if (loaded) "settled" else "loaded")
             append(" after ").append(OPEN_SETTLE_MS / MS_PER_S).append(" s)")
         }
-        append("; close it with browser_close when done")
+        if (!closing) append("; close it with browser_close when done")
     }
     return Opened(tab.id, line)
 }
@@ -152,25 +201,35 @@ private suspend fun loaded(services: ServerServices, target: String): Boolean {
 
 internal suspend fun browserFind(
     services: ServerServices,
+    scopes: Set<Scope>,
     request: CallToolRequest,
 ): CallToolResult = runTool {
     val args = request.args<BrowserFindArgs>()
-    val result =
-        services.browser.find(
-            args.target,
-            BrowserFindRequest(
-                kind = args.kind,
-                query = args.query,
-                regex = args.regex,
-                hrefContains = args.hrefContains,
-                scope = args.scope,
-                selector = args.selector,
-                format = args.format,
-                contextChars = args.contextChars,
-                limit = args.limit,
-            ),
+    if ((args.target == null) == (args.url == null)) {
+        throw ApiException.badRequest("Pass target or url, not both")
+    }
+    val find =
+        BrowserFindRequest(
+            kind = args.kind,
+            query = args.query,
+            queries = args.queries,
+            regex = args.regex,
+            hrefContains = args.hrefContains,
+            scope = args.scope,
+            selector = args.selector,
+            format = args.format,
+            contextChars = args.contextChars,
+            limit = args.limit,
         )
-    if (args.kind == FindKind.LINKS) linksText(result) else matchesText(result)
+    checkFind(find)
+    val opened = args.url?.let { url -> openAndSettle(services, scopes, url, args.close) }
+    val target = opened?.target ?: args.target.orEmpty()
+    val text =
+        closingAfter(services, target, args.close) {
+            val result = services.browser.find(target, find)
+            if (args.kind == FindKind.LINKS) linksText(result) else matchesText(result)
+        }
+    opened?.let { "${it.line}\n$text" } ?: text
 }
 
 /** The page line every read and find result starts with. */
@@ -264,27 +323,51 @@ internal fun outlineText(result: BrowserReadResult, maxChars: Int, show: Boolean
 }
 
 internal fun matchesText(result: BrowserFindResult): String {
+    val head = listOf(pageLine(result.title, result.url)) + reloadedNote(result)
+    val queries = result.queries
+    if (queries != null) {
+        val summary =
+            "# ${plural(queries.size, "query", "queries")} in ${result.extracted} content " +
+                "(${result.totalChars} chars, version ${result.version}), " +
+                "${result.total} matches in all; @ is each one's offset"
+        val lines = queries.flatMap { query ->
+            val count = plural(query.total, "match", "matches")
+            val title =
+                when {
+                    query.total == 0 -> "## ${quoted(query.query)}: no matches"
+                    query.matches.size < query.total ->
+                        "## ${quoted(query.query)}: $count, showing ${query.matches.size}"
+                    else -> "## ${quoted(query.query)}: $count"
+                }
+            listOf(title) + query.matches.map(::matchLine)
+        }
+        return (head + summary + lines).joinToString("\n")
+    }
     val matches = result.matches.orEmpty()
     val summary =
         "# ${result.total} matches in ${result.extracted} content (${result.totalChars} chars, " +
             "version ${result.version}); showing ${matches.size}, @ is each one's offset"
-    val lines = matches.map { match ->
-        buildString {
-            append('@').append(match.offset).append(' ')
-            match.heading?.let { append("under ").append(quoted(it)).append(": ") }
-            append('…').append(oneLine(match.before)).append('«').append(oneLine(match.match))
-            append('»').append(oneLine(match.after)).append('…')
-        }
-    }
-    return (listOf(pageLine(result.title, result.url)) + reloadedNote(result) + summary + lines)
-        .joinToString("\n")
+    return (head + summary + matches.map(::matchLine)).joinToString("\n")
 }
+
+private fun matchLine(match: TextMatch): String = buildString {
+    append('@').append(match.offset).append(' ')
+    match.heading?.let { append("under ").append(quoted(it)).append(": ") }
+    append('…').append(oneLine(match.before)).append('«').append(oneLine(match.match))
+    append('»').append(oneLine(match.after)).append('…')
+}
+
+private fun plural(count: Int, one: String, many: String): String =
+    "$count ${if (count == 1) one else many}"
 
 internal fun linksText(result: BrowserFindResult): String {
     val links = result.links.orEmpty()
+    val repeats =
+        if (result.repeats == 0) ""
+        else "; ${plural(result.repeats, "repeat", "repeats")} of a URL above left out"
     val summary =
         "# ${result.total} links in ${result.extracted} content (version ${result.version}); " +
-            "showing ${links.size}, @ is where each one's text starts"
+            "showing ${links.size}, @ is where each one's text starts$repeats"
     val lines = links.map {
         "@${it.offset} ${quoted(it.text)} ${it.href}" + if (it.sameOrigin) " same-origin" else ""
     }

@@ -151,6 +151,94 @@ class PageReadTest {
     }
 
     @Test
+    fun `finds several queries at once`() {
+        val result =
+            findInPage(extract, BrowserFindRequest(queries = listOf("first", "missing", "e")))
+        val queries = result.queries!!
+        assertEquals(listOf("first", "missing", "e"), queries.map { it.query })
+        assertEquals(1, queries[0].total)
+        assertEquals("First", queries[0].matches.single().match)
+        assertEquals(0, queries[1].total)
+        assertTrue(queries[1].matches.isEmpty())
+        assertEquals(queries.sumOf { it.total }, result.total)
+        assertNull(result.matches)
+    }
+
+    @Test
+    fun `checks queries`() {
+        val bad =
+            listOf(
+                BrowserFindRequest(query = "a", queries = listOf("b")),
+                BrowserFindRequest(kind = FindKind.LINKS, queries = listOf("b")),
+                BrowserFindRequest(queries = List(21) { "q$it" }),
+                BrowserFindRequest(queries = listOf("")),
+            )
+        for (request in bad) {
+            assertThrows(ApiException::class.java) { checkFind(request) }
+        }
+        checkFind(BrowserFindRequest(queries = List(20) { "q$it" }))
+    }
+
+    @Test
+    fun `merges a link split by styling`() {
+        val styled =
+            ApiJson.decodeFromString(
+                PageExtract.serializer(),
+                """{"url":"https://shop.example/","extracted":"page","blocks":[""" +
+                    """{"k":"p","r":[{"t":"Lint","s":"b","h":"https://shop.example/p"},""" +
+                    """{"t":" ","h":"https://shop.example/p"},""" +
+                    """{"t":"Roller ","h":"https://shop.example/p"},{"t":"now"},""" +
+                    """{"t":" Lint","h":"https://shop.example/p"}]}]}""",
+            )
+        val page = renderPage(styled.blocks, ReadFormat.MARKDOWN)
+        assertEquals("**Lint** Roller now Lint", page.text)
+        assertEquals(listOf("Lint Roller", "Lint"), page.links.map { it.text })
+        assertEquals(listOf(2, 20), page.links.map { it.offset })
+    }
+
+    @Test
+    fun `lists each URL once`() {
+        val shop =
+            ApiJson.decodeFromString(
+                PageExtract.serializer(),
+                """{"url":"https://www.amazon.com/s","extracted":"page","blocks":[""" +
+                    """{"k":"p","r":[{"t":"Image","h":"https://www.amazon.com/dp/B01/ref=sr_1_1""" +
+                    """?crid=X&dib=Y&keywords=lint&qid=1&sr=8-1&pd_rd_w=Z"}]},""" +
+                    """{"k":"p","r":[{"t":"Lint roller","h":"https://www.amazon.com/dp/B01""" +
+                    """?keywords=lint&utm_source=a"}]},""" +
+                    """{"k":"p","r":[{"t":"Other","h":"https://www.amazon.com/dp/B02#top"}]}]}""",
+            )
+        val result = findInPage(shop, BrowserFindRequest(kind = FindKind.LINKS))
+        assertEquals(2, result.total)
+        assertEquals(1, result.repeats)
+        assertEquals(
+            listOf(
+                "https://www.amazon.com/dp/B01?keywords=lint",
+                "https://www.amazon.com/dp/B02#top",
+            ),
+            result.links!!.map { it.href },
+        )
+        assertEquals("Image", result.links!!.first().text)
+    }
+
+    @Test
+    fun `drops only known tracking`() {
+        assertEquals(
+            "https://example.com/a?id=3#x",
+            withoutTracking("https://example.com/a?utm_source=n&id=3&fbclid=q#x"),
+        )
+        assertEquals(
+            "https://github.com/o/r/tree/x?ref=main&qid=2",
+            withoutTracking("https://github.com/o/r/tree/x?ref=main&qid=2"),
+        )
+        assertEquals(
+            "https://smile.amazon.co.uk/gp/product/B03?psc=1",
+            withoutTracking("https://smile.amazon.co.uk/gp/product/B03/ref=x?psc=1&pf_rd_r=Q"),
+        )
+        assertEquals("https://example.com/", withoutTracking("https://example.com/?utm_medium=e"))
+    }
+
+    @Test
     fun `carries pending signs`() {
         val waiting =
             ApiJson.decodeFromString(
