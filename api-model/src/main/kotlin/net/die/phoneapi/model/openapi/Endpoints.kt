@@ -40,6 +40,7 @@ import net.die.phoneapi.model.PinStatus
 import net.die.phoneapi.model.PointerFrame
 import net.die.phoneapi.model.Scope
 import net.die.phoneapi.model.SessionInfo
+import net.die.phoneapi.model.SessionStarted
 import net.die.phoneapi.model.SetPinRequest
 import net.die.phoneapi.model.SwipeRequest
 import net.die.phoneapi.model.TapRequest
@@ -64,7 +65,8 @@ public enum class ApiMethod {
 public data class ApiEndpoint(
     public val method: ApiMethod,
     public val path: String,
-    public val scope: Scope,
+    /** The scope a token needs. Null when any token may call it, as for starting a session. */
+    public val scope: Scope?,
     public val summary: String,
     public val request: KSerializer<*>? = null,
     public val response: KSerializer<*>? = null,
@@ -430,6 +432,28 @@ public val phoneApiEndpoints: List<ApiEndpoint> =
             status = 204,
         ),
         endpoint(
+            ApiMethod.POST,
+            "/v1/sessions",
+            null,
+            "Start a session. REST calls that act on the phone or its tabs need its id in Mcp-Session-Id, and fail with 428 session_required without one. It holds the screen across calls and owns the tabs it opens, as an MCP session does.",
+            response = serializer<SessionStarted>(),
+            status = 201,
+        ),
+        endpoint(
+            ApiMethod.DELETE,
+            "/v1/sessions/current",
+            null,
+            "End the session named in Mcp-Session-Id: cleanup if it held the screen, and the tabs it opened close.",
+            status = 204,
+        ),
+        endpoint(
+            ApiMethod.POST,
+            "/v1/screen/release",
+            null,
+            "Let the screen go for the session named in Mcp-Session-Id, with cleanup. The session keeps its tabs, and its next call that needs the screen takes it again.",
+            response = serializer<ActionResult>(),
+        ),
+        endpoint(
             ApiMethod.GET,
             "/v1/sessions",
             Scope.ADMIN,
@@ -455,7 +479,7 @@ public val phoneApiEndpoints: List<ApiEndpoint> =
 private fun endpoint(
     method: ApiMethod,
     path: String,
-    scope: Scope,
+    scope: Scope?,
     summary: String,
     request: KSerializer<*>? = null,
     response: KSerializer<*>? = null,

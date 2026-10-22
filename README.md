@@ -108,7 +108,7 @@ Tool list, resources, and scopes are in [docs/api.md](docs/api.md).
 
 ### HTTP and WebSocket API
 
-You can also call the REST and WebSocket API directly (`curl`, your own client, or `phoneapi papi` while developing). Run `phoneapi server` first so localhost reaches the on-device socket. Auth, routes, and OpenAPI are in [docs/api.md](docs/api.md). The viewer at `http://127.0.0.1:<port>/viewer` plays video and audio streams with WebCodecs (stream scope).
+You can also call the REST and WebSocket API directly (`curl`, your own client, or `phoneapi papi` while developing). Calls that act on the phone need a session from `POST /v1/sessions`, named in the `Mcp-Session-Id` header; `phoneapi papi` keeps one for you. Run `phoneapi server` first so localhost reaches the on-device socket. Auth, routes, and OpenAPI are in [docs/api.md](docs/api.md). The viewer at `http://127.0.0.1:<port>/viewer` plays video and audio streams with WebCodecs (stream scope).
 
 ## AI Disclosure
 

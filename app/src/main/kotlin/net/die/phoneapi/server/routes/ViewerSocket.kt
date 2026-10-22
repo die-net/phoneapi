@@ -29,6 +29,7 @@ import net.die.phoneapi.model.PointerFrame
 import net.die.phoneapi.model.PointerOp
 import net.die.phoneapi.model.TextRequest
 import net.die.phoneapi.server.ServerServices
+import net.die.phoneapi.server.SessionsKey
 
 private val viewers = AtomicLong()
 
@@ -54,6 +55,7 @@ private class ViewerSocket(
     private val viewer: Holder.Viewer,
 ) {
     private val lease = services.lease
+    private val sessions = session.call.application.attributes[SessionsKey]
     private val frames = Channel<PointerFrame>(Channel.UNLIMITED)
     private val down = HashSet<Int>()
 
@@ -197,8 +199,7 @@ private class ViewerSocket(
             null -> "none"
             viewer -> "you"
             is Holder.Viewer -> "person"
-            is Holder.Session -> "agent"
-            is Holder.Rest -> "script"
+            is Holder.Session -> if (sessions.isRest(holder.id)) "script" else "agent"
         }
 
     private fun touched() {

@@ -40,14 +40,25 @@ ADB `CREATE_TOKEN` (via `phoneapi pair`) grants every scope. Narrower tokens: `P
 - `humanize` defaults to **true** on taps, swipes, and gestures (including browser). Set `false` for exact points and a fixed contact.
 - `/v1/device.capabilities` (and MCP `device_info`) say what works right now. MCP omits tools the token or device cannot use.
 
+### Sessions
+
+A REST call that acts on the phone or its tabs runs as a session, as an MCP client does, so a script's steps hold the screen and its tabs together. [sharing.md](sharing.md#rest-sessions) has the design.
+
+- `POST /v1/sessions` starts one (any token, whatever its scopes) → 201 `SessionStarted` with its `id`. Send the id in `Mcp-Session-Id` on every call that needs a session. Without it a call fails with **428** `session_required`; with the id of a session that ended or belongs to another token, **404** `not_found`.
+- Calls that need a session: wake, unlock, lock, orientation, the UI tree and its actions, screenshots, input, IME, app launch, stop, and clear, intents, waits, and every `/v1/browser/` route except the raw CDP socket.
+- Calls that need none: `GET /v1/device`, `GET /v1/apps`, the PIN routes, the OpenAPI document, the events socket, the viewer and its sockets and streams, the raw CDP socket, and session and token admin.
+- `DELETE /v1/sessions/current` ends the session named in the header: cleanup if it held the screen, and the tabs it opened close. `POST /v1/screen/release` lets its screen go and keeps its tabs. A session also ends after 20 minutes without a request.
+- One id works on both sides. An id from MCP's `initialize` works on REST as the same session, and an `initialize` that carries a REST session's id in `Mcp-Session-Id` gives that session an MCP transport. Ending it from either side ends it for both.
+- `phoneapi papi` starts a session when a call first needs one and keeps its id in a `session` file next to the pairing file; it starts a new one, and says so, if the old one ended. `PAPI_SESSION` names a session to use instead, and `phoneapi session id` and `phoneapi session end` show and end the kept one.
+
 ### Screen lease
 
 One client at a time holds the screen, as [sharing.md](sharing.md) describes. Calls that act on the screen or show what is on it take the lease: input, IME, apps and intents, wake, unlock, lock, orientation, the UI tree, screenshots, waits with any condition that is not `browser.*`, browser input with `input` `touch` (and `cdp` for pointer input), and browser reads and snapshots with `show`. Reading a tab, and `cdp` keys, text, and `cdp-mouse` taps, need no lease.
 
-- An MCP session keeps the screen from its first such call until the session ends, it calls `screen_release`, or it makes no screen call for 30 s while someone else waits. Then cleanup runs and the waiter gets the screen; the session keeps its tabs, and its next screen call waits again and gets a note. A REST call holds the screen only while it runs.
+- A session keeps the screen from its first such call until the session ends, it calls `screen_release`, or it makes no screen call for 30 s while someone else waits. Then cleanup runs and the waiter gets the screen; the session keeps its tabs, and its next screen call waits again and gets a note. REST sessions follow the same rules.
 - A call that needs the screen while someone else has it waits up to 60 s, then fails with 409 `screen_busy`, saying how long the screen has been held.
 - When a holder lets go, PhoneAPI hides the keyboard, puts Chrome on a blank placeholder tab, goes home, and locks the phone before the next holder gets the screen. A step that failed is reported to the next holder: as a `# note:` line first in an MCP tool result, or an `X-PhoneAPI-Note` header on REST.
-- While Chrome is in front, it shows the screen holder's tab or the placeholder, never another MCP session's tab. A session without the screen that opens a tab, or whose page opens a popup, gets it behind, with `tookScreen` false.
+- While Chrome is in front, it shows the screen holder's tab or the placeholder, never another session's tab. A session without the screen that opens a tab, or whose page opens a popup, gets it behind, with `tookScreen` false.
 - A browser input, `browser_eval`, `browser_navigate`, or `browser_open` call from a session without the screen that brings an app forward fails with 409 `took_screen`. If no one held the screen, that session now does; otherwise the app that was in front comes back and the holder gets a note. Android and Chrome block nearly all of these, so this is a tripwire for workflows that rely on it.
 
 ### UI snapshot
@@ -102,14 +113,15 @@ Authenticated errors are JSON:
 | 404 | `not_found` | Unknown id/ref (authenticated) |
 | 404 | *(empty body)* | Missing/invalid Bearer |
 | 409 | `needs_user` / `no_keyboard` / … | Unlock or typing cannot proceed automatically |
+| 428 | `session_required` | A REST call that needs a session came without `Mcp-Session-Id`; start one with `POST /v1/sessions` |
 | 409 | `screen_busy` | Someone else held the screen for the whole 60 s wait |
-| 409 | `screen_taken` | A person in the viewer took the screen from this MCP session |
-| 409 | `tab_limit` | An MCP session has 4 tabs it opened, or all sessions 8 |
-| 409 | `took_screen` | A call from an MCP session without the screen brought an app or Chrome forward; the message names it |
+| 409 | `screen_taken` | A person in the viewer took the screen from this session |
+| 409 | `tab_limit` | A session has 4 tabs it opened, or all sessions 8 |
+| 409 | `took_screen` | A call from a session without the screen brought an app or Chrome forward; the message names it |
 | 409 | `tab_reloaded` | Chrome had unloaded the hidden tab, so PhoneAPI reloaded it instead of sending input or script to a page the caller has not seen |
 | 409 | `tab_frozen` | `cdp` or `cdp-mouse` input into a tab Chrome has paused, as it does to tabs hidden for about 5 minutes. Bring it forward with `touch` or `show`, or reload it |
 | 503 | `browser_frozen` | Android froze Chrome in the background, so nothing in it answers |
-| 429 | `too_many_sessions` | `initialize` past 16 MCP sessions for the token or 32 in all |
+| 429 | `too_many_sessions` | `initialize` or `POST /v1/sessions` past 16 sessions for the token or 32 in all |
 | 503 | `helper_unavailable` | Helper down or dropped; message may say starting / needs pairing / needs USB / stopped |
 | 500 | `internal` | Unexpected failure |
 
@@ -174,7 +186,7 @@ Browser pointer input has three `input` modes. `touch` brings the tab to the fro
 
 Target ids look like `chrome_devtools_remote~<pageId>`. Chrome's tabs are listed with DevTools' `Target.getTargets`, so a tab has the same id however it was found, and `openerId` names the tab that opened a popup. Tabs Chrome has unloaded can be missing from the list, and the blank placeholder tab PhoneAPI keeps for the screen is left out.
 
-An MCP session owns the tabs it opens, popups they open, and unowned tabs it claims by using them; `browser_targets` lists those and unowned tabs, with `owned`, and leaves out other sessions' tabs, which every browser tool refuses as `not_found`. A session can have 4 tabs it opened and all sessions 8; past either, opening fails with `tab_limit`. When a session ends, the tabs it opened close and those it claimed go back to being unowned; tabs left by a restart close when the helper next starts. The screen holder can also use the WebViews of the app in front. REST and the raw CDP socket can use any tab a live session does not own. A tab Chrome unloaded to save memory is reloaded in the background when used: reads, finds, and snapshots return the fresh page with `reloaded` true, and input and `eval` fail with `tab_reloaded`. Chrome must publish DevTools; Android 11+ needs Wireless Debugging; Android 10 needs the USB tunnel from `phoneapi helper`.
+A session, from MCP or REST, owns the tabs it opens, popups they open, and unowned tabs it claims by using them; `browser_targets` lists those and unowned tabs, with `owned`, and leaves out other sessions' tabs, which every browser tool refuses as `not_found`. A session can have 4 tabs it opened and all sessions 8; past either, opening fails with `tab_limit`. When a session ends, the tabs it opened close and those it claimed go back to being unowned; tabs left by a restart close when the helper next starts. The screen holder can also use the WebViews of the app in front. The raw CDP socket can use any tab no live session owns. A tab Chrome unloaded to save memory is reloaded in the background when used: reads, finds, and snapshots return the fresh page with `reloaded` true, and input and `eval` fail with `tab_reloaded`. Chrome must publish DevTools; Android 11+ needs Wireless Debugging; Android 10 needs the USB tunnel from `phoneapi helper`.
 
 | Method | Path | Scope | Summary |
 | --- | --- | --- | --- |
@@ -199,9 +211,12 @@ An MCP session owns the tabs it opens, popups they open, and unowned tabs it cla
 | --- | --- | --- | --- |
 | `GET` | `/v1/tokens` | admin | `TokenInfo[]` |
 | `POST` | `/v1/tokens` | admin | `CreateTokenRequest` → `CreatedToken` (201; secret once) |
-| `DELETE` | `/v1/tokens/{id}` | admin | Revoke → 204. Ends the token's MCP sessions within 30 s |
-| `GET` | `/v1/sessions` | admin | `SessionInfo[]`: MCP sessions by a hash of their id, with age, idle time, whether they hold the screen, their tab count, how often they brought an app forward without it (`tookScreen`), and for one from `session_start`, the hash of the session that started it (`parent`) |
-| `DELETE` | `/v1/sessions/{hash}` | admin | End an MCP session → 204 |
+| `DELETE` | `/v1/tokens/{id}` | admin | Revoke → 204. Ends the token's sessions within 30 s |
+| `POST` | `/v1/sessions` | any | Start a session → 201 `SessionStarted` |
+| `DELETE` | `/v1/sessions/current` | any | End the session named in `Mcp-Session-Id` → 204 |
+| `POST` | `/v1/screen/release` | any | Let the screen go for the session named in `Mcp-Session-Id` → `ActionResult` |
+| `GET` | `/v1/sessions` | admin | `SessionInfo[]`: sessions by a hash of their id, with age, idle time, whether they hold the screen, their tab count, how often they brought an app forward without it (`tookScreen`), and for one from `session_start`, the hash of the session that started it (`parent`) |
+| `DELETE` | `/v1/sessions/{hash}` | admin | End a session → 204 |
 | `GET` | `/v1/openapi.json` | observe | OpenAPI 3.1 document |
 
 ## WebSockets
@@ -283,7 +298,7 @@ When node ids are not stable, tool descriptions say so. Raw CDP, streams, and to
 | Swipe `direction` | `up`, `down`, `left`, `right` |
 | Screen `orientation` | `auto`, `lock`, `0`, `90`, `180`, `270`. `0` is the device's natural orientation. `display.autoRotate` reports the system setting; `display.rotation` is the current quarter-turn (`0`–`3`). An app can still force its own orientation. |
 | Text `mode` | `auto`, `keyboard`, `keyevent`, `setText` |
-| Browser `input` | `auto` (default; `touch` for an MCP session that holds the screen, and otherwise `cdp-mouse` for a tap and `cdp` for keys and text, so it does not take a free screen; swipes and gestures use `touch`; a REST call never holds the screen beforehand, so it gets the DevTools modes), `touch` (bring the tab forward and inject a hardware event), `cdp` (dispatch over DevTools; touch needs the tab showing in Chrome on screen, keys and text reach a background tab), `cdp-mouse` (a mouse click that reaches a background tab, taps only). Swipe and gesture coordinates are CSS viewport pixels. |
+| Browser `input` | `auto` (default; `touch` for a session that holds the screen, and otherwise `cdp-mouse` for a tap and `cdp` for keys and text, so it does not take a free screen; swipes and gestures use `touch`), `touch` (bring the tab forward and inject a hardware event), `cdp` (dispatch over DevTools; touch needs the tab showing in Chrome on screen, keys and text reach a background tab), `cdp-mouse` (a mouse click that reaches a background tab, taps only). Swipe and gesture coordinates are CSS viewport pixels. |
 | Node `action` | `click`, `longClick`, `focus`, `clearFocus`, `select`, `setText`, `scrollForward`, `scrollBackward`, `expand`, `collapse`, `dismiss`, `showOnScreen`, `imeEnter`, plus other platform / app-listed names. `imeEnter` needs Android 11. |
 
 Full request and response schemas live in OpenAPI and under `api-model` (`DeviceInfo`, `UiSnapshot`, `TapRequest`, `WaitRequest`, `BrowserTarget`, `ApiError`, …).

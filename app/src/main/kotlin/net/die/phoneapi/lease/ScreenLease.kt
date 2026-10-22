@@ -24,14 +24,11 @@ import net.die.phoneapi.model.ApiException
 
 /** Who can hold the screen. See docs/sharing.md. */
 sealed interface Holder {
-    /** An MCP session, keyed by the `Mcp-Session-Id` PhoneAPI gave it. */
+    /** A session, from MCP or REST, keyed by the `Mcp-Session-Id` PhoneAPI gave it. */
     data class Session(val id: String) : Holder
 
     /** A person's input socket in `/viewer`. */
     data class Viewer(val id: Long) : Holder
-
-    /** One REST call, which holds the screen only while it runs. */
-    data class Rest(val id: Long) : Holder
 }
 
 /** Who has the screen now, for the viewer page and the admin routes. */
@@ -46,10 +43,9 @@ data class LeaseState(
 data class Screened<T>(val value: T, val notes: List<String>)
 
 /**
- * The one exclusive screen lease. A holder keeps it until [release], except a [Holder.Rest] call,
- * which lets it go when the call returns. Others wait first come, first served for up to [waitMs],
- * then fail with `screen_busy`. Releasing runs [cleanup] before the next holder gets the screen,
- * and the steps that failed reach that holder as notes.
+ * The one exclusive screen lease. A holder keeps it until [release]. Others wait first come, first
+ * served for up to [waitMs], then fail with `screen_busy`. Releasing runs [cleanup] before the next
+ * holder gets the screen, and the steps that failed reach that holder as notes.
  *
  * A viewer takes a free screen on input with [viewerInput], and an agent's only with [takeOver].
  * Taking over cancels the agent's screen call in progress and makes its next ones fail with
@@ -91,14 +87,8 @@ class ScreenLease(
      */
     suspend fun <T> withScreen(holder: Holder, block: suspend () -> T): Screened<T> {
         acquire(holder)
-        try {
-            val value = runTracked(holder, block)
-            return Screened(value, drainNotes(holder))
-        } finally {
-            if (holder is Holder.Rest) {
-                withContext(NonCancellable) { release(holder, cleanup = false) }
-            }
-        }
+        val value = runTracked(holder, block)
+        return Screened(value, drainNotes(holder))
     }
 
     /**

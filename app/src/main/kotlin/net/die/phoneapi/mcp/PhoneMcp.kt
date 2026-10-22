@@ -49,15 +49,18 @@ internal fun Application.installPhoneMcp(services: ServerServices, sessions: Mcp
                     startSession(services, sessions, call)
                     return@post
                 }
-                // A session from session_start has no transport: it is only a tool argument.
-                val session = sessions.get(id)?.takeIf { it.transport != null }
+                val session = sessions.get(id)
                 when {
                     session == null -> call.respond(HttpStatusCode.NotFound, noSession())
                     session.tokenId != call.token.id -> call.respond(HttpStatusCode.NotFound)
-                    else -> {
+                    session.transport != null -> {
                         session.touch(sessions.clock())
                         serve(session, call)
                     }
+                    // A REST session takes an initialize, which gives it a transport.
+                    session.rest -> attachSession(services, sessions, session, call)
+                    // One from session_start has no transport: it is only a tool argument.
+                    else -> call.respond(HttpStatusCode.NotFound, noSession())
                 }
             }
             get {
@@ -85,13 +88,7 @@ private suspend fun startSession(
     val token = call.token
     sessions.admit(token.id)
     val id = sessions.newId()
-    val transport =
-        StreamableHttpServerTransport(
-            StreamableHttpServerTransport.Configuration(
-                enableJsonResponse = true,
-                enableDnsRebindingProtection = false,
-            )
-        )
+    val transport = newTransport()
     transport.setSessionIdGenerator { id }
     val control = sessions.control(id, token.id, token.name)
     val server = phoneServer(services, token.scopes, Holder.Session(id), control)
@@ -112,6 +109,37 @@ private suspend fun startSession(
     // leaves nothing behind.
     if (transport.sessionId == null) server.close()
 }
+
+/**
+ * Gives a REST [session] an MCP transport, from an `initialize` that carries its id, so one session
+ * works on both. A request that is not an initialize is refused by the transport, as for a new
+ * session, and leaves the session as it was.
+ */
+private suspend fun attachSession(
+    services: ServerServices,
+    sessions: McpSessions,
+    session: McpSession,
+    call: ApplicationCall,
+) {
+    val transport = newTransport()
+    transport.setSessionIdGenerator { session.id }
+    val control = sessions.control(session.id, session.tokenId, session.tokenName)
+    val server = phoneServer(services, call.token.scopes, Holder.Session(session.id), control)
+    transport.setOnSessionInitialized { session.attach(transport, server) }
+    transport.setOnSessionClosed { sessions.closed(it) }
+    server.createSession(transport)
+    session.touch(sessions.clock())
+    transport.handleRequest(null, call)
+    if (transport.sessionId == null) server.close()
+}
+
+private fun newTransport() =
+    StreamableHttpServerTransport(
+        StreamableHttpServerTransport.Configuration(
+            enableJsonResponse = true,
+            enableDnsRebindingProtection = false,
+        )
+    )
 
 /**
  * Hands [call] to the session's transport. A session that ends while the call waits, as on `DELETE`

@@ -19,3 +19,13 @@ public data class SessionInfo(
     @Doc("For a session made with session_start, the hash of the session that started it.")
     val parent: String? = null,
 )
+
+/** A session from `POST /v1/sessions`. */
+@Serializable
+public data class SessionStarted(
+    @Doc(
+        "Send this in the Mcp-Session-Id header on every REST call that acts on the phone or its tabs. It also names the session on MCP."
+    )
+    val id: String,
+    @Doc("The session ends after this long without a request.") val idleMs: Long,
+)

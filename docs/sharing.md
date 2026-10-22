@@ -1,6 +1,6 @@
 # Sharing the phone
 
-Phase 1, below, is built: MCP sessions, the screen lease with its queue and cleanup, the viewer's Take over, REST calls as one-call holders, the security limits, and browser input defaulting to `auto`. Phase 2 is built too: tab ownership with the caps and startup sweep, the placeholder tab that keeps other sessions' tabs off the screen, recovering unloaded tabs, `browser_frozen`, Chrome's Custom Tabs binding, and `took_screen`. It was checked on the Android 16 emulator, not yet on a phone. Where the build differs from the design below, the section says so. [REST sessions](#rest-sessions) are designed but not built. [api.md](api.md) describes what exists.
+Phase 1, below, is built: MCP sessions, the screen lease with its queue and cleanup, the viewer's Take over, REST calls as one-call holders (since replaced by REST sessions), the security limits, and browser input defaulting to `auto`. Phase 2 is built too: tab ownership with the caps and startup sweep, the placeholder tab that keeps other sessions' tabs off the screen, recovering unloaded tabs, `browser_frozen`, Chrome's Custom Tabs binding, and `took_screen`. It was checked on the Android 16 emulator, not yet on a phone. Where the build differs from the design below, the section says so. [REST sessions](#rest-sessions) are built too. [api.md](api.md) describes what exists.
 
 Several clients can drive one phone at once: two agent conversations, an agent and a person in `/viewer`, or a script on REST. Without rules, one taps while the other types, one navigates a tab the other is reading, or one sees what the other left on screen. This design lets them share the phone without that, and lets background Chrome tabs be used freely while someone else has the screen.
 
@@ -27,11 +27,9 @@ A lease belongs to a holder. These are the kinds:
 | MCP session | `initialize` on `/mcp` | `DELETE`, or idle expiry |
 | Started session | `session_start`, from an MCP session | `session_end`, idle expiry, or the session that started it ending |
 | Viewer | Its input socket opening | The socket closing |
-| REST call | The request | The response |
+| REST session | `POST /v1/sessions` | `DELETE /v1/sessions/current`, or idle expiry |
 
-[REST sessions](#rest-sessions), designed but not built, would replace the one-call REST holder with a session like MCP's.
-
-The screen lease and tab ownership are keyed by holder, not by `Mcp-Session-Id`, so the viewer and REST follow the same queue.
+The screen lease and tab ownership are keyed by holder, so the viewer and every session follow the same queue. A session's holder is its `Mcp-Session-Id`, whether MCP or REST made it.
 
 ## MCP sessions
 
@@ -73,7 +71,7 @@ So `/mcp` answers POSTs with JSON and refuses the GET stream with 405, which the
 
 ## REST sessions
 
-Designed, not built. Today a REST call is a one-call holder: it takes the screen, lets it go when it returns, and leaves any tab it opens unowned. That does not work for scripts, which run sequences such as unlock, launch an app, tap a field, type. Another holder can take the screen between two of those steps, and a session can claim a tab the script opened by using it. So REST gets sessions too, the same ones MCP has.
+Built. Before REST sessions, a REST call was a one-call holder: it took the screen, let it go when it returned, and left any tab it opened unowned. That does not work for scripts, which run sequences such as unlock, launch an app, tap a field, type. Another holder can take the screen between two of those steps, and a session can claim a tab the script opened by using it. So REST has sessions too, the same ones MCP has.
 
 ### Starting and ending
 
@@ -115,7 +113,7 @@ These stay sessionless:
 ### Sharing ids with MCP
 
 - **MCP to REST.** The id `initialize` returns works on REST calls as the same holder: same place in the screen queue, same tabs, same notes. An agent's client can make a REST call mid-turn without losing its screen.
-- **REST to MCP.** MCP requires `initialize` before anything else, so PhoneAPI accepts an `initialize` that carries an existing session's id in `Mcp-Session-Id`, from the same token, and attaches the MCP transport to that session instead of making a new one. A standard client never sends one, so it cannot affect them. A session that already has a transport refuses a second with 409 `session_attached`.
+- **REST to MCP.** MCP requires `initialize` before anything else, so PhoneAPI accepts an `initialize` that carries an existing session's id in `Mcp-Session-Id`, from the same token, and attaches the MCP transport to that session instead of making a new one. A standard client never sends one, so it cannot affect them. A session that already has a transport answers a second `initialize` as any MCP session does, with the SDK's 400 that it is already initialized. A session from `session_start` cannot take an `initialize`; its id stays a tool argument.
 - **Started sessions.** An id from `session_start` works in the header on REST too, for the token that owns it. On REST there is no parent session in the request, so any of the token's live sessions can be named.
 - **Ending.** A session is one session whichever side ends it. A REST `DELETE /v1/sessions/current` on a session with an MCP transport closes the transport, and the MCP client gets 404 on its next request. An MCP `DELETE` ends it for REST callers too.
 
@@ -123,7 +121,7 @@ These stay sessionless:
 
 `phoneapi papi` is the only REST client in this repository; the viewer page uses only `GET /v1/device` and its sockets.
 
-- `papi` creates a session on its first call that needs one and keeps the id next to the pairing file, in `.dev/session` for `phoneapi-dev`, so a sequence of `papi` calls is one holder, as a script expects. It sends `Mcp-Session-Id` on every call.
+- `papi` creates a session when the server first answers 428 and keeps the id next to the pairing file, in `.dev/session` for `phoneapi-dev`, so a sequence of `papi` calls is one holder, as a script expects. It sends `Mcp-Session-Id` on every call.
 - When a call gets 404 because the session ended, `papi` creates a new one, retries once, and says so on stderr: a new session starts without the screen or the old session's tabs.
 - `PAPI_SESSION` names a session to use instead of the file, so two scripts can run as separate holders, or a script can join an MCP session.
 - `phoneapi session end` ends the stored session and removes the file; `phoneapi session id` prints it.
@@ -175,7 +173,7 @@ When a holder releases the screen or expires, PhoneAPI runs cleanup before grant
 
 A step that fails is reported in the next holder's first result that needs the screen, so it checks the state before it acts.
 
-A REST call releases without cleanup, so a script's steps are not undone between calls. Another holder can take the screen between two REST calls, which is why REST is to get [sessions](#rest-sessions).
+A REST call runs as its [session](#rest-sessions), which keeps the screen between calls, so a script's steps are not undone and no other holder takes the screen between them.
 
 Chrome stays in the background after cleanup. When it comes forward for the new holder, it shows one of the holder's tabs or the placeholder, never another holder's page.
 
@@ -197,14 +195,14 @@ Agents never take the screen over. They queue behind a viewer like anyone else.
 
 ## Tabs
 
-A tab belongs to the holder that opened it, or that claimed it. A REST call that opens a tab leaves it unowned, until [REST sessions](#rest-sessions) let it own one.
+A tab belongs to the holder that opened it, or that claimed it. A REST session owns the tabs it opens, as an MCP session does.
 
 - `browser_targets` lists the caller's tabs and unowned ones, marked as unowned. Other holders' tabs are left out.
 - `browser_navigate`, `browser_close`, `browser_read`, `browser_find`, `browser_snapshot`, `browser_eval`, `browser_console`, browser input, and `browser.*` wait conditions refuse a tab another holder owns, the same way they refuse a tab that does not exist. `browser.newTarget` only matches tabs the caller owns.
 - A tab that a page opens, through `window.open` or a `target=_blank` link, belongs to the owner of the tab that opened it. That needs Chrome's `openerId`, which `/json/list` does not report, so ownership is read from the `Target` domain (`Target.getTargets`, or `Target.setDiscoverTargets` on the browser connection). On the emulator `Target.getTargets` reported `openerId` for both, with the opener on screen, behind another tab, and with Chrome in the background.
-- Tabs that existed before PhoneAPI started, tabs left by a session that died, and tabs REST opened belong to no holder. On these phones they are almost always Kira's own pages from earlier conversations, such as a signed-in shopping tab, so they stay usable. A session claims an unowned tab by using it, and the first session to do so gets it. When that session ends, the tab goes back to being unowned instead of closing.
+- Tabs that existed before PhoneAPI started and tabs left by a session that died belong to no holder. On these phones they are almost always Kira's own pages from earlier conversations, such as a signed-in shopping tab, so they stay usable. A session claims an unowned tab by using it, and the first session to do so gets it. When that session ends, the tab goes back to being unowned instead of closing.
 - WebViews belong to the app that shows them. The screen holder can use the WebViews of the app in front, which it can already see with `ui_snapshot`. Other sessions cannot.
-- REST and the raw CDP socket can use any tab except one a live holder owns. With [REST sessions](#rest-sessions), REST follows the session rules instead, and only the raw CDP socket keeps this.
+- The raw CDP socket can use any tab except one a live holder owns.
 - Each session can have 4 tabs open, and all sessions 8, not counting the placeholder, unowned tabs, or tabs a session claimed. Opening past either fails with `tab_limit` and a message to close one. Under memory pressure Chrome unloads hidden tabs, as in [Tabs that stop answering](#tabs-that-stop-answering). The caps keep that rare, and a few tabs at a time is what a turn needs. On the 2 GB emulator unloading started at 17 tabs, so 8 leaves room for the tab on screen, unowned tabs, and other apps on a 4 GB phone.
 - The tabs a session opened close when it ends. Tabs it claimed go back to being unowned.
 
@@ -333,8 +331,7 @@ Leaks between holders are limited by the rules above: `screen_busy` says how lon
 | 409 | `tab_reloaded` | Chrome had unloaded the tab, so PhoneAPI reloaded it instead of sending input to a page the session has not seen |
 | 409 | `tab_frozen` | Chrome has paused the hidden tab, so it would not respond to input. Bring it forward or reload it |
 | 503 | `browser_frozen` | Android has frozen Chrome in the background, so its tabs cannot answer. The message names the developer option that turns the freezer off |
-| 428 | `session_required` | A REST call that needs a session came without `Mcp-Session-Id`. Part of [REST sessions](#rest-sessions), not built |
-| 409 | `session_attached` | An `initialize` named a session that already has an MCP transport. Part of [REST sessions](#rest-sessions), not built |
+| 428 | `session_required` | A REST call that needs a session came without `Mcp-Session-Id` |
 | 429 | `too_many_sessions` | The token has 16 sessions open, or the phone has 32 |
 
 On MCP these are tool errors, like other `ApiException`s.
@@ -343,7 +340,7 @@ On MCP these are tool errors, like other `ApiException`s.
 
 1. Stateful `/mcp` with the token check, idle expiry, the session caps, hashed ids in the log, ending sessions on revocation, the admin session routes, and retiring `phoneapi mcp`. The `Origin` check on WebSocket upgrades. Holders, the screen lease with its queue, and cleanup. REST calls as one-call holders. The viewer's socket as a holder, with **Take over**. Browser input defaulting to `auto`. Built.
 2. Tab ownership, including opener inheritance and the startup sweep. Recovering unloaded tabs, `browser_frozen`, and holding Chrome's Custom Tabs binding while the helper runs. The placeholder tab and keeping Chrome in the background. `took_screen`. The tab caps. Built.
-3. REST sessions: `POST /v1/sessions`, `Mcp-Session-Id` on REST calls, 428 `session_required`, session-owned REST tabs, `POST /v1/screen/release`, ids shared with MCP, and `papi` keeping a session. Designed.
+3. REST sessions: `POST /v1/sessions`, `Mcp-Session-Id` on REST calls, 428 `session_required`, session-owned REST tabs, `POST /v1/screen/release`, ids shared with MCP, and `papi` keeping a session. Built.
 
 Legwork's phases 3 and 4 need phase 1. Phase 2 can follow. `shown`, `pending`, and `show` on reads and snapshots needed neither phase.
 

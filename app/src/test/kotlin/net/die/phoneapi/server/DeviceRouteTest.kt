@@ -18,9 +18,11 @@ class DeviceRouteTest {
         val control = api.tokens.issue("control", setOf(Scope.CONTROL))
         application { phoneApiModule(api.services) }
         apiClient().use { client ->
+            val session = startSession(client, control)
             val response =
                 client.post("/v1/device/orientation") {
                     bearer(control)
+                    session(session)
                     contentType(ContentType.Application.Json)
                     setBody("""{"orientation":"90"}""")
                 }

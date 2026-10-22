@@ -88,10 +88,11 @@ private fun operationKey(endpoint: ApiEndpoint): String =
     }
 
 private fun operation(endpoint: ApiEndpoint, schemas: JsonSchemas): JsonObject = buildJsonObject {
-    val scope = scopeName(endpoint.scope)
+    val scope = endpoint.scope?.let(::scopeName)
     put("summary", endpoint.summary)
-    put("description", endpoint.summary + " Requires the $scope scope.")
-    put("x-scope", scope)
+    val needs = if (scope == null) " Any token may call it." else " Requires the $scope scope."
+    put("description", endpoint.summary + needs)
+    put("x-scope", scope ?: "any")
     if (endpoint.method == ApiMethod.WEBSOCKET) put("x-websocket", true)
     pathParameters(endpoint.path)?.let { put("parameters", it) }
     endpoint.request?.let { request ->
