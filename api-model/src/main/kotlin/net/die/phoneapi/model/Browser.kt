@@ -22,6 +22,10 @@ public data class BrowserTarget(
     val tookScreen: Boolean? = null,
     @Doc("The tab that opened this one, as for a popup or a link opened in a new tab.")
     val openerId: String? = null,
+    @Doc(
+        "For an MCP session: true for its own tabs, false for unowned ones, which it claims by using them. Other sessions' tabs are not listed."
+    )
+    val owned: Boolean? = null,
 )
 
 @Serializable public data class OpenTabRequest(val url: String)

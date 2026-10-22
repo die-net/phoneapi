@@ -102,6 +102,7 @@ Authenticated errors are JSON:
 | 409 | `needs_user` / `no_keyboard` / … | Unlock or typing cannot proceed automatically |
 | 409 | `screen_busy` | Someone else held the screen for the whole 60 s wait |
 | 409 | `screen_taken` | A person in the viewer took the screen from this MCP session |
+| 409 | `tab_limit` | An MCP session has 4 tabs it opened, or all sessions 8 |
 | 429 | `too_many_sessions` | `initialize` past 16 MCP sessions for the token or 32 in all |
 | 503 | `helper_unavailable` | Helper down or dropped; message may say starting / needs pairing / needs USB / stopped |
 | 500 | `internal` | Unexpected failure |
@@ -165,7 +166,9 @@ Browser pointer input has three `input` modes. `touch` brings the tab to the fro
 
 ### Browser (CDP helpers)
 
-Target ids look like `chrome_devtools_remote~<pageId>`. Chrome must publish DevTools; Android 11+ needs Wireless Debugging; Android 10 needs the USB tunnel from `phoneapi helper`.
+Target ids look like `chrome_devtools_remote~<pageId>`. Chrome's tabs are listed with DevTools' `Target.getTargets`, so a tab has the same id however it was found, and `openerId` names the tab that opened a popup. Tabs Chrome has unloaded can be missing from the list.
+
+An MCP session owns the tabs it opens, popups they open, and unowned tabs it claims by using them; `browser_targets` lists those and unowned tabs, with `owned`, and leaves out other sessions' tabs, which every browser tool refuses as `not_found`. A session can have 4 tabs it opened and all sessions 8; past either, opening fails with `tab_limit`. When a session ends, the tabs it opened close and those it claimed go back to being unowned; tabs left by a restart close when the helper next starts. The screen holder can also use the WebViews of the app in front. REST and the raw CDP socket can use any tab a live session does not own. Chrome must publish DevTools; Android 11+ needs Wireless Debugging; Android 10 needs the USB tunnel from `phoneapi helper`.
 
 | Method | Path | Scope | Summary |
 | --- | --- | --- | --- |

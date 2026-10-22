@@ -20,6 +20,7 @@ import net.die.phoneapi.model.Event
 import net.die.phoneapi.model.Scope
 import net.die.phoneapi.model.TokenInfo
 import net.die.phoneapi.stream.VideoSpec
+import net.die.phoneapi.tabs.Tabs
 
 /**
  * The REST and MCP handlers' view of the process. [net.die.phoneapi.AppGraph] builds the real one;
@@ -47,6 +48,8 @@ data class ServerServices(
     val logcat: LogcatFeed,
     /** The one screen lease, shared by MCP sessions, the viewer, and REST calls. */
     val lease: ScreenLease,
+    /** Who owns which browser tab. */
+    val tabs: Tabs,
 )
 
 /** Per-connection logcat. Not part of [ServerServices.events]; only clients that ask receive it. */

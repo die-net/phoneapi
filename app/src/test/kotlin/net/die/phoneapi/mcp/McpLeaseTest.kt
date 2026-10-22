@@ -79,6 +79,27 @@ class McpLeaseTest {
         }
     }
 
+    @Test
+    fun `sessions keep their tabs`() = testApplication {
+        application { phoneApiModule(api.services) }
+        apiClient().use { http ->
+            val first = initialize(http)
+            val second = initialize(http)
+            val opened = call(http, first, "browser_open", """{"url":"https://example.com/"}""")
+            assertTrue(opened.contains("chrome_devtools_remote~t"), opened)
+            val read =
+                call(http, second, "browser_read", """{"target":"chrome_devtools_remote~t"}""")
+            assertTrue(read.contains("not_found"), read)
+            val mine =
+                call(http, first, "browser_read", """{"target":"chrome_devtools_remote~t"}""")
+            assertFalse(mine.contains("isError\":true"), mine)
+            assertEquals(setOf("chrome_devtools_remote~t"), api.tabStore.ids)
+            http.delete("/mcp") { headers(first) }
+            settle { api.tabStore.ids.isEmpty() }
+            assertEquals(emptySet<String>(), api.tabStore.ids)
+        }
+    }
+
     private suspend fun initialize(http: HttpClient): String {
         val response =
             http.post("/mcp") {

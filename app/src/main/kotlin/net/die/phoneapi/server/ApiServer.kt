@@ -73,8 +73,12 @@ fun Application.phoneApiModule(
         McpSessions(
                 services.tokens,
                 scope = this,
-                onEnd = { services.lease.forget(Holder.Session(it)) },
+                onEnd = {
+                    services.lease.forget(Holder.Session(it))
+                    services.tabs.end(Holder.Session(it))
+                },
                 holdsScreen = { services.lease.holds(Holder.Session(it)) },
+                tabCount = { services.tabs.count(Holder.Session(it)) },
             )
             .also { it.start() },
 ) {

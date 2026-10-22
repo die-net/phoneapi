@@ -121,7 +121,13 @@ private fun noSession() =
     ApiError("not_found", "No such MCP session. Start a new one with initialize.")
 
 /** The MCP server for one session, with the tools and resources [scopes] allow. */
-private fun phoneServer(services: ServerServices, scopes: Set<Scope>, holder: Holder): Server {
+private fun phoneServer(shared: ServerServices, scopes: Set<Scope>, holder: Holder): Server {
+    // The session's tools see only its own tabs and unowned ones.
+    val services =
+        shared.copy(
+            browser = shared.tabs.browserFor(holder),
+            waits = shared.tabs.waitsFor(holder, shared.waits),
+        )
     val tools = visibleMcpTools(scopes, services.device.capabilities())
     val resources = mcpResources(scopes)
     return Server(
