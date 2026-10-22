@@ -25,7 +25,12 @@ internal class UiAutomationSession(
     private var lastUseMs = 0L
     private var generation = 0
 
-    fun windows(): List<AccessibilityWindowInfo> = use { it.windows }
+    /** When the current UiAutomation connected, so [windows] can wait for its first windows. */
+    @Volatile private var connectedAtMs = 0L
+
+    fun windows(): List<AccessibilityWindowInfo> = use { ui ->
+        settledWindows(connectedAtMs, SystemClock::uptimeMillis, SystemClock::sleep) { ui.windows }
+    }
 
     fun performGlobalAction(action: Int): Boolean = use { it.performGlobalAction(action) }
 
@@ -94,6 +99,7 @@ internal class UiAutomationSession(
             onEvent(event)
             armIdle()
         }
+        connectedAtMs = SystemClock.uptimeMillis()
         Log.i(TAG, "UiAutomation connected")
         return ui
     }
