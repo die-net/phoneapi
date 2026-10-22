@@ -110,7 +110,8 @@ internal class TimerWatch(
         /** How long a background check waits, within DevTools' read timeout. */
         private const val WATCH_MS = 10_000L
         private const val SETUP_MS = 2_000L
-        private const val TIMER = "new Promise((done) => setTimeout(() => done(true), 0))"
+        // Not 0: Chrome runs a zero-delay timer at once, on a queue it never throttles or stops.
+        private const val TIMER = "new Promise((done) => setTimeout(() => done(true), 1))"
     }
 }
 

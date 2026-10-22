@@ -88,7 +88,7 @@ private val TOOLS: List<McpTool> =
         McpTool(
             name = "device_info",
             description =
-                "Model, Android version, display, helper status, capabilities, and current state: screen, keyguard, keyboard, and foregroundPackage. Cheap. foregroundPackage only updates while the helper is watching the screen, as during wait_for or right after ui_snapshot, so it can be missing or stale. To know what is in front, take a ui_snapshot or wait_for a window condition. The phone is shared: screenHolder says who has the screen now (you, agent, person, or script; absent when it is free), and screenHeldMs for how long. Tools whose descriptions say Uses the screen wait for it.",
+                "Model, Android version, display, helper status, capabilities, and current state: screen, keyguard, keyboard, and foregroundPackage. Cheap. foregroundPackage only updates while the helper is watching the screen, as during wait_for or right after ui_snapshot, so it can be missing or stale. To know what is in front, take a ui_snapshot or wait_for a window condition. The phone is shared: screenHolder says who has the screen now (you; parent, the session that started yours; subagent, one you started with session_start; agent; person; or script; absent when it is free), and screenHeldMs for how long. Tools whose descriptions say Uses the screen wait for it.",
             scope = Scope.OBSERVE,
             available = always,
             arguments = serializer<EmptyArgs>(),

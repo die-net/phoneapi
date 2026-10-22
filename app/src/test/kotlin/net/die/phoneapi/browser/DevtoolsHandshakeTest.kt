@@ -4,6 +4,7 @@ import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -39,6 +40,28 @@ class DevtoolsHandshakeTest {
                 )
             }
         assertTrue(error.message!!.contains("accept"))
+    }
+
+    @Test
+    fun `says a closed tab is gone`() {
+        val body = "No such target id: abc"
+        val response =
+            asciiLines(
+                "HTTP/1.1 500 Internal Server Error",
+                "Content-Length: ${body.length}",
+                "Content-Type:text/html",
+            ) + body.toByteArray()
+        val error =
+            assertThrows(IOException::class.java) {
+                handshakeWebSocket(
+                    ByteArrayInputStream(response),
+                    ByteArrayOutputStream(),
+                    "/devtools/page/abc",
+                )
+            }
+        assertEquals("DevTools WebSocket was refused (500): $body", error.message)
+        assertTrue(tabGone(error.message))
+        assertFalse(tabGone("DevTools WebSocket was refused (500)"))
     }
 
     @Test

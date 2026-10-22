@@ -33,7 +33,10 @@ internal fun handshakeWebSocket(
     output.flush()
     val (status, headers) = input.readHttpHeaders()
     if (status != SWITCHING_PROTOCOLS) {
-        throw IOException("DevTools WebSocket was refused ($status)")
+        // Chrome says why in a short body, such as "No such target id: ..." for a closed tab.
+        val why = runCatching { input.readBody(headers, MAX_REFUSAL).decodeToString().trim() }
+        val detail = why.getOrNull()?.takeIf { it.isNotEmpty() }?.let { ": $it" }.orEmpty()
+        throw IOException("DevTools WebSocket was refused ($status)$detail")
     }
     if (headers["sec-websocket-accept"] != websocketAccept(key)) {
         throw IOException("DevTools WebSocket accept key did not match")
@@ -154,6 +157,7 @@ private const val HTTP_OK = 200
 private const val SWITCHING_PROTOCOLS = 101
 private const val KEY_BYTES = 16
 private const val MAX_HEADER = 16 * 1024
+private const val MAX_REFUSAL = 512
 private const val CHUNK = 8 * 1024
 private const val WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 

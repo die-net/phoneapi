@@ -515,7 +515,7 @@ internal class BrowserServiceImpl(
                     block(cdp)
                 }
             } catch (e: ApiException) {
-                if (!started && e.message.orEmpty().contains(TAB_GONE)) {
+                if (!started && tabGone(e.message)) {
                     throw tabClosed(browserTargetId(socket, chromeId))
                 }
                 if (!retryable(e, socket, started, repeatable)) throw e

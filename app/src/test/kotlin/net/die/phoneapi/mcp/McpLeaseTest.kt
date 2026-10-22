@@ -170,6 +170,13 @@ class McpLeaseTest {
             assertTrue(mine.contains("""screenHolder\":\"you"""), mine)
             val theirs = call(http, second, "device_info", "{}")
             assertTrue(theirs.contains("""screenHolder\":\"agent"""), theirs)
+            val child = start(http, first)
+            val parent = call(http, first, "device_info", """{"session":"$child"}""")
+            assertTrue(parent.contains("""screenHolder\":\"parent"""), parent)
+            call(http, first, "screen_release", "{}")
+            call(http, first, "tap", """{"x":1,"y":2,"session":"$child"}""")
+            val sub = call(http, first, "device_info", "{}")
+            assertTrue(sub.contains("""screenHolder\":\"subagent"""), sub)
         }
     }
 
