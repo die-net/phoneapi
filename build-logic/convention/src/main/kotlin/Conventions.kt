@@ -38,7 +38,10 @@ internal fun Project.configureDetekt() {
     extensions.configure<DetektExtension> {
         buildUponDefaultConfig.set(true)
         allRules.set(true)
-        parallel.set(true)
+        // Parallel analysis races in the Kotlin compiler (KT-88461) and now and then fails a run
+        // with an ArrayIndexOutOfBoundsException while analyzing some file. detekt/detekt#9121
+        // recommends leaving it off until that is fixed.
+        parallel.set(false)
         debug.set(providers.gradleProperty("detektDebug").isPresent)
         config.setFrom(rootProject.file("config/detekt.yml"))
         basePath.set(rootProject.layout.projectDirectory)
