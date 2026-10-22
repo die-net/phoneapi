@@ -39,6 +39,7 @@ import net.die.phoneapi.model.OrientationRequest
 import net.die.phoneapi.model.PinStatus
 import net.die.phoneapi.model.PointerFrame
 import net.die.phoneapi.model.Scope
+import net.die.phoneapi.model.SessionInfo
 import net.die.phoneapi.model.SetPinRequest
 import net.die.phoneapi.model.SwipeRequest
 import net.die.phoneapi.model.TapRequest
@@ -426,6 +427,20 @@ public val phoneApiEndpoints: List<ApiEndpoint> =
             "/v1/tokens/{id}",
             Scope.ADMIN,
             "Revoke a bearer token.",
+            status = 204,
+        ),
+        endpoint(
+            ApiMethod.GET,
+            "/v1/sessions",
+            Scope.ADMIN,
+            "List MCP sessions by a hash of their id, with their age, idle time, and whether they hold the screen.",
+            response = ListSerializer(serializer<SessionInfo>()),
+        ),
+        endpoint(
+            ApiMethod.DELETE,
+            "/v1/sessions/{hash}",
+            Scope.ADMIN,
+            "End an MCP session, as its own DELETE would.",
             status = 204,
         ),
         endpoint(

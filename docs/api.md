@@ -92,6 +92,7 @@ Authenticated errors are JSON:
 | 404 | `not_found` | Unknown id/ref (authenticated) |
 | 404 | *(empty body)* | Missing/invalid Bearer |
 | 409 | `needs_user` / `no_keyboard` / … | Unlock or typing cannot proceed automatically |
+| 429 | `too_many_sessions` | `initialize` past 16 MCP sessions for the token or 32 in all |
 | 503 | `helper_unavailable` | Helper down or dropped; message may say starting / needs pairing / needs USB / stopped |
 | 500 | `internal` | Unexpected failure |
 
@@ -179,7 +180,9 @@ Target ids look like `chrome_devtools_remote~<pageId>`. Chrome must publish DevT
 | --- | --- | --- | --- |
 | `GET` | `/v1/tokens` | admin | `TokenInfo[]` |
 | `POST` | `/v1/tokens` | admin | `CreateTokenRequest` → `CreatedToken` (201; secret once) |
-| `DELETE` | `/v1/tokens/{id}` | admin | Revoke → 204 |
+| `DELETE` | `/v1/tokens/{id}` | admin | Revoke → 204. Ends the token's MCP sessions within 30 s |
+| `GET` | `/v1/sessions` | admin | `SessionInfo[]`: MCP sessions by a hash of their id, with age, idle time, and whether they hold the screen |
+| `DELETE` | `/v1/sessions/{hash}` | admin | End an MCP session → 204 |
 | `GET` | `/v1/openapi.json` | observe | OpenAPI 3.1 document |
 
 ## WebSockets
@@ -200,7 +203,12 @@ Auth: Bearer header, the `phoneapi` cookie, or `access_token` on the upgrade URL
 
 ## MCP
 
-`POST /mcp` is a stateless Streamable HTTP MCP endpoint (same Bearer token; **not** `access_token`). It does not restrict the Host header.
+`/mcp` is a stateful Streamable HTTP MCP endpoint (same Bearer token; **not** `access_token`). It does not restrict the Host header.
+
+- `initialize` starts a session, and the response's `Mcp-Session-Id` header names it. Every later request carries that header and the token that started the session; any other token gets the empty 404 an unknown token gets. An unknown or ended session gets 404, and the client starts again with `initialize`.
+- POSTs are answered with JSON. `GET` is refused with 405, since PhoneAPI sends nothing unprompted. `DELETE` ends the session, which cancels its calls in progress; those get 404.
+- A session ends after 20 minutes without a request, and when its token is revoked or replaced. A token can have 16 sessions open and the phone 32; past either, `initialize` fails with 429 `too_many_sessions`.
+- Sessions live in the app's memory, so restarting the app ends them all.
 
 For stdio hosts (Cursor, etc.), run `phoneapi mcp` (with the helper up). It installs the same localhost `adb forward` as `phoneapi server` and relays one JSON-RPC line at a time to `/mcp`. For Streamable HTTP clients, run `phoneapi server` and `POST` to `http://127.0.0.1:<port>/mcp` with the bearer token.
 
