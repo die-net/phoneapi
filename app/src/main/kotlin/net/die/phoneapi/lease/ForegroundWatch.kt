@@ -80,7 +80,6 @@ class ForegroundWatch(
         after: String,
         late: Boolean,
     ): ApiException {
-        counts.getOrPut(holder) { AtomicInteger() }.incrementAndGet()
         report(holder, after)
         val current = lease.state.value.holder
         // With another call from a session without the screen in flight, it is not clear whose
@@ -106,6 +105,8 @@ class ForegroundWatch(
                 "session, which does not hold the screen. $outcome Only calls that hold the " +
                 "screen should bring an app forward."
         if (late) lease.addNote(holder, "took_screen: $message")
+        // Counted last, so whoever sees the count also sees the screen and notes settled.
+        counts.getOrPut(holder) { AtomicInteger() }.incrementAndGet()
         return ApiException(409, "took_screen", message)
     }
 
