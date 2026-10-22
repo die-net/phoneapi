@@ -25,6 +25,7 @@ import net.die.phoneapi.model.TapRequest
 import net.die.phoneapi.model.TextRequest
 import net.die.phoneapi.server.ServerServices
 import net.die.phoneapi.server.scoped
+import net.die.phoneapi.server.withScreen
 
 /**
  * `POST /v1/input/tap|swipe|gesture|key|text`, `WS /v1/input/pointer`, and `POST
@@ -32,17 +33,33 @@ import net.die.phoneapi.server.scoped
  */
 fun Route.inputRoutes(services: ServerServices) {
     scoped(Scope.CONTROL) {
-        post("/v1/input/tap") { call.respond(services.input.tap(call.receive<TapRequest>())) }
-        post("/v1/input/swipe") { call.respond(services.input.swipe(call.receive<SwipeRequest>())) }
+        post("/v1/input/tap") {
+            val request = call.receive<TapRequest>()
+            call.respond(withScreen(call, services) { services.input.tap(request) })
+        }
+        post("/v1/input/swipe") {
+            val request = call.receive<SwipeRequest>()
+            call.respond(withScreen(call, services) { services.input.swipe(request) })
+        }
         post("/v1/input/gesture") {
-            call.respond(services.input.gesture(call.receive<GestureRequest>()))
+            val request = call.receive<GestureRequest>()
+            call.respond(withScreen(call, services) { services.input.gesture(request) })
         }
         webSocket("/v1/input/pointer") { servePointer(services, incoming) }
-        post("/v1/input/key") { call.respond(services.input.key(call.receive<KeyRequest>())) }
-        post("/v1/input/text") { call.respond(services.input.text(call.receive<TextRequest>())) }
-        post("/v1/ime/hide") { call.respond(services.input.hideIme()) }
+        post("/v1/input/key") {
+            val request = call.receive<KeyRequest>()
+            call.respond(withScreen(call, services) { services.input.key(request) })
+        }
+        post("/v1/input/text") {
+            val request = call.receive<TextRequest>()
+            call.respond(withScreen(call, services) { services.input.text(request) })
+        }
+        post("/v1/ime/hide") {
+            call.respond(withScreen(call, services) { services.input.hideIme() })
+        }
         post("/v1/ime/show") {
-            call.respond(services.input.showIme(call.receive<ImeShowRequest>()))
+            val request = call.receive<ImeShowRequest>()
+            call.respond(withScreen(call, services) { services.input.showIme(request) })
         }
     }
 }

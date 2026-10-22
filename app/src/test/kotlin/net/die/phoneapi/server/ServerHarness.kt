@@ -6,6 +6,7 @@ import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.header
 import io.ktor.http.HttpHeaders
 import io.ktor.server.testing.ApplicationTestBuilder
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
@@ -18,6 +19,7 @@ import net.die.phoneapi.core.SnapshotOptions
 import net.die.phoneapi.core.UiService
 import net.die.phoneapi.core.WaitService
 import net.die.phoneapi.helperclient.ShellResult
+import net.die.phoneapi.lease.ScreenLease
 import net.die.phoneapi.model.ActionResult
 import net.die.phoneapi.model.AppInfo
 import net.die.phoneapi.model.BrowserFindRequest
@@ -106,7 +108,7 @@ internal class RecordingWaits : WaitService {
 
 /** Fakes of the service interfaces, so [phoneApiModule] can run under `testApplication`. */
 @Suppress("InjectDispatcher") // The test server has no injected graph dispatcher.
-internal class FakeApi {
+internal class FakeApi(leaseWaitMs: Long = ScreenLease.WAIT_MS) {
     val tokens = MemoryTokens()
     val waits = RecordingWaits()
     var capabilities = allCapabilities()
@@ -114,6 +116,7 @@ internal class FakeApi {
     var imeShow: ImeShowRequest? = null
     var orientation: OrientationRequest? = null
     val pointerSessions = Channel<List<PointerFrame>>(capacity = Channel.UNLIMITED)
+    @Volatile var cleanups = 0
 
     val services: ServerServices =
         ServerServices(
@@ -176,6 +179,15 @@ internal class FakeApi {
             cdp = CdpPipes { _ -> IdlePipe },
             viewerText = { "http://127.0.0.1:1/viewer?access_token=TOKEN" },
             logcat = LogcatFeed { _ -> emptyFlow() },
+            lease =
+                ScreenLease(
+                    CoroutineScope(Dispatchers.Default),
+                    cleanup = {
+                        cleanups++
+                        emptyList()
+                    },
+                    waitMs = leaseWaitMs,
+                ),
         )
 
     private object IdlePipe : CdpPipe {

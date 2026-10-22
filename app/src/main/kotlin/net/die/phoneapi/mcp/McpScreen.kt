@@ -1,0 +1,111 @@
+package net.die.phoneapi.mcp
+
+import io.modelcontextprotocol.kotlin.sdk.types.CallToolResult
+import io.modelcontextprotocol.kotlin.sdk.types.TextContent
+import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import net.die.phoneapi.lease.Holder
+import net.die.phoneapi.lease.ScreenLease
+import net.die.phoneapi.model.ApiException
+
+/** Tools that always take the screen: they act on it or show what is on it. */
+internal val SCREEN_TOOLS =
+    setOf(
+        "ui_snapshot",
+        "ui_find",
+        "ui_act",
+        "tap",
+        "swipe",
+        "type_text",
+        "press_key",
+        "keyboard_hide",
+        "keyboard_show",
+        "app_launch",
+        "app_stop",
+        "app_clear",
+        "open_intent",
+        "device_wake",
+        "device_unlock",
+        "device_lock",
+        "device_orientation",
+        "screenshot",
+    )
+
+/** Tools whose arguments decide, in [takesScreen]. */
+internal val SOMETIMES_SCREEN_TOOLS =
+    setOf(
+        "wait_for",
+        "browser_tap",
+        "browser_swipe",
+        "browser_gesture",
+        "browser_key",
+        "browser_type",
+        "browser_read",
+        "browser_snapshot",
+    )
+
+/**
+ * Whether a call to [tool] with [args] takes the screen, as docs/sharing.md lists. Reading and cdp
+ * input on a tab need no screen; touch input brings the tab forward, and Chrome only takes cdp
+ * pointer input on the tab it is showing.
+ */
+internal fun takesScreen(tool: String, args: JsonObject?): Boolean =
+    when (tool) {
+        in SCREEN_TOOLS -> true
+        "wait_for" -> conditionTypes(args).any { !it.startsWith("browser.") }
+        "browser_tap",
+        "browser_swipe",
+        "browser_gesture" -> input(args) != "cdp-mouse"
+        "browser_key",
+        "browser_type" -> input(args) == "touch"
+        "browser_read",
+        "browser_snapshot" -> (args?.get("show") as? JsonPrimitive)?.booleanOrNull == true
+        else -> false
+    }
+
+private fun input(args: JsonObject?): String =
+    (args?.get("input") as? JsonPrimitive)?.contentOrNull?.lowercase() ?: "touch"
+
+private fun conditionTypes(args: JsonObject?): List<String> =
+    listOf("all", "any").flatMap { key ->
+        (args?.get(key) as? JsonArray).orEmpty().mapNotNull { condition ->
+            (condition.jsonObject["type"] as? JsonPrimitive)?.contentOrNull
+        }
+    }
+
+/**
+ * Runs [call] holding the screen for [holder] when [needed], and puts the holder's notes first in
+ * the result. `screen_busy` and `screen_taken` come back as tool errors.
+ */
+internal suspend fun leased(
+    lease: ScreenLease,
+    holder: Holder,
+    needed: Boolean,
+    call: suspend () -> CallToolResult,
+): CallToolResult {
+    if (!needed) return call()
+    val screened =
+        try {
+            lease.withScreen(holder) { call() }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: ApiException) {
+            return CallToolResult(
+                content = listOf(TextContent(text = "${e.error}: ${e.message.orEmpty()}")),
+                isError = true,
+            )
+        }
+    val result = screened.value
+    if (screened.notes.isEmpty()) return result
+    val notes = TextContent(text = screened.notes.joinToString("\n") { "# note: $it" })
+    return CallToolResult(
+        content = listOf(notes) + result.content,
+        isError = result.isError,
+        structuredContent = result.structuredContent,
+    )
+}

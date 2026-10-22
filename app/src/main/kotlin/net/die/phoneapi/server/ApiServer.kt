@@ -18,6 +18,7 @@ import io.ktor.server.websocket.pingPeriod
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.serialization.SerializationException
 import net.die.phoneapi.core.ApiException
+import net.die.phoneapi.lease.Holder
 import net.die.phoneapi.mcp.McpSessions
 import net.die.phoneapi.mcp.installPhoneMcp
 import net.die.phoneapi.model.ApiError
@@ -68,7 +69,14 @@ class ApiServer(
 
 fun Application.phoneApiModule(
     services: ServerServices,
-    sessions: McpSessions = McpSessions(services.tokens, scope = this).also { it.start() },
+    sessions: McpSessions =
+        McpSessions(
+                services.tokens,
+                scope = this,
+                onEnd = { services.lease.forget(Holder.Session(it)) },
+                holdsScreen = { services.lease.holds(Holder.Session(it)) },
+            )
+            .also { it.start() },
 ) {
     install(ContentNegotiation) { register(ContentType.Application.Json, PhoneJsonConverter) }
     install(WebSockets) { pingPeriod = 15.seconds }

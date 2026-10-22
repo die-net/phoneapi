@@ -12,6 +12,7 @@ import net.die.phoneapi.model.LaunchRequest
 import net.die.phoneapi.model.Scope
 import net.die.phoneapi.server.ServerServices
 import net.die.phoneapi.server.scoped
+import net.die.phoneapi.server.withScreen
 
 /**
  * `GET /v1/apps?launchable=`, `POST /v1/apps/{pkg}/launch|stop|clear` and `POST /v1/intents`.
@@ -26,13 +27,21 @@ fun Route.appRoutes(services: ServerServices) {
     }
     scoped(Scope.CONTROL) {
         post("/v1/apps/{pkg}/launch") {
+            val request = bodyOrDefault(call, LaunchRequest())
             call.respond(
-                services.apps.launch(call.packageName(), bodyOrDefault(call, LaunchRequest()))
+                withScreen(call, services) { services.apps.launch(call.packageName(), request) }
             )
         }
-        post("/v1/apps/{pkg}/stop") { call.respond(services.apps.stop(call.packageName())) }
-        post("/v1/apps/{pkg}/clear") { call.respond(services.apps.clear(call.packageName())) }
-        post("/v1/intents") { call.respond(services.apps.intent(call.receive<IntentRequest>())) }
+        post("/v1/apps/{pkg}/stop") {
+            call.respond(withScreen(call, services) { services.apps.stop(call.packageName()) })
+        }
+        post("/v1/apps/{pkg}/clear") {
+            call.respond(withScreen(call, services) { services.apps.clear(call.packageName()) })
+        }
+        post("/v1/intents") {
+            val request = call.receive<IntentRequest>()
+            call.respond(withScreen(call, services) { services.apps.intent(request) })
+        }
     }
 }
 

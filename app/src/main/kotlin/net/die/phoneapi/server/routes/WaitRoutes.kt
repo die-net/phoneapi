@@ -9,6 +9,8 @@ import net.die.phoneapi.model.WaitRequest
 import net.die.phoneapi.server.ServerServices
 import net.die.phoneapi.server.scoped
 import net.die.phoneapi.server.token
+import net.die.phoneapi.server.withScreen
+import net.die.phoneapi.wait.isBrowserCondition
 import net.die.phoneapi.wait.requireWaitAccess
 
 /**
@@ -22,7 +24,10 @@ fun Route.waitRoutes(services: ServerServices) {
             val request = call.receive<WaitRequest>()
             val scopes = call.token.scopes
             requireWaitAccess(request, scopes)
-            call.respond(services.waits.wait(request, scopes))
+            val screen = (request.all + request.any).any { !isBrowserCondition(it) }
+            call.respond(
+                withScreen(call, services, screen) { services.waits.wait(request, scopes) }
+            )
         }
     }
 }

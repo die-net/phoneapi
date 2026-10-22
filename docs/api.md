@@ -40,6 +40,14 @@ ADB `CREATE_TOKEN` (via `phoneapi pair`) grants every scope. Narrower tokens: `P
 - `humanize` defaults to **true** on taps, swipes, and gestures (including browser). Set `false` for exact points and a fixed contact.
 - `/v1/device.capabilities` (and MCP `device_info`) say what works right now. MCP omits tools the token or device cannot use.
 
+### Screen lease
+
+One client at a time holds the screen, as [sharing.md](sharing.md) describes. Calls that act on the screen or show what is on it take the lease: input, IME, apps and intents, wake, unlock, lock, orientation, the UI tree, screenshots, waits with any condition that is not `browser.*`, browser input with `input` `touch` (and `cdp` for pointer input), and browser reads and snapshots with `show`. Reading a tab, and `cdp` keys, text, and `cdp-mouse` taps, need no lease.
+
+- An MCP session keeps the screen from its first such call until the session ends. A REST call holds it only while it runs.
+- A call that needs the screen while someone else has it waits up to 60 s, then fails with 409 `screen_busy`, saying how long the screen has been held.
+- When a holder lets go, PhoneAPI hides the keyboard, goes home, and locks the phone before the next holder gets the screen. A step that failed is reported to the next holder: as a `# note:` line first in an MCP tool result, or an `X-PhoneAPI-Note` header on REST.
+
 ### UI snapshot
 
 `GET /v1/ui/snapshot`
@@ -92,6 +100,8 @@ Authenticated errors are JSON:
 | 404 | `not_found` | Unknown id/ref (authenticated) |
 | 404 | *(empty body)* | Missing/invalid Bearer |
 | 409 | `needs_user` / `no_keyboard` / … | Unlock or typing cannot proceed automatically |
+| 409 | `screen_busy` | Someone else held the screen for the whole 60 s wait |
+| 409 | `screen_taken` | A person in the viewer took the screen from this MCP session |
 | 429 | `too_many_sessions` | `initialize` past 16 MCP sessions for the token or 32 in all |
 | 503 | `helper_unavailable` | Helper down or dropped; message may say starting / needs pairing / needs USB / stopped |
 | 500 | `internal` | Unexpected failure |
