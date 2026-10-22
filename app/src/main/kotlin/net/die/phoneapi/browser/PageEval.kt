@@ -22,6 +22,16 @@ internal suspend fun evaluateIn(
     val frameId =
         loaded?.frameTree?.frame?.id
             ?: throw ApiException(502, "cdp_error", "Chrome did not return a frame")
+    return evaluateInFrame(cdp, frameId, expression, awaitPromise)
+}
+
+/** [evaluateIn] for a caller that already has the main frame's id. */
+internal suspend fun evaluateInFrame(
+    cdp: CdpSession,
+    frameId: String,
+    expression: String,
+    awaitPromise: Boolean,
+): EvalResult {
     val contextId =
         cdp.call(
                 "Page.createIsolatedWorld",

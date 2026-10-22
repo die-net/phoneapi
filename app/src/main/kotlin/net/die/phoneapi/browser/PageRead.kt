@@ -32,6 +32,9 @@ internal data class PageExtract(
     val title: String? = null,
     val url: String? = null,
     val readyState: String? = null,
+    /** `document.visibilityState`, which can say `visible` while Chrome itself is hidden. */
+    val visibility: String? = null,
+    val pending: List<String> = emptyList(),
     val status: Int = 0,
     val published: String? = null,
     val blocked: String? = null,
@@ -255,6 +258,7 @@ internal fun readPage(extract: PageExtract, request: BrowserReadRequest): Browse
         status = extract.status.takeIf { it > 0 },
         blocked = extract.blocked,
         sparse = extract.pageChars < SPARSE_CHARS,
+        pending = extract.pending,
         extracted = extract.extracted,
         version = page.version,
         totalChars = total,

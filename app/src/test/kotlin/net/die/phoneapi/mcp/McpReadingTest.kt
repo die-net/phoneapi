@@ -2,6 +2,7 @@ package net.die.phoneapi.mcp
 
 import net.die.phoneapi.model.BrowserFindResult
 import net.die.phoneapi.model.BrowserReadResult
+import net.die.phoneapi.model.BrowserSnapshot
 import net.die.phoneapi.model.PageHeading
 import net.die.phoneapi.model.PageLink
 import net.die.phoneapi.model.TextMatch
@@ -94,5 +95,63 @@ class McpReadingTest {
             """@9 "a link" https://example.com/b same-origin""",
             linksText(links).lines()[2],
         )
+    }
+
+    @Test
+    fun `drawn tab adds no notes`() {
+        assertEquals(readText(read), readText(read.copy(shown = true)))
+    }
+
+    @Test
+    fun `hidden tab says how to show`() {
+        val hidden =
+            read.copy(shown = false, pending = listOf("busy region", "1 loading placeholder"))
+        assertEquals(
+            listOf(
+                "# pending: busy region, 1 loading placeholder",
+                "# hidden: this tab is not on screen, so content that loads when drawn may be " +
+                    "missing; read again with show true to bring it forward",
+            ),
+            readText(hidden).lines().subList(1, 3),
+        )
+    }
+
+    @Test
+    fun `quiet hidden tab gets a note`() {
+        assertEquals(
+            "# hidden: this tab is not on screen",
+            readText(read.copy(shown = false)).lines()[1],
+        )
+    }
+
+    @Test
+    fun `failed show says so`() {
+        assertEquals(
+            "# still hidden after show: the tab did not come on screen; the phone may be locked",
+            readText(read.copy(shown = false, sparse = true), show = true).lines()[2],
+        )
+    }
+
+    @Test
+    fun `snapshot notes follow header`() {
+        val snapshot =
+            BrowserSnapshot(
+                id = "s~t",
+                compact = "# url=https://example.com/\n[1] RootWebArea",
+                shown = false,
+                pending = listOf("\"Load more\" control"),
+            )
+        assertEquals(
+            listOf(
+                    "# url=https://example.com/",
+                    "# pending: \"Load more\" control",
+                    "# hidden: this tab is not on screen, so content that loads when drawn may " +
+                        "be missing; snapshot again with show true to bring it forward",
+                    "[1] RootWebArea",
+                )
+                .joinToString("\n"),
+            snapshotText(snapshot),
+        )
+        assertEquals("only", snapshotText(BrowserSnapshot(id = "s~t", compact = "only")))
     }
 }

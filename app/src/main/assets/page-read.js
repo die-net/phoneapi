@@ -1,6 +1,6 @@
 // Turns a page into blocks for browser_read and browser_find. Runs in an isolated world after
-// Readability.js, as the body of a function given `options` ({scope, selector}). Rendering,
-// offsets, and searching happen in Kotlin, so this only walks the DOM.
+// Readability.js and page-pending.js, as the body of a function given `options` ({scope,
+// selector}). Rendering, offsets, and searching happen in Kotlin, so this only walks the DOM.
 
 const MAX_CHARS = 2000000;
 const SKIP = new Set([
@@ -218,6 +218,8 @@ return {
   title: document.title || null,
   url: location.href,
   readyState: document.readyState,
+  visibility: document.visibilityState,
+  pending: pagePending(),
   status: status,
   published: published() || articlePublished,
   blocked: blocked(status, bodyText),

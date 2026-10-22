@@ -24,6 +24,7 @@ import net.die.phoneapi.model.BROWSER_WAKE_DOC
 import net.die.phoneapi.model.BrowserGestureRequest
 import net.die.phoneapi.model.BrowserInput
 import net.die.phoneapi.model.BrowserKeyRequest
+import net.die.phoneapi.model.BrowserSnapshot
 import net.die.phoneapi.model.BrowserSnapshotOptions
 import net.die.phoneapi.model.BrowserSwipeRequest
 import net.die.phoneapi.model.BrowserTapRequest
@@ -38,6 +39,7 @@ import net.die.phoneapi.model.LaunchRequest
 import net.die.phoneapi.model.NodeActionRequest
 import net.die.phoneapi.model.OrientationRequest
 import net.die.phoneapi.model.Point
+import net.die.phoneapi.model.SHOW_DOC
 import net.die.phoneapi.model.Scope
 import net.die.phoneapi.model.SnapshotFormat
 import net.die.phoneapi.model.SwipeDirection
@@ -235,8 +237,20 @@ internal suspend fun browserSnapshot(
 ): CallToolResult = runTool {
     val args = request.args<BrowserSnapshotArgs>()
     val snapshot =
-        services.browser.snapshot(args.target, BrowserSnapshotOptions(args.maxNodes, args.maxChars))
-    snapshot.compact
+        services.browser.snapshot(
+            args.target,
+            BrowserSnapshotOptions(args.maxNodes, args.maxChars, args.show),
+        )
+    snapshotText(snapshot, args.show)
+}
+
+/** The outline, with notes on whether the tab was drawn after its header line. */
+internal fun snapshotText(snapshot: BrowserSnapshot, show: Boolean = false): String {
+    val notes = drawnNotes(snapshot.shown, snapshot.pending, sparse = false, show, "snapshot")
+    if (notes.isEmpty()) return snapshot.compact
+    val header = snapshot.compact.substringBefore('\n')
+    val rest = snapshot.compact.substringAfter('\n', "")
+    return (listOf(header) + notes + listOfNotNull(rest.ifEmpty { null })).joinToString("\n")
 }
 
 internal suspend fun browserTap(
@@ -503,6 +517,7 @@ internal data class BrowserSnapshotArgs(
     val maxNodes: Int = 400,
     @Doc("Most characters of outline to show, cut at a line. Cuts are reported like maxNodes.")
     val maxChars: Int? = null,
+    @Doc(SHOW_DOC) val show: Boolean = false,
 )
 
 @Serializable internal data class TargetUrlArgs(val target: String, val url: String)

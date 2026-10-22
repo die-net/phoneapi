@@ -312,17 +312,17 @@ private val MCP_TOOLS: List<McpTool> =
         McpTool(
             name = "browser_snapshot",
             description =
-                "Compact outline of a browser target's accessibility tree, with refs for browser_tap. Works in the background. Shows up to maxNodes lines (default 400) and 40 levels. When anything is left out, the first line ends with truncated and the next lines say how much. Links show their text, not their URL. To read a page's text, browser_read is much smaller.",
+                "Compact outline of a browser target's accessibility tree, with refs for browser_tap. Works in the background. Shows up to maxNodes lines (default 400) and 40 levels. When anything is left out, the first line ends with truncated and the next lines say how much. Links show their text, not their URL. To read a page's text, browser_read is much smaller. A tab that is not on screen is not drawn, so content that loads when drawn may be missing; the header says so, and show brings the tab forward first.",
             scope = Scope.BROWSER,
             available = Capabilities::browserCdp,
             arguments = serializer<BrowserSnapshotArgs>(),
-            annotations = readOnly,
+            annotations = changes,
             call = { graph, _, request -> browserSnapshot(graph, request) },
         ),
         McpTool(
             name = "browser_read",
             description =
-                "Read a page's text as markdown, a slice at a time. Works in the background. scope article (default) is the main content without navigation, footers, and ads. page is all visible text. selector reads one element, such as a table. The header gives the total length, a version, and nextOffset for the next slice, and flags a page that looks blocked or still loading. outline returns only headings with their offsets, cheaply. Pass url instead of target to open a new tab and read it in one call.",
+                "Read a page's text as markdown, a slice at a time. Works in the background. scope article (default) is the main content without navigation, footers, and ads. page is all visible text. selector reads one element, such as a table. The header gives the total length, a version, and nextOffset for the next slice, and flags a page that looks blocked or still loading. outline returns only headings with their offsets, cheaply. Pass url instead of target to open a new tab and read it in one call. A tab that is not on screen is not drawn, so content that loads when drawn may be missing; the header says so, and show brings the tab forward first.",
             scope = Scope.BROWSER,
             available = Capabilities::browserCdp,
             arguments = serializer<BrowserReadArgs>(),

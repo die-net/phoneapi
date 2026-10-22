@@ -163,6 +163,7 @@ public data class EvalResult(
 public data class BrowserSnapshotOptions(
     @Doc("Most node lines to show, 1 to 5000. Defaults to 400.") val maxNodes: Int = 400,
     @Doc("Most characters of outline below the header, cut at a line.") val maxChars: Int? = null,
+    @Doc(SHOW_DOC) val show: Boolean = false,
 )
 
 /** Compact accessibility tree of a browser target. */
@@ -172,6 +173,8 @@ public data class BrowserSnapshot(
     val url: String? = null,
     val title: String? = null,
     val compact: String,
+    @Doc(SHOWN_DOC) val shown: Boolean? = null,
+    @Doc(PENDING_DOC) val pending: List<String> = emptyList(),
 )
 
 /** Which part of a page browser reads and finds work over. */
@@ -195,6 +198,15 @@ public const val READ_SCOPE_DOC: String =
 public const val READ_SELECTOR_DOC: String =
     "CSS selector for one element to read instead of scope, such as a table or an article body."
 
+public const val SHOW_DOC: String =
+    "Bring the tab on screen first, waking the phone, and wait until its text stops growing, so content that loads only when drawn can load. Takes the screen, like touch input."
+
+public const val SHOWN_DOC: String =
+    "Whether Chrome was drawing this tab: Chrome in front with this tab selected, on an awake, unlocked phone. A hidden tab can be missing content that loads when drawn. Absent when it could not be told."
+
+public const val PENDING_DOC: String =
+    "Signs the page is still waiting to load content: a busy region, loading placeholders, or a Load more control."
+
 public const val READ_FORMAT_DOC: String =
     "markdown (default) or text. Offsets depend on the format, so use the same one for reading and finding."
 
@@ -215,6 +227,7 @@ public data class BrowserReadRequest(
     val offset: Int = 0,
     @Doc("Most characters to return, 1 to 100000. Defaults to 8000. Cut at a line or a space.")
     val maxChars: Int = 8_000,
+    @Doc(SHOW_DOC) val show: Boolean = false,
 )
 
 /** A heading in rendered content, at the offset its line starts. */
@@ -236,6 +249,8 @@ public data class BrowserReadResult(
         "The page has under 200 characters of visible text, so it may still be loading or need scripts."
     )
     val sparse: Boolean = false,
+    @Doc(PENDING_DOC) val pending: List<String> = emptyList(),
+    @Doc(SHOWN_DOC) val shown: Boolean? = null,
     @Doc("What was read: article, page (also when no article was found), or selector.")
     val extracted: String,
     @Doc("Changes when the rendered content changes, so offsets from another call still apply.")
