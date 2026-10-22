@@ -180,12 +180,17 @@ class McpSessions(
             }
 
             override fun resolve(id: String): Holder.Session? {
-                val session = sessions[id] ?: return null
-                val ours = session.id == parentId || session.parentId == parentId
-                if (session.tokenId != tokenId || !ours) return null
+                val session = sessions[id]?.takeIf(::ours) ?: return null
                 session.touch(now())
                 return Holder.Session(session.id)
             }
+
+            override fun related(holder: Holder.Session): Boolean =
+                sessions[holder.id]?.let(::ours) == true
+
+            private fun ours(session: McpSession): Boolean =
+                session.tokenId == tokenId &&
+                    (session.id == parentId || session.parentId == parentId)
         }
 
     /** A transport closed itself, as on `DELETE`. */

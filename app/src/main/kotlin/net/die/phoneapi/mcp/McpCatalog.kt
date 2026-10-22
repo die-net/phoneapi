@@ -99,7 +99,7 @@ private val TOOLS: List<McpTool> =
         McpTool(
             name = "session_start",
             description =
-                "Start a separate session for a subagent or a parallel task, with its own turn at the screen and its own browser tabs, so parallel work does not tap over each other or share tabs. Pass the returned id as session on every call made for that task, and end it with session_end when the task is done. It also ends with your own session, or after 20 minutes unused.",
+                "Give a subagent or parallel task its own place in line for the screen and its own browser tabs, so parallel tasks do not tap over each other. Not needed for one agent working step by step. Call it once per task, either yourself, putting the id in the subagent's instructions, or in the subagent. Then pass the id as session on every phone call for that task, reads included; a call without session acts as you, with your screen turn and your tabs. Tabs are not shared between sessions. End it with session_end when the task is done; it also ends when your connection ends, or after 20 minutes unused.",
             scope = Scope.OBSERVE,
             available = always,
             arguments = serializer<EmptyArgs>(),
@@ -109,7 +109,7 @@ private val TOOLS: List<McpTool> =
         McpTool(
             name = "session_end",
             description =
-                "End a session from session_start: close the tabs it opened and let the screen go if it held it.",
+                "End a session from session_start when its task is done: close the tabs it opened, give back the ones it took over, and let the screen go if it held it.",
             scope = Scope.OBSERVE,
             available = always,
             arguments = serializer<SessionEndArgs>(),
@@ -474,7 +474,7 @@ private val MCP_TOOLS: List<McpTool> = TOOLS.map {
 internal const val SESSION_ARGUMENT = "session"
 
 private const val SESSION_DOC =
-    "A session from session_start, for a subagent or parallel task with its own turn at the screen and its own tabs. Leave it out to act as yourself."
+    "Id from session_start, if this call is for a subagent or parallel task. Use the same id on every call for that task; leave it out for your own work."
 
 private fun McpTool.withSessionArgument(): McpTool {
     val argument = buildJsonObject {

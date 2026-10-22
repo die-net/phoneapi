@@ -47,10 +47,13 @@ One MCP client is usually one session, so its subagents share a turn at the scre
 
 - It returns a new session id, under the session that called it and bound to the same token. Every other tool takes an optional `session` argument naming it, and a call with it acts as that session: its own place in the screen queue, its own tabs, its own grace period and notes. Without the argument, a call acts as the caller's own session.
 - A session can name only itself or sessions it started. Another session's id, or one that has ended, fails with `not_found` and a message to call `session_start`.
+- Tabs are not shared between them. A tab that belongs to another session in the same family still fails with `not_found`, but the message says it belongs to the caller's own session or one from `session_start`, and how to use it. A tab of an unrelated session gets the plain `not_found`, so nothing about other clients leaks.
 - `session_end` ends one, as `DELETE` would: cleanup if it held the screen, and the tabs it opened close. It also ends after 20 minutes unused, and when the session that started it ends.
 - A started session has no transport, so `/mcp` answers its id in `Mcp-Session-Id` with 404. It counts toward the session caps and shows in `GET /v1/sessions` with `parent`, the hash of the session that started it.
 
 This is also the shape MCP's stateless revision (2026-07-28) asks for: it drops protocol sessions, and servers that need state across calls mint handles that clients pass as tool arguments. PhoneAPI's MCP SDK (0.15.0) does not speak that revision yet, so such clients still cannot connect, but the tools would carry over.
+
+`initialize` returns `instructions`, a short overview for the model: the phone is shared, which calls wait for the screen and for how long, that reading tabs and `cdp` input need no screen, `screen_release`, and `session_start` for parallel work. Clients decide whether the model sees them. Claude Code does. Legwork's hub serves its own tools and does not pass an upstream's instructions on yet, so there the tool descriptions have to carry it alone.
 
 The model carries the id, so it can forget it or pass a stale one. A forgotten id makes the call act as the caller's own session, and a stale one fails loudly. The id sits in the model's context and the client's logs, where the header kept it out of sight, but it is useless with any other token.
 

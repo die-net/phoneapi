@@ -149,8 +149,9 @@ internal suspend fun waitFor(
 
 internal suspend fun sessionStart(services: ServerServices): CallToolResult = runTool {
     val id = checkNotNull(services.sessions).start()
-    "session=$id\nPass it as session on each call for that task, and end it with session_end " +
-        "when the task is done."
+    "session=$id\nPass session=$id on every phone call for this task, reads included. A call " +
+        "without it acts as you, and tabs opened without it are yours, not the task's. End it " +
+        "with session_end when the task is done."
 }
 
 internal suspend fun sessionEnd(
