@@ -19,6 +19,7 @@ import net.die.phoneapi.core.SnapshotOptions
 import net.die.phoneapi.core.UiService
 import net.die.phoneapi.core.WaitService
 import net.die.phoneapi.helperclient.ShellResult
+import net.die.phoneapi.lease.ForegroundWatch
 import net.die.phoneapi.lease.ScreenLease
 import net.die.phoneapi.model.ActionResult
 import net.die.phoneapi.model.AppInfo
@@ -131,6 +132,19 @@ internal class FakeApi(leaseWaitMs: Long = ScreenLease.WAIT_MS) {
             waitMs = leaseWaitMs,
         )
 
+    /** The package the fake phone has in front, which a test changes to act out a launch. */
+    @Volatile var top: String? = "com.launcher"
+    val tookScreen = mutableListOf<String>()
+    val foreground =
+        ForegroundWatch(
+            lease,
+            CoroutineScope(Dispatchers.Default),
+            top = { top },
+            bringBack = { top = it },
+            report = { _, pkg -> synchronized(tookScreen) { tookScreen += pkg } },
+            lateMs = 200,
+        )
+
     val services: ServerServices =
         ServerServices(
             ui = FakeUi,
@@ -194,6 +208,7 @@ internal class FakeApi(leaseWaitMs: Long = ScreenLease.WAIT_MS) {
             logcat = LogcatFeed { _ -> emptyFlow() },
             lease = lease,
             tabs = Tabs(FakeBrowser, lease, inFront = { false }, store = tabStore),
+            foreground = foreground,
         )
 
     private object IdlePipe : CdpPipe {

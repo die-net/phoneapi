@@ -1,5 +1,6 @@
 package net.die.phoneapi.lease
 
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -68,6 +69,7 @@ class ScreenLease(
     private val notes = HashMap<Holder, MutableList<String>>()
     private val running = HashMap<Holder, MutableSet<Job>>()
     private val taken = HashSet<Job>()
+    private val started = AtomicLong()
     private var cleaning = false
     private var pendingCleanup: String? = null
     private val _state = MutableStateFlow(LeaseState())
@@ -96,8 +98,29 @@ class ScreenLease(
      * returns. For putting Chrome back on the holder's tab without cutting into a gesture.
      */
     suspend fun <T> betweenCalls(block: suspend () -> T): T = gate.withLock {
-        while (mutex.withLock { running.values.any { it.isNotEmpty() } }) delay(BETWEEN_POLL_MS)
+        while (callRunning()) delay(BETWEEN_POLL_MS)
         block()
+    }
+
+    /** Whether a screen call is running now. */
+    suspend fun callRunning(): Boolean = mutex.withLock { running.values.any { it.isNotEmpty() } }
+
+    /** How many screen calls have started, to tell whether any ran in a stretch of time. */
+    val screenCalls: Long
+        get() = started.get()
+
+    /** Gives [holder] the screen if no one has it or waits for it. True when it got it. */
+    suspend fun claim(holder: Holder): Boolean = mutex.withLock {
+        val current = _state.value.holder
+        if (current == holder) return@withLock true
+        if (current != null || cleaning || queue.isNotEmpty()) return@withLock false
+        grant(holder)
+        true
+    }
+
+    /** Leaves [holder] a note for its next screen call. */
+    suspend fun addNote(holder: Holder, message: String) {
+        mutex.withLock { note(holder, message) }
     }
 
     /** Whether [holder] has the screen now. */
@@ -235,6 +258,7 @@ class ScreenLease(
         val work = async(start = CoroutineStart.LAZY) { block() }
         // Registered under the gate, so betweenCalls cannot miss a call that is about to start.
         gate.withLock { mutex.withLock { running.getOrPut(holder) { HashSet() } += work } }
+        started.incrementAndGet()
         work.start()
         try {
             // join throws only when this caller is canceled, not when take over cancels the child.

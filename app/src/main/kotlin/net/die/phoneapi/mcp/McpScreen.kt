@@ -72,6 +72,22 @@ internal fun takesScreen(tool: String, args: JsonObject?): Boolean =
         else -> false
     }
 
+/**
+ * Tools that, without the screen, could still make a page launch an app, so the foreground watch
+ * watches the top task around them.
+ */
+internal val LAUNCHING_TOOLS =
+    setOf(
+        "browser_open",
+        "browser_navigate",
+        "browser_eval",
+        "browser_tap",
+        "browser_swipe",
+        "browser_gesture",
+        "browser_key",
+        "browser_type",
+    )
+
 /** The browser input tools, and the kind of input each sends. */
 private val INPUT_KINDS =
     mapOf(
@@ -111,6 +127,21 @@ private fun conditionTypes(args: JsonObject?): List<String> =
         }
     }
 
+/** `took_screen` as a tool error, like the lease's own errors. */
+internal suspend fun tookScreenError(call: suspend () -> CallToolResult): CallToolResult =
+    try {
+        call()
+    } catch (e: ApiException) {
+        if (e.error != "took_screen") throw e
+        errorResult(e)
+    }
+
+private fun errorResult(e: ApiException) =
+    CallToolResult(
+        content = listOf(TextContent(text = "${e.error}: ${e.message.orEmpty()}")),
+        isError = true,
+    )
+
 /**
  * Runs [call] holding the screen for [holder] when [needed], and puts the holder's notes first in
  * the result. `screen_busy` and `screen_taken` come back as tool errors.
@@ -128,10 +159,7 @@ internal suspend fun leased(
         } catch (e: CancellationException) {
             throw e
         } catch (e: ApiException) {
-            return CallToolResult(
-                content = listOf(TextContent(text = "${e.error}: ${e.message.orEmpty()}")),
-                isError = true,
-            )
+            return errorResult(e)
         }
     val result = screened.value
     if (screened.notes.isEmpty()) return result

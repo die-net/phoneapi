@@ -182,6 +182,7 @@ private fun pageLine(title: String?, url: String?, extra: String = ""): String =
 }
 
 private fun stateNotes(result: BrowserReadResult, show: Boolean): List<String> = buildList {
+    if (result.reloaded) add(RELOADED_NOTE)
     result.blocked?.let { add("# blocked: $it") }
     if (result.sparse)
         add("# sparse: under 200 characters of visible text; it may still be loading")
@@ -275,7 +276,8 @@ internal fun matchesText(result: BrowserFindResult): String {
             append('»').append(oneLine(match.after)).append('…')
         }
     }
-    return (listOf(pageLine(result.title, result.url), summary) + lines).joinToString("\n")
+    return (listOf(pageLine(result.title, result.url)) + reloadedNote(result) + summary + lines)
+        .joinToString("\n")
 }
 
 internal fun linksText(result: BrowserFindResult): String {
@@ -286,8 +288,17 @@ internal fun linksText(result: BrowserFindResult): String {
     val lines = links.map {
         "@${it.offset} ${quoted(it.text)} ${it.href}" + if (it.sameOrigin) " same-origin" else ""
     }
-    return (listOf(pageLine(result.title, result.url), summary) + lines).joinToString("\n")
+    return (listOf(pageLine(result.title, result.url)) + reloadedNote(result) + summary + lines)
+        .joinToString("\n")
 }
+
+private fun reloadedNote(result: BrowserFindResult): List<String> =
+    if (result.reloaded) listOf(RELOADED_NOTE) else emptyList()
+
+/** Chrome had unloaded the tab, so what the session saw before is gone. */
+internal const val RELOADED_NOTE =
+    "# reloaded: Chrome had unloaded this hidden tab, so PhoneAPI loaded it again; anything " +
+        "typed or scrolled before is gone"
 
 private fun oneLine(text: String): String = text.replace(WHITESPACE, " ")
 

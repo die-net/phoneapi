@@ -1,5 +1,14 @@
 package net.die.phoneapi.browser
 
+import java.io.IOException
+import java.net.SocketTimeoutException
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.coroutines.CoroutineContext
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.JsonObject
@@ -47,6 +56,63 @@ private data class TargetInfo(
 )
 
 /**
+ * A WebView's pages from `/json/list` on [devtools], which this closes. Gives up after [timeoutMs].
+ */
+internal suspend fun listJsonTargets(
+    devtools: DevtoolsSocket,
+    socket: String,
+    pid: Int?,
+    packageName: String?,
+    io: CoroutineContext,
+    timeoutMs: Long,
+): List<BrowserTarget> = coroutineScope {
+    val timedOut = AtomicBoolean(false)
+    val closer = launch {
+        delay(timeoutMs)
+        timedOut.set(true)
+        devtools.close()
+    }
+    try {
+        withContext(io) {
+            try {
+                listedTargets(
+                    httpGet(devtools.input, devtools.output, "/json/list", MAX_BODY),
+                    socket,
+                    pid,
+                    packageName,
+                )
+            } catch (e: SocketTimeoutException) {
+                throw ApiException(
+                    503,
+                    "cdp_timeout",
+                    e.message ?: "DevTools did not answer in time",
+                    cause = e,
+                )
+            } catch (e: IOException) {
+                coroutineContext.ensureActive()
+                if (timedOut.get()) {
+                    throw ApiException(
+                        503,
+                        "cdp_timeout",
+                        "DevTools did not answer in time",
+                        cause = e,
+                    )
+                }
+                throw ApiException(
+                    502,
+                    "cdp_error",
+                    e.message?.takeIf { it.isNotBlank() } ?: DEVTOOLS_CLOSED,
+                    cause = e,
+                )
+            }
+        }
+    } finally {
+        closer.cancel()
+        devtools.close()
+    }
+}
+
+/**
  * A WebView's pages from `/json/list`. Chrome's come from [chromeTargets] instead, since its
  * `/json/list` ids differ from the ones the `Target` domain uses.
  */
@@ -86,3 +152,4 @@ private data class ListedTarget(
 )
 
 private val SKIPPED_TYPES = setOf("service_worker", "shared_worker", "worker")
+private const val MAX_BODY = 4 * 1024 * 1024

@@ -9,12 +9,11 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.JsonObject
@@ -57,9 +56,10 @@ internal class CdpSession(
 
     suspend fun call(method: String, params: JsonObject? = null): JsonObject =
         try {
-            withTimeout(CALL_TIMEOUT_MS) { roundTrip(method, params) }
-        } catch (e: TimeoutCancellationException) {
-            throw ApiException(503, "cdp_timeout", "DevTools did not answer in time", cause = e)
+            // Only this call's own timeout is cdp_timeout. A caller's shorter one stays a
+            // cancellation, so withTimeoutOrNull around a call works.
+            withTimeoutOrNull(CALL_TIMEOUT_MS) { roundTrip(method, params) }
+                ?: throw ApiException(503, "cdp_timeout", "DevTools did not answer in time")
         } catch (e: CancellationException) {
             throw e
         } catch (e: ApiException) {

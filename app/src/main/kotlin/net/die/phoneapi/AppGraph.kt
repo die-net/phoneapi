@@ -3,6 +3,7 @@ package net.die.phoneapi
 import android.content.Context
 import android.graphics.Rect
 import android.os.Build
+import android.util.Log
 import java.io.File
 import java.io.FileInputStream
 import kotlinx.coroutines.CoroutineDispatcher
@@ -11,6 +12,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import net.die.phoneapi.apps.AppsServiceImpl
 import net.die.phoneapi.apps.RESUMED_ACTIVITY_ARGS
 import net.die.phoneapi.apps.resumedPackage
@@ -19,6 +22,7 @@ import net.die.phoneapi.browser.CdpForward
 import net.die.phoneapi.browser.DevtoolsPreconditions
 import net.die.phoneapi.browser.DevtoolsSocket
 import net.die.phoneapi.browser.HelperCdpPipes
+import net.die.phoneapi.browser.TabProbe
 import net.die.phoneapi.browser.USB_DEVTOOLS_SOCKET
 import net.die.phoneapi.browser.UsbDevtools
 import net.die.phoneapi.core.AppsService
@@ -45,10 +49,15 @@ import net.die.phoneapi.input.InjectTouchBackend
 import net.die.phoneapi.input.InputServiceImpl
 import net.die.phoneapi.input.TouchInput
 import net.die.phoneapi.input.TouchOutcome
+import net.die.phoneapi.lease.ForegroundWatch
 import net.die.phoneapi.lease.ScreenCleanup
 import net.die.phoneapi.lease.ScreenLease
+import net.die.phoneapi.mcp.McpSessions
 import net.die.phoneapi.model.ActionResult
+import net.die.phoneapi.model.ApiException
+import net.die.phoneapi.model.EventTypes
 import net.die.phoneapi.model.HelperStatus
+import net.die.phoneapi.model.KeyRequest
 import net.die.phoneapi.model.ScreenState
 import net.die.phoneapi.power.PinStore
 import net.die.phoneapi.power.PowerServiceImpl
@@ -241,6 +250,14 @@ class AppGraph(
             logcat = HelperLogcatFeed(helper, bus, ioDispatcher),
             lease = screenLease,
             tabs = tabs,
+            foreground =
+                ForegroundWatch(
+                    screenLease,
+                    scope,
+                    top = { topPackage() },
+                    bringBack = { pkg -> bringBack(pkg) },
+                    report = { holder, pkg -> tookScreen(McpSessions.hashOf(holder.id), pkg) },
+                ),
         )
 
     val server = ApiServer(services, socketName = context.packageName)
@@ -276,12 +293,58 @@ class AppGraph(
         return activities.ok && resumedPackage(activities.stdout) == pkg
     }
 
+    private suspend fun launchPackage(pkg: String) =
+        shell.exec(
+            listOf(
+                "am",
+                "start",
+                "-a",
+                "android.intent.action.MAIN",
+                "-c",
+                "android.intent.category.LAUNCHER",
+                "-p",
+                pkg,
+            )
+        )
+
+    /** The package of the resumed activity, or null when the helper cannot tell. */
+    private suspend fun topPackage(): String? =
+        try {
+            val activities = shell.exec(RESUMED_ACTIVITY_ARGS)
+            if (activities.ok) resumedPackage(activities.stdout) else null
+        } catch (_: ApiException) {
+            null
+        }
+
+    /** Puts [pkg] back in front, or goes home when it has no launcher entry, as a launcher. */
+    private suspend fun bringBack(pkg: String) {
+        try {
+            val launched = launchPackage(pkg)
+            if (!launched.ok || launched.stdout.contains("Error"))
+                input.key(KeyRequest(key = "HOME"))
+        } catch (_: ApiException) {
+            // The helper is gone; the holder's next result says to check the screen.
+        }
+    }
+
+    private fun tookScreen(session: String, pkg: String) {
+        Log.w(TAG, "MCP session $session brought $pkg forward without holding the screen")
+        bus.emit(
+            EventTypes.SCREEN_TAKEN,
+            buildJsonObject {
+                put("session", session)
+                put("package", pkg)
+            },
+        )
+    }
+
     @Suppress("MissingUseCall")
     private fun browserService(): BrowserService =
         BrowserServiceImpl(
             io = ioDispatcher,
             listSockets = { helper.require().listDevtoolsSockets() },
             open = { name -> openDevtools(name, DEVTOOLS_READ_MS) },
+            openProbe = { name -> openDevtools(name, TabProbe.PROBE_MS) },
             contentBounds = { pkg -> tree.contentBounds(pkg.orEmpty()) },
             touchAt = { rect, humanize ->
                 val outcome = touch.tap(rect, humanize = humanize)
@@ -294,20 +357,7 @@ class AppGraph(
             prepare = { autoWake -> power.prepareForAction(autoWake) },
             sequence = { tree.seq.value },
             invalidateSnapshots = { tree.invalidate() },
-            showPackage = { pkg ->
-                shell.exec(
-                    listOf(
-                        "am",
-                        "start",
-                        "-a",
-                        "android.intent.action.MAIN",
-                        "-c",
-                        "android.intent.category.LAUNCHER",
-                        "-p",
-                        pkg,
-                    )
-                )
-            },
+            showPackage = { pkg -> launchPackage(pkg) },
             inFront = { pkg -> appInFront(pkg) },
             pageScript = {
                 asset("readability/Readability.js").decodeToString() +
@@ -361,6 +411,7 @@ class AppGraph(
 
     private companion object {
         const val DEVTOOLS_READ_MS = 15_000L
+        const val TAG = "PhoneApiLease"
     }
 }
 

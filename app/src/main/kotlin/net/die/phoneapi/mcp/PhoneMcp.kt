@@ -15,6 +15,8 @@ import io.ktor.server.routing.routing
 import io.modelcontextprotocol.kotlin.sdk.server.Server
 import io.modelcontextprotocol.kotlin.sdk.server.ServerOptions
 import io.modelcontextprotocol.kotlin.sdk.server.StreamableHttpServerTransport
+import io.modelcontextprotocol.kotlin.sdk.types.CallToolRequest
+import io.modelcontextprotocol.kotlin.sdk.types.CallToolResult
 import io.modelcontextprotocol.kotlin.sdk.types.Implementation
 import io.modelcontextprotocol.kotlin.sdk.types.ReadResourceResult
 import io.modelcontextprotocol.kotlin.sdk.types.ServerCapabilities
@@ -121,7 +123,11 @@ private fun noSession() =
     ApiError("not_found", "No such MCP session. Start a new one with initialize.")
 
 /** The MCP server for one session, with the tools and resources [scopes] allow. */
-private fun phoneServer(shared: ServerServices, scopes: Set<Scope>, holder: Holder): Server {
+private fun phoneServer(
+    shared: ServerServices,
+    scopes: Set<Scope>,
+    holder: Holder.Session,
+): Server {
     // The session's tools see only its own tabs and unowned ones.
     val services =
         shared.copy(
@@ -152,11 +158,7 @@ private fun phoneServer(shared: ServerServices, scopes: Set<Scope>, holder: Hold
                 inputSchema = tool.schema,
                 toolAnnotations = tool.annotations,
             ) { asked ->
-                val request = resolveInput(tool.name, asked, services.lease.holds(holder))
-                val screen = takesScreen(tool.name, request.params.arguments)
-                leased(services.lease, holder, screen) {
-                    services.tabs.screenCall(holder) { tool.call(services, scopes, request) }
-                }
+                callTool(services, scopes, holder, tool, asked)
             }
         }
         resources.forEach { resource ->
@@ -182,3 +184,27 @@ private fun phoneServer(shared: ServerServices, scopes: Set<Scope>, holder: Hold
 }
 
 private const val SESSION_HEADER = "Mcp-Session-Id"
+
+/**
+ * Runs [holder]'s call to [tool]: holding the screen when it needs it, keeping other sessions' tabs
+ * off Chrome's screen meanwhile, and otherwise watching for it bringing an app forward.
+ */
+private suspend fun callTool(
+    services: ServerServices,
+    scopes: Set<Scope>,
+    holder: Holder.Session,
+    tool: McpTool,
+    asked: CallToolRequest,
+): CallToolResult {
+    val request = resolveInput(tool.name, asked, services.lease.holds(holder))
+    val screen = takesScreen(tool.name, request.params.arguments)
+    return leased(services.lease, holder, screen) {
+        val call = suspend { tool.call(services, scopes, request) }
+        when {
+            screen -> services.tabs.screenCall(holder, call)
+            tool.name in LAUNCHING_TOOLS ->
+                tookScreenError { services.foreground.watch(holder, call) }
+            else -> call()
+        }
+    }
+}

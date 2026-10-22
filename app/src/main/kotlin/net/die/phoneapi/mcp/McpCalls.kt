@@ -246,7 +246,9 @@ internal suspend fun browserSnapshot(
 
 /** The outline, with notes on whether the tab was drawn after its header line. */
 internal fun snapshotText(snapshot: BrowserSnapshot, show: Boolean = false): String {
-    val notes = drawnNotes(snapshot.shown, snapshot.pending, sparse = false, show, "snapshot")
+    val notes =
+        listOfNotNull(RELOADED_NOTE.takeIf { snapshot.reloaded }) +
+            drawnNotes(snapshot.shown, snapshot.pending, sparse = false, show, "snapshot")
     if (notes.isEmpty()) return snapshot.compact
     val header = snapshot.compact.substringBefore('\n')
     val rest = snapshot.compact.substringAfter('\n', "")
