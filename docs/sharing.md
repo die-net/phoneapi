@@ -47,7 +47,7 @@ One MCP client is usually one session, so its subagents share a turn at the scre
 
 - It returns a new session id, under the session that called it and bound to the same token. Every other tool takes an optional `session` argument naming it, and a call with it acts as that session: its own place in the screen queue, its own tabs, its own grace period and notes. Without the argument, a call acts as the caller's own session.
 - A session can name only itself or sessions it started. Another session's id, or one that has ended, fails with `not_found` and a message to call `session_start`.
-- A session and one it started never wait for each other's screen. A screen call while the other one holds the screen fails at once with `session_conflict`, saying which way round it is: a session from `session_start` called while its starter held the screen, which on 2026-10-22 was Kira passing `session` on her own calls, or the starter called while one of its sessions held it. Waiting would queue the caller's own work behind itself, and after 30 seconds the idle-holder rule would hand the screen over with a cleanup the caller never asked for. Two sessions started by the same one still wait for each other, since that is parallel work.
+- A session and one it started never wait for each other's screen. A screen call while the other one holds the screen fails at once with `session_conflict`, saying which way round it is: a session from `session_start` called while its starter held the screen, which on 2026-10-22 was an agent passing `session` on its own calls, or the starter called while one of its sessions held it. Waiting would queue the caller's own work behind itself, and after 30 seconds the idle-holder rule would hand the screen over with a cleanup the caller never asked for. Two sessions started by the same one still wait for each other, since that is parallel work.
 - Tabs are not shared between them. A tab that belongs to another session in the same family still fails with `not_found`, but the message says it belongs to the caller's own session or one from `session_start`, and how to use it. A tab of an unrelated session gets the plain `not_found`, so nothing about other clients leaks.
 - `session_end` ends one, as `DELETE` would: cleanup if it held the screen, and the tabs it opened close. It also ends after 20 minutes unused, and when the session that started it ends.
 - A started session has no transport, so `/mcp` answers its id in `Mcp-Session-Id` with 404. It counts toward the session caps and shows in `GET /v1/sessions` with `parent`, the hash of the session that started it.
@@ -372,7 +372,7 @@ The emulator runs Chrome 133, and the phone Chrome 155.0.8059.84. Checked on the
 - Tabs not on screen launched no app in 8 tries with `tel:` and `intent:` links, by click and by script with a user gesture. From the tab on screen, both opened the dialer.
 - Page commands work on each page's own DevTools endpoint. Attaching through the browser connection got no answers.
 
-Checked on the phone on 2026-10-22, with v0.3.0, by Kira through her tools and over adb:
+Checked on the phone on 2026-10-22, with v0.3.0, by the phone's agent through its tools and over adb:
 
 - `use_freezer=false`, so Android 11 prints "Freezer settings" and has the freezer off, and `cached_apps_freezer` is unset. PhoneAPI holds Chrome's Custom Tabs binding (`chromeKept`).
 - A session's own tab stayed on screen while another session opened a tab, so switching back works on Chrome 155.
@@ -397,7 +397,7 @@ Checked on the phone on 2026-10-22, with this branch's dev build beside v0.3.0, 
 - Chrome 155 refuses a closed tab with 500 "No such target id", as 133 does, and PhoneAPI reports it as `not_found`.
 - The direct top-task query uses `getTasks(int)` on Android 11, as on Android 10, and `show` brought Chrome forward with it.
 - Two `ui_snapshot` calls at once connected UiAutomation once, with no "already registered". The first snapshot right after connecting saw 0 nodes and 0 windows; the next, 9 seconds later, saw 30 nodes.
-- Restarting the dev helper closed both test tabs a live session had: the startup sweep ran on every helper connection. It now runs once per app start. Kira's own helper also restarted during cleanup, when the USB connection dropped, and her app relaunched it within 30 seconds.
+- Restarting the dev helper closed both test tabs a live session had: the startup sweep ran on every helper connection. It now runs once per app start. The release build's helper also restarted during cleanup, when the USB connection dropped, and its app relaunched it within 30 seconds.
 
 Still to check on the phone:
 - Whether a tab opened while Chrome is in the background becomes Chrome's selected tab. On the Android 16 emulator it does: Chrome selects it as it comes forward, even over a `Page.bringToFront` sent just before, which is why `show` checks that its tab is still showing and tries again. Opening the tab did not bring Chrome forward.
