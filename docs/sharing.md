@@ -1,6 +1,6 @@
 # Sharing the phone
 
-This is a design, not a description of running code. Nothing here is built yet. [architecture.md](architecture.md) and [api.md](api.md) describe what exists.
+Phase 1, below, is built: MCP sessions, the screen lease with its queue and cleanup, the viewer's Take over, REST calls as one-call holders, the security limits, and browser input defaulting to `auto`. Phase 2, tab ownership and keeping background tabs working, is still a design. [api.md](api.md) describes what exists.
 
 Several clients can drive one phone at once: two agent conversations, an agent and a person in `/viewer`, or a script on REST. Without rules, one taps while the other types, one navigates a tab the other is reading, or one sees what the other left on screen. This design lets them share the phone without that, and lets background Chrome tabs be used freely while someone else has the screen.
 
