@@ -430,7 +430,14 @@ internal class BrowserServiceImpl(
         return pkg?.let { inFront(it) }
     }
 
-    private suspend fun listOne(socket: HelperSocket): List<BrowserTarget> = coroutineScope {
+    private suspend fun listOne(socket: HelperSocket): List<BrowserTarget> {
+        if (socket.name != CHROME_SOCKET) return listJson(socket)
+        val result = useCdp(socket.name, "/devtools/browser") { it.call("Target.getTargets") }
+        return chromeTargets(result, socket.name, socket.pid, socket.packageName)
+    }
+
+    /** WebViews' targets, from `/json/list`. */
+    private suspend fun listJson(socket: HelperSocket): List<BrowserTarget> = coroutineScope {
         val devtools = withContext(io) { open(socket.name) }
         val timedOut = AtomicBoolean(false)
         val closer = launch {

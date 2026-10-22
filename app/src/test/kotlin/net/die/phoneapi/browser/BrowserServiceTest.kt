@@ -30,13 +30,18 @@ class BrowserServiceTest {
     @Test
     fun `lists a page`() {
         val body =
-            """[{"id":"abc","type":"page","title":"Hi","url":"https://example.com/"},{"id":"w","type":"service_worker","url":"https://example.com/sw.js"}]"""
-        val service = service(http(body), sockets = CHROME)
+            targetsReply(
+                """{"targetId":"abc","type":"page","title":"Hi","url":"https://example.com/"},""" +
+                    """{"targetId":"pop","type":"page","url":"https://example.com/2","openerId":"abc"},""" +
+                    """{"targetId":"w","type":"service_worker","url":"https://example.com/sw.js"}"""
+            )
+        val service = service(body, sockets = CHROME)
         val targets = runBlocking { service.targets() }
-        assertEquals(1, targets.size)
+        assertEquals(2, targets.size)
         assertEquals("chrome_devtools_remote~abc", targets[0].id)
         assertEquals("Hi", targets[0].title)
         assertEquals("com.android.chrome", targets[0].packageName)
+        assertEquals("chrome_devtools_remote~abc", targets[1].openerId)
     }
 
     @Test
@@ -464,8 +469,8 @@ class BrowserServiceTest {
                 listOf(
                     snapshotFrames(),
                     snapshotFrames(),
-                    http(
-                        """[{"id":"keep","type":"page","title":"K","url":"https://example.com/"}]"""
+                    targetsReply(
+                        """{"targetId":"keep","type":"page","title":"K","url":"https://example.com/"}"""
                     ),
                     cacheHitTap(),
                     cacheHitTap(),
@@ -633,6 +638,10 @@ class BrowserServiceTest {
             serverTextFrame("""{"id":2,"result":{}}""") +
             serverTextFrame(quad(3)) +
             serverTextFrame(metrics(4))
+
+    /** Chrome's `Target.getTargets` reply listing [infos]. */
+    private fun targetsReply(infos: String): ByteArray =
+        switched() + serverTextFrame("""{"id":1,"result":{"targetInfos":[$infos]}}""")
 
     private fun http(body: String): ByteArray =
         asciiLines("HTTP/1.1 200 OK", "Content-Length: ${body.toByteArray().size}") +
