@@ -90,8 +90,9 @@ public data class DeviceInfo(
      */
     val chromeKept: Boolean = false,
     /**
-     * Who has the screen now: `you` (the calling session), `agent`, `person` (in the viewer), or
-     * `script` (a REST session). Absent when it is free.
+     * Who has the screen now: `you` (the calling session), `parent` (the session that started it
+     * with `session_start`), `subagent` (a session it started), `agent`, `person` (in the viewer),
+     * or `script` (a REST session). Absent when it is free.
      */
     val screenHolder: String? = null,
     /** How long [screenHolder] has had the screen. */

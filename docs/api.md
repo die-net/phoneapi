@@ -133,7 +133,7 @@ Authenticated errors are JSON:
 
 | Method | Path | Scope | Summary |
 | --- | --- | --- | --- |
-| `GET` | `/v1/device` | observe | `DeviceInfo`: display, helper status, capabilities, whether Android's app freezer is on (`appFreezer`), whether PhoneAPI holds Chrome's Custom Tabs binding, which keeps the freezer off Chrome while the helper runs (`chromeKept`), and who has the screen (`screenHolder`: `you` when `Mcp-Session-Id` names the holder, `agent`, `person`, or `script`) and for how long (`screenHeldMs`) |
+| `GET` | `/v1/device` | observe | `DeviceInfo`: display, helper status, capabilities, whether Android's app freezer is on (`appFreezer`), whether PhoneAPI holds Chrome's Custom Tabs binding, which keeps the freezer off Chrome while the helper runs (`chromeKept`), and who has the screen (`screenHolder`: `you` when `Mcp-Session-Id` names the holder, `parent` or `subagent` for a session related by `session_start`, `agent`, `person`, or `script`) and for how long (`screenHeldMs`) |
 | `POST` | `/v1/device/wake` | control | Turn the screen on → `ActionResult` |
 | `POST` | `/v1/device/unlock` | control | Dismiss keyguard (`UnlockRequest`, optional) |
 | `POST` | `/v1/device/lock` | control | Lock the device |

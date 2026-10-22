@@ -200,7 +200,7 @@ Agents never take the screen over. They queue behind a viewer like anyone else.
 
 A tab belongs to the holder that opened it, or that claimed it. A REST session owns the tabs it opens, as an MCP session does. A tab Chrome opens for an `open_intent` or `app_launch` belongs to the session that made that call too: PhoneAPI notes Chrome's tabs before the call and claims the new ones that appear in the next 2 seconds, since Chrome handles the intent's URL after the activity starts. Before 2026-10-22 such a tab stayed unowned and outlived its session.
 
-A tab id that no longer works says why: the tab closed, as a session's tabs do when it ends, or it belongs to another session. Chrome refuses a DevTools connection to a closed tab with a 404, which PhoneAPI reports as that `not_found` rather than retrying.
+A tab id that no longer works says why: the tab closed, as a session's tabs do when it ends, or it belongs to another session. Chrome refuses a DevTools connection to a closed tab, with 500 "No such target id" in Chrome 133 (404 in some releases), which PhoneAPI reports as that `not_found` rather than retrying.
 
 - `browser_targets` lists the caller's tabs and unowned ones, marked as unowned. Other holders' tabs are left out.
 - `browser_navigate`, `browser_close`, `browser_read`, `browser_find`, `browser_snapshot`, `browser_eval`, `browser_console`, browser input, and `browser.*` wait conditions refuse a tab another holder owns, the same way they refuse a tab that does not exist. `browser.newTarget` only matches tabs the caller owns.
@@ -260,7 +260,7 @@ So a second check, for timers, runs next to the pause check. Chrome runs a hidde
 - a `wait_for` on the tab fails at once, or as soon as the check comes due, rather than running out its timeout;
 - a read notes `timersStopped`.
 
-Bringing the tab forward, reloading it, or navigating clears the check. Both checks run in an isolated world, so the page can neither see them nor fool them by replacing `MessageChannel` or `setTimeout`; Chrome stops that world's timers along with the page's, since it throttles per frame.
+The check's timer has a 1 ms delay: Chrome runs a zero-delay timer at once on a queue it never throttles, which on the emulator fired at once in a tab whose other timers had slowed to once a minute. Bringing the tab forward, reloading it, or navigating clears the check. Both checks run in an isolated world, so the page can neither see them nor fool them by replacing `MessageChannel` or `setTimeout`; Chrome stops that world's timers along with the page's, since it throttles per frame.
 
 As built, the check is `Inspector.enable` on the page's own connection. Chrome answers it from the browser process and, for a tab with no renderer, sends `Inspector.targetCrashed` first. A script probe with a timeout cannot tell an unloaded tab from a page whose main thread is busy: on the emulator, a page in an 8-second loop answered neither script nor, on a fresh connection, `Runtime.getIsolateId`, and the first build reloaded it. With `Inspector.enable`, that read waited for the loop and kept the page. When `Inspector.enable` gets no answer in 2 seconds, PhoneAPI checks Chrome's browser endpoint on a socket that gives up reading after 2 seconds. A read of an unloaded tab returned the reloaded page in about a second on the emulator, with Chrome's renderers killed to stand in for memory pressure. An unloaded tab answered neither script nor `Page.getFrameTree` there, so "answers page-level commands" above holds for `Page.reload` and `Page.navigate`, not every page command. When Android has frozen Chrome, the page connection's handshake waits out the 15-second read timeout before the browser check, so `browser_frozen` takes about 17 seconds rather than four 15-second retries. Checked with `am freeze --sticky com.android.chrome`.
 
@@ -381,6 +381,13 @@ Checked on the phone on 2026-10-22, with v0.3.0, by Kira through her tools and o
 - `dumpsys` takes 90 to 140 ms per call, which led to the direct top-task query.
 - "UiAutomationService already registered" came from two calls connecting UiAutomation at once in one helper; connecting is now serialized.
 
+Checked on the emulators on 2026-10-22, with Chrome 133:
+
+- The direct top-task query works on Android 16, where `getTasks` takes `(int, boolean, boolean, int)`, and on Android 10, where it takes `(int)`; `show` brought Chrome forward on both.
+- A tab hidden for a minute ran a single 1 ms timer within a second, while its `setInterval` ran once a minute, so the timer check let input through. With the check's timer swapped for a chain of nested timers, which Chrome had slowed to once a minute, a background key was let through, a read noted `timers stopped`, the next key was refused with `tab_frozen` after the 1.1 s confirmation, a wait on the tab failed the same way, and a tab opened a moment before was left alone. Bringing the tab forward with `show` cleared it.
+- A tab closed outside PhoneAPI refused DevTools with 500 "No such target id", which now reads as `not_found`.
+- A tab Chrome opened for `open_intent` became the caller's, and another session did not see it.
+
 Still to check on the phone:
 - Whether a tab opened while Chrome is in the background becomes Chrome's selected tab. On the Android 16 emulator it does: Chrome selects it as it comes forward, even over a `Page.bringToFront` sent just before, which is why `show` checks that its tab is still showing and tries again. Opening the tab did not bring Chrome forward.
 - Whether the shell user can clear the clipboard on Android 11, without clearing Kira's.
@@ -388,7 +395,8 @@ Still to check on the phone:
 - Whether a release build logs anything from the SDK, such as session ids.
 - That binding Chrome's Custom Tabs service works on a real Android 12 or later phone, and does not change anything visible on Kira's Android 11 phone.
 - That Chrome 155 still sends `Inspector.targetCrashed` on `Inspector.enable` for a tab it unloaded.
-- That the direct top-task query works on Android 11, and the timer check catches the stopped timers there.
+- That the direct top-task query works on Android 11, and the timer check catches the stopped timers there: that a single 1 ms timer stops along with `setInterval`, as the emulator's did not.
+- What Chrome 155 answers a DevTools connection to a closed tab: 500 "No such target id", as Chrome 133 does, or 404.
 - Whether a hidden tab's timers also stop while Chrome itself is in front, with the tab behind another, or only while Chrome is in the background.
 - That `show` brings a background tab on screen, including when Chrome is behind another app, and that `shown` and `pending` match what is on screen.
 

@@ -196,8 +196,8 @@ class McpSessions(
         }
 
     /**
-     * [info] with who has the screen in [state], as [caller] sees it: itself, another agent, a
-     * person in the viewer, or a script on REST.
+     * [info] with who has the screen in [state], as [caller] sees it: itself, the session that
+     * started it, one it started, another agent, a person in the viewer, or a script on REST.
      */
     fun withScreenHolder(info: DeviceInfo, state: LeaseState, caller: String?): DeviceInfo {
         val holder = state.holder ?: return info
@@ -207,6 +207,8 @@ class McpSessions(
                 is Holder.Session ->
                     when {
                         holder.id == caller -> "you"
+                        caller != null && sessions[caller]?.parentId == holder.id -> "parent"
+                        caller != null && sessions[holder.id]?.parentId == caller -> "subagent"
                         isRest(holder.id) -> "script"
                         else -> "agent"
                     }
