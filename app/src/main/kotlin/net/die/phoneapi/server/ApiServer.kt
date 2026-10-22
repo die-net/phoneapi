@@ -18,6 +18,7 @@ import io.ktor.server.websocket.pingPeriod
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.serialization.SerializationException
 import net.die.phoneapi.core.ApiException
+import net.die.phoneapi.mcp.McpSessions
 import net.die.phoneapi.mcp.installPhoneMcp
 import net.die.phoneapi.model.ApiError
 import net.die.phoneapi.server.routes.appRoutes
@@ -26,6 +27,7 @@ import net.die.phoneapi.server.routes.deviceRoutes
 import net.die.phoneapi.server.routes.eventRoutes
 import net.die.phoneapi.server.routes.inputRoutes
 import net.die.phoneapi.server.routes.openApiRoutes
+import net.die.phoneapi.server.routes.sessionRoutes
 import net.die.phoneapi.server.routes.streamRoutes
 import net.die.phoneapi.server.routes.tokenRoutes
 import net.die.phoneapi.server.routes.uiRoutes
@@ -64,7 +66,10 @@ class ApiServer(
     }
 }
 
-fun Application.phoneApiModule(services: ServerServices) {
+fun Application.phoneApiModule(
+    services: ServerServices,
+    sessions: McpSessions = McpSessions(services.tokens, scope = this).also { it.start() },
+) {
     install(ContentNegotiation) { register(ContentType.Application.Json, PhoneJsonConverter) }
     install(WebSockets) { pingPeriod = 15.seconds }
     install(StatusPages) {
@@ -94,8 +99,9 @@ fun Application.phoneApiModule(services: ServerServices) {
         browserRoutes(services)
         waitRoutes(services)
         streamRoutes(services)
+        sessionRoutes(sessions)
     }
-    installPhoneMcp(services)
+    installPhoneMcp(services, sessions)
 }
 
 private fun Throwable.rootMessage(): String? = generateSequence(this) { it.cause }.last().message
