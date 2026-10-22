@@ -32,7 +32,9 @@ class TabProbeTest {
         val page = StallingSocket(harness.switched() + empty(1))
         val reloaded = onPage(page) { probe().revive(it, CHROME_SOCKET, reading = true) }
         assertFalse(reloaded)
-        assertEquals(listOf("Inspector.enable"), page.methods())
+        // The reply is queued ahead, so the call can finish and the session close before Ktor's
+        // writer sends Inspector.enable; check only that nothing else, such as a reload, went out.
+        assertTrue(page.methods().all { it == "Inspector.enable" }, page.methods().toString())
     }
 
     @Test
