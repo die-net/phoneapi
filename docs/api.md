@@ -222,7 +222,7 @@ The socket also takes `{"op":"key","key":"HOME"}` (a `KeyRequest`), `{"op":"text
 - A session ends after 20 minutes without a request, and when its token is revoked or replaced. A token can have 16 sessions open and the phone 32; past either, `initialize` fails with 429 `too_many_sessions`.
 - Sessions live in the app's memory, so restarting the app ends them all.
 
-For stdio hosts (Cursor, etc.), run `phoneapi mcp` (with the helper up). It installs the same localhost `adb forward` as `phoneapi server` and relays one JSON-RPC line at a time to `/mcp`. For Streamable HTTP clients, run `phoneapi server` and `POST` to `http://127.0.0.1:<port>/mcp` with the bearer token.
+Run `phoneapi server` and point a Streamable HTTP client at `http://127.0.0.1:<port>/mcp` with the bearer token. There is no stdio bridge: `phoneapi mcp` was retired when sessions arrived.
 
 ### Tools
 

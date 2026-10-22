@@ -9,7 +9,6 @@ USAGE="\
 Usage: $(basename "$0") <command> [<options>]
     pair      - Mint a token and save the pairing file
     server    - Expose the on-device PhoneAPI server on localhost
-    mcp       - Run as a stdio MCP client
     papi      - Call the HTTP/WebSocket API
     helper    - Start the listener and shell helper over ADB
     help      - Display this text
@@ -89,89 +88,6 @@ command:server() {
     load_pairing
     forward_api "$PAIRING_PORT" "$PKG"
     echo "PhoneAPI at http://127.0.0.1:$PAIRING_PORT (package $PKG)." >&2
-}
-
-# shellcheck disable=SC2317
-command:mcp() {
-    needs adb
-    needs jq
-    needs curl
-
-    local host port token scheme url_host url tmp protocol_version request_id
-    local -a curl_args
-    local http_code ver
-    local PKG="$PHONEAPI_PKG"
-
-    load_pairing
-    forward_api "$PAIRING_PORT" "$PKG"
-    host="$PAIRING_HOST"
-    port="$PAIRING_PORT"
-    token="$PAIRING_TOKEN"
-    scheme="$PAIRING_SCHEME"
-
-    if [[ $host == *:* && $host != \[* ]]; then
-        url_host="[$host]"
-    else
-        url_host="$host"
-    fi
-    url="${scheme}://${url_host}:${port}/mcp"
-
-    tmp="$(mktemp)"
-    trap 'rm -f "$tmp"' EXIT
-    protocol_version=""
-    request_id=""
-
-    echo "phoneapi mcp: $url" >&2
-
-    reply_error() {
-        [[ -z $request_id ]] && return 0
-        jq -cn --argjson id "$request_id" --arg message "$1" \
-            '{jsonrpc:"2.0",id:$id,error:{code:-32000,message:$message}}'
-    }
-
-    while IFS= read -r line || [[ -n $line ]]; do
-        [[ $line =~ [^[:space:]] ]] || continue
-        if ! request_id="$(jq -c 'select(type == "object" and has("id") and .id != null) | .id' <<<"$line")"; then
-            echo "phoneapi mcp: ignoring a line that is not JSON" >&2
-            request_id=""
-            continue
-        fi
-
-        : >"$tmp"
-        curl_args=(
-            --silent
-            --show-error
-            --http1.1
-            --connect-timeout 10
-            -H "Authorization: Bearer $token"
-            -H "Content-Type: application/json"
-            -H "Accept: application/json, text/event-stream"
-        )
-        if [[ -n $protocol_version ]]; then
-            curl_args+=(-H "MCP-Protocol-Version: $protocol_version")
-        fi
-        curl_args+=(--output "$tmp" --write-out '%{http_code}' --data-binary @- "$url")
-
-        http_code="000"
-        if ! http_code="$(curl "${curl_args[@]}" <<<"$line")"; then
-            reply_error "PhoneAPI request failed (HTTP ${http_code:-000})"
-            continue
-        fi
-        if [[ $http_code == "202" || ! -s $tmp ]]; then
-            if [[ $http_code != "202" ]]; then
-                reply_error "PhoneAPI returned HTTP $http_code with an empty body"
-            fi
-            continue
-        fi
-        if ! jq -c . "$tmp"; then
-            reply_error "PhoneAPI returned HTTP $http_code with a non-JSON body"
-            continue
-        fi
-        ver="$(jq -r 'select(.result.protocolVersion != null) | .result.protocolVersion' "$tmp")"
-        if [[ -n $ver && $ver != null ]]; then
-            protocol_version="$ver"
-        fi
-    done
 }
 
 # shellcheck disable=SC2317
