@@ -79,6 +79,16 @@ public data class DeviceInfo(
     /** The helper's UiAutomation session is up. */
     val uiAutomationConnected: Boolean,
     val capabilities: Capabilities,
+    /**
+     * Whether Android's cached-app freezer is on, as `use_freezer` in `dumpsys activity settings`
+     * said when the helper last started. Null when that is not known, as before Android 11.
+     */
+    val appFreezer: Boolean? = null,
+    /**
+     * Whether PhoneAPI holds a binding to Chrome's Custom Tabs service, which keeps the freezer off
+     * Chrome. It does while the helper runs.
+     */
+    val chromeKept: Boolean = false,
 )
 
 /** Runtime feature flags. A flag is true only when that path works on this device right now. */

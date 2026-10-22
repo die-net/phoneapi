@@ -19,6 +19,10 @@
         tools:ignore="ProtectedPermissions" />
 
     <queries>
+        <!-- ChromeKeeper binds Chrome's Custom Tabs service. -->
+        <intent>
+            <action android:name="android.support.customtabs.action.CustomTabsService" />
+        </intent>
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />

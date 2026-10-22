@@ -19,12 +19,15 @@ import net.die.phoneapi.apps.RESUMED_ACTIVITY_ARGS
 import net.die.phoneapi.apps.resumedPackage
 import net.die.phoneapi.browser.BrowserServiceImpl
 import net.die.phoneapi.browser.CdpForward
+import net.die.phoneapi.browser.ChromeKeeper
 import net.die.phoneapi.browser.DevtoolsPreconditions
 import net.die.phoneapi.browser.DevtoolsSocket
+import net.die.phoneapi.browser.FREEZER_ARGS
 import net.die.phoneapi.browser.HelperCdpPipes
 import net.die.phoneapi.browser.TabProbe
 import net.die.phoneapi.browser.USB_DEVTOOLS_SOCKET
 import net.die.phoneapi.browser.UsbDevtools
+import net.die.phoneapi.browser.freezerOn
 import net.die.phoneapi.core.AppsService
 import net.die.phoneapi.core.BrowserService
 import net.die.phoneapi.core.DeviceInfoProvider
@@ -125,6 +128,9 @@ class AppGraph(
 
     @Volatile private var uiAutomationConnected = false
 
+    private val chromeKeeper = ChromeKeeper(context)
+    @Volatile private var appFreezer: Boolean? = null
+
     val deviceInfo =
         DeviceInfoProvider(
             context = context,
@@ -133,6 +139,8 @@ class AppGraph(
             isUiAutomationConnected = { uiAutomationConnected },
             helperStatus = { helper.status.value },
             helperRecoveredAtMs = { helper.recoveredAtMs },
+            appFreezer = { appFreezer },
+            chromeKept = { chromeKeeper.held },
         )
 
     val tree =
@@ -307,6 +315,14 @@ class AppGraph(
             )
         )
 
+    private suspend fun readFreezer(): Boolean? =
+        try {
+            val settings = shell.exec(FREEZER_ARGS)
+            if (settings.ok) freezerOn(settings.stdout) else null
+        } catch (_: ApiException) {
+            null
+        }
+
     /** The package of the resumed activity, or null when the helper cannot tell. */
     private suspend fun topPackage(): String? =
         try {
@@ -379,6 +395,13 @@ class AppGraph(
         helper.onReady = { proxy ->
             tree.attach(proxy)
             scope.launch { tabs.sweep() }
+            scope.launch { appFreezer = readFreezer() }
+        }
+        // Chrome stays unfrozen whenever the helper runs, whether or not anyone is connected.
+        scope.launch {
+            helper.status.collect { status ->
+                if (status == HelperStatus.RUNNING) chromeKeeper.hold() else chromeKeeper.drop()
+            }
         }
         HelperStatusNotifier(context, helper).start(scope)
         helperSupervisor.start()
