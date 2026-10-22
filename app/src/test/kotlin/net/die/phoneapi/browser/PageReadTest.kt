@@ -149,4 +149,17 @@ class PageReadTest {
         val text = findInPage(extract, BrowserFindRequest(kind = FindKind.LINKS, query = "link"))
         assertEquals(listOf("https://example.com/b"), text.links!!.map { it.href })
     }
+
+    @Test
+    fun `carries pending signs`() {
+        val waiting =
+            ApiJson.decodeFromString(
+                PageExtract.serializer(),
+                """{"visibility":"hidden","pending":["busy region"],"pageChars":900}""",
+            )
+        assertEquals("hidden", waiting.visibility)
+        val result = readPage(waiting, BrowserReadRequest())
+        assertEquals(listOf("busy region"), result.pending)
+        assertNull(result.shown)
+    }
 }

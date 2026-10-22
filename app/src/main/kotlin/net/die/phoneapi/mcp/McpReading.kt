@@ -18,6 +18,7 @@ import net.die.phoneapi.model.READ_SCOPE_DOC
 import net.die.phoneapi.model.READ_SELECTOR_DOC
 import net.die.phoneapi.model.ReadFormat
 import net.die.phoneapi.model.ReadScope
+import net.die.phoneapi.model.SHOW_DOC
 import net.die.phoneapi.model.Scope
 import net.die.phoneapi.model.WaitCondition
 import net.die.phoneapi.model.WaitRequest
@@ -41,6 +42,7 @@ internal data class BrowserReadArgs(
     @Doc("Character offset to start at, such as nextOffset or an offset from browser_find.")
     val offset: Int = 0,
     @Doc("Most characters to return, 1 to 100000. Defaults to 8000.") val maxChars: Int = 8_000,
+    @Doc(SHOW_DOC) val show: Boolean = false,
 )
 
 @Serializable
@@ -79,11 +81,14 @@ internal suspend fun browserRead(
             outline = args.outline,
             offset = args.offset,
             maxChars = args.maxChars,
+            show = args.show,
         )
     val opened = args.url?.let { url -> openAndSettle(services, scopes, url) }
     val target = opened?.target ?: args.target.orEmpty()
     val result = services.browser.read(target, read)
-    val text = if (args.outline) outlineText(result, args.maxChars) else readText(result)
+    val text =
+        if (args.outline) outlineText(result, args.maxChars, args.show)
+        else readText(result, args.show)
     opened?.let { "${it.line}\n$text" } ?: text
 }
 
@@ -176,10 +181,11 @@ private fun pageLine(title: String?, url: String?, extra: String = ""): String =
     append(extra)
 }
 
-private fun stateNotes(result: BrowserReadResult): List<String> = buildList {
+private fun stateNotes(result: BrowserReadResult, show: Boolean): List<String> = buildList {
     result.blocked?.let { add("# blocked: $it") }
     if (result.sparse)
         add("# sparse: under 200 characters of visible text; it may still be loading")
+    addAll(drawnNotes(result.shown, result.pending, result.sparse, show, "read"))
     val readyState = result.readyState
     if (readyState != null && readyState != "complete") {
         add("# readyState=$readyState: the page is still loading")
@@ -187,7 +193,35 @@ private fun stateNotes(result: BrowserReadResult): List<String> = buildList {
     if (result.clipped) add("# clipped: the page has more text than reading takes")
 }
 
-internal fun readText(result: BrowserReadResult): String {
+/**
+ * Notes on whether a tab was drawn. A hidden tab can be missing content that loads when drawn, so
+ * when the page shows signs of that, the note says how to bring it forward. [again] names the tool
+ * to call again.
+ */
+internal fun drawnNotes(
+    shown: Boolean?,
+    pending: List<String>,
+    sparse: Boolean,
+    show: Boolean,
+    again: String,
+): List<String> = buildList {
+    if (pending.isNotEmpty()) add("# pending: " + pending.joinToString(", "))
+    if (shown != false) return@buildList
+    when {
+        show ->
+            add(
+                "# still hidden after show: the tab did not come on screen; the phone may be locked"
+            )
+        sparse || pending.isNotEmpty() ->
+            add(
+                "# hidden: this tab is not on screen, so content that loads when drawn may be " +
+                    "missing; $again again with show true to bring it forward"
+            )
+        else -> add("# hidden: this tab is not on screen")
+    }
+}
+
+internal fun readText(result: BrowserReadResult, show: Boolean = false): String {
     val extra = buildString {
         result.published?.let { append(" published=").append(it) }
         result.status?.let { append(" status=").append(it) }
@@ -200,11 +234,11 @@ internal fun readText(result: BrowserReadResult): String {
         result.nextOffset?.let { append("; nextOffset=").append(it) }
             ?: append(if (result.totalChars == 0) "; empty" else "; end")
     }
-    val lines = listOf(pageLine(result.title, result.url, extra)) + stateNotes(result) + range
+    val lines = listOf(pageLine(result.title, result.url, extra)) + stateNotes(result, show) + range
     return lines.joinToString("\n") + "\n\n" + result.content.orEmpty()
 }
 
-internal fun outlineText(result: BrowserReadResult, maxChars: Int): String {
+internal fun outlineText(result: BrowserReadResult, maxChars: Int, show: Boolean = false): String {
     val headings = result.headings.orEmpty()
     val lines = headings.map { "@${it.offset} " + "#".repeat(it.level) + " " + it.text }
     var chars = 0
@@ -220,7 +254,7 @@ internal fun outlineText(result: BrowserReadResult, maxChars: Int): String {
         append(result.forms).append(" forms")
     }
     val notes = buildList {
-        addAll(stateNotes(result))
+        addAll(stateNotes(result, show))
         add(summary)
         if (kept.size < lines.size)
             add("# showing ${kept.size} of ${lines.size} headings; raise maxChars for more")

@@ -303,7 +303,7 @@ public val phoneApiEndpoints: List<ApiEndpoint> =
             ApiMethod.GET,
             "/v1/browser/targets/{id}/snapshot",
             Scope.BROWSER,
-            "Compact outline of a browser target. Query maxNodes (default 400) and maxChars cap it.",
+            "Compact outline of a browser target. Query maxNodes (default 400) and maxChars cap it, and show brings the tab on screen first.",
             response = serializer<BrowserSnapshot>(),
         ),
         endpoint(

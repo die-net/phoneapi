@@ -5,7 +5,6 @@ import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.SocketTimeoutException
-import java.util.Collections
 import java.util.LinkedHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.CoroutineContext
@@ -24,9 +23,7 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.put
 import kotlinx.serialization.serializer
 import net.die.phoneapi.core.ApiException
@@ -49,7 +46,6 @@ import net.die.phoneapi.model.BrowserSwipeRequest
 import net.die.phoneapi.model.BrowserTapRequest
 import net.die.phoneapi.model.BrowserTarget
 import net.die.phoneapi.model.BrowserTextRequest
-import net.die.phoneapi.model.ConsoleEntry
 import net.die.phoneapi.model.ConsoleRequest
 import net.die.phoneapi.model.ConsoleResult
 import net.die.phoneapi.model.EvalRequest
@@ -96,8 +92,10 @@ internal class BrowserServiceImpl(
     private val invalidateSnapshots: () -> Unit = {},
     private val showPackage: suspend (String) -> Unit = {},
     private val inFront: suspend (String) -> Boolean = { true },
-    /** Readability.js followed by page-read.js. */
+    /** Readability.js, page-pending.js, then page-read.js. */
     private val pageScript: suspend () -> String = { "" },
+    /** page-pending.js, for snapshots. */
+    private val pendingScript: suspend () -> String = { "" },
     private val devtoolsGap: (BrowserGap) -> String = { gap ->
         browserGapMessage(gap, chromeInstalled = true, usbDebugging = true)
     },
@@ -106,6 +104,7 @@ internal class BrowserServiceImpl(
 ) : BrowserService {
     private val axTrees = newAxCache()
     @Volatile private var pageSource: String? = null
+    @Volatile private var stateSource: String? = null
     private val pageInput: PageInput by lazy {
         PageInput(
             touchAt = touchAt,
@@ -329,7 +328,10 @@ internal class BrowserServiceImpl(
 
     override suspend fun read(id: String, request: BrowserReadRequest): BrowserReadResult {
         checkRead(request)
-        return readPage(extractPage(id, request.scope, request.selector), request)
+        if (request.show) show(id)
+        val extract = extractPage(id, request.scope, request.selector)
+        val socket = parseBrowserTargetId(id).first
+        return readPage(extract, request).copy(shown = drawn(socket, extract.visibility))
     }
 
     override suspend fun find(id: String, request: BrowserFindRequest): BrowserFindResult {
@@ -365,15 +367,66 @@ internal class BrowserServiceImpl(
             )
         }
         val (socket, chromeId) = parseBrowserTargetId(id)
-        return usePage(socket, chromeId, repeatable = true) { cdp ->
-            val loaded = cdp.call("Page.getFrameTree").decodeCdp<FrameTreeResult>()
-            val url = loaded?.frameTree?.frame?.url
-            cdp.call("Accessibility.enable")
-            val tree = cdp.call("Accessibility.getFullAXTree")
-            axTrees.put(id, tree)
-            val text = formatAxTree(tree, url, options)
-            BrowserSnapshot(id = id, url = url, title = text.title, compact = text.compact)
+        if (options.show) show(id)
+        val (snapshot, state) =
+            usePage(socket, chromeId, repeatable = true) { cdp ->
+                val loaded = cdp.call("Page.getFrameTree").decodeCdp<FrameTreeResult>()
+                val url = loaded?.frameTree?.frame?.url
+                cdp.call("Accessibility.enable")
+                val tree = cdp.call("Accessibility.getFullAXTree")
+                axTrees.put(id, tree)
+                val text = formatAxTree(tree, url, options)
+                val script = stateSource ?: stateScript(pendingScript()).also { stateSource = it }
+                val state = pageState(cdp, loaded?.frameTree?.frame?.id, script)
+                BrowserSnapshot(
+                    id = id,
+                    url = url,
+                    title = text.title,
+                    compact = text.compact,
+                    pending = state.pending,
+                ) to state
+            }
+        return snapshot.copy(shown = drawn(socket, state.visibility))
+    }
+
+    /**
+     * Brings a tab on screen, as touch input does, then waits until its text stops growing, so
+     * content that loads only when drawn has a chance to.
+     *
+     * Chrome coming forward selects a tab opened while it was in the background, and that can land
+     * after this selects the wanted one. So the tab has to still be showing once its text holds
+     * still, or this tries again.
+     */
+    private suspend fun show(id: String) {
+        val (socket, chromeId) = parseBrowserTargetId(id)
+        prepare(true)
+        val pkg = browserPackage(socketList().firstOrNull { it.name == socket }, socket)
+        try {
+            usePage(socket, chromeId) { cdp ->
+                var front = pkg == null || inFront(pkg)
+                if (!front) {
+                    showPackage(pkg.orEmpty())
+                    delay(APPEAR_MS)
+                    front = inFront(pkg.orEmpty())
+                }
+                // With the app behind, visibility says nothing, so there is no point trying again.
+                bringForward(cdp, attempts = if (front) SHOW_ATTEMPTS else 1)
+            }
+        } finally {
+            invalidateSnapshots()
         }
+    }
+
+    /**
+     * Whether the tab is being drawn. A tab can report `visible` while Chrome itself is hidden,
+     * such as one opened while Chrome was in the background, so a visible tab also needs its app in
+     * front. Null when that cannot be told.
+     */
+    private suspend fun drawn(socket: String, visibility: String?): Boolean? {
+        if (visibility == null) return null
+        if (visibility != "visible") return false
+        val pkg = browserPackage(socketList().firstOrNull { it.name == socket }, socket)
+        return pkg?.let { inFront(it) }
     }
 
     private suspend fun listOne(socket: HelperSocket): List<BrowserTarget> = coroutineScope {
@@ -561,51 +614,6 @@ internal class BrowserServiceImpl(
         return selector
     }
 
-    private suspend fun collectLogs(session: CdpSession, timeoutMs: Long): ConsoleResult {
-        val entries = Collections.synchronizedList(mutableListOf<ConsoleEntry>())
-        coroutineScope {
-            val job = launch { session.events.collect { event -> appendLog(entries, event) } }
-            try {
-                session.call("Runtime.enable")
-                session.call("Log.enable")
-                // Enabling replays Chrome's buffer. The wait starts after that.
-                synchronized(entries) { entries.clear() }
-                delay(timeoutMs)
-            } finally {
-                job.cancel()
-            }
-        }
-        return ConsoleResult(synchronized(entries) { entries.toList() })
-    }
-
-    private fun appendLog(entries: MutableList<ConsoleEntry>, event: CdpEvent) {
-        when (event.method) {
-            "Runtime.consoleAPICalled" -> {
-                val call = event.params.decodeCdp<ConsoleCall>() ?: return
-                val text = consoleText(call.args) ?: return
-                entries += ConsoleEntry(call.type ?: "log", text)
-            }
-            "Log.entryAdded" -> {
-                val entry = event.params.decodeCdp<LogAdded>()?.entry ?: return
-                // console.log also arrives as Runtime.consoleAPICalled.
-                if (entry.source == "console-api") return
-                val text = entry.text ?: return
-                entries += ConsoleEntry(entry.level ?: "info", text)
-            }
-        }
-    }
-
-    private fun consoleText(args: List<ConsoleArg>): String? {
-        val text = args.mapNotNull(::argText).joinToString(" ").trim()
-        return text.ifEmpty { null }
-    }
-
-    private fun argText(arg: ConsoleArg): String? {
-        val value = arg.value
-        if (value is JsonPrimitive) return value.contentOrNull
-        return arg.unserializableValue ?: arg.description
-    }
-
     private suspend fun contentOnScreen(pkg: String?): Rect {
         try {
             return contentBounds(pkg)
@@ -637,8 +645,7 @@ internal class BrowserServiceImpl(
      * While Chrome itself is hidden every tab reports visible, which [requireOnScreen] catches.
      */
     private suspend fun requireShowing(cdp: CdpSession) {
-        val state = evaluateIn(cdp, "document.visibilityState", awaitPromise = false).value
-        if ((state as? JsonPrimitive)?.contentOrNull == "visible") return
+        if (tabShowing(cdp)) return
         throw ApiException(
             409,
             "not_visible",
@@ -748,28 +755,6 @@ internal class BrowserServiceImpl(
 
     @Serializable private data class QuadResult(val quads: List<JsonElement> = emptyList())
 
-    @Serializable private data class LogAdded(val entry: LogLine? = null)
-
-    @Serializable
-    private data class LogLine(
-        val text: String? = null,
-        val level: String? = null,
-        val source: String? = null,
-    )
-
-    @Serializable
-    private data class ConsoleCall(
-        val type: String? = null,
-        val args: List<ConsoleArg> = emptyList(),
-    )
-
-    @Serializable
-    private data class ConsoleArg(
-        val value: JsonElement? = null,
-        val description: String? = null,
-        val unserializableValue: String? = null,
-    )
-
     private companion object {
         const val HTTP_SERVER_ERROR = 500
         val NODE_REF = Regex("[A-Za-z0-9_-]{1,64}")
@@ -783,6 +768,7 @@ internal class BrowserServiceImpl(
         const val PAGE_ATTEMPTS = 4
         const val PAGE_RETRY_MS = 200L
         const val APPEAR_MS = 500L
+        const val SHOW_ATTEMPTS = 3
         const val ERROR_SNIPPET = 80
         val SKIPPED_TYPES = setOf("service_worker", "shared_worker", "worker")
     }

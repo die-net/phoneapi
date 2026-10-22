@@ -56,6 +56,7 @@ fun Route.browserRoutes(services: ServerServices) {
                 BrowserSnapshotOptions(
                     maxNodes = q.int("maxNodes") ?: BrowserSnapshotOptions().maxNodes,
                     maxChars = q.int("maxChars"),
+                    show = q.flag("show", default = false),
                 )
             call.respond(services.browser.snapshot(call.targetId(), options))
         }

@@ -560,6 +560,7 @@ class BrowserServiceTest {
         sequence: () -> Long = { 0L },
         invalidate: () -> Unit = {},
         inFront: suspend (String) -> Boolean = { true },
+        showPackage: suspend (String) -> Unit = {},
     ) =
         BrowserServiceImpl(
             io = Dispatchers.IO,
@@ -577,6 +578,7 @@ class BrowserServiceTest {
             sequence = sequence,
             invalidateSnapshots = invalidate,
             inFront = inFront,
+            showPackage = showPackage,
         )
 
     internal class ScriptedSocket(

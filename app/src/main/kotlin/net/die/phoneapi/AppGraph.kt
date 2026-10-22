@@ -290,8 +290,11 @@ class AppGraph(
             pageScript = {
                 asset("readability/Readability.js").decodeToString() +
                     "\n" +
+                    asset("page-pending.js").decodeToString() +
+                    "\n" +
                     asset("page-read.js").decodeToString()
             },
+            pendingScript = { asset("page-pending.js").decodeToString() },
             devtoolsGap = DevtoolsPreconditions(context)::explain,
             refreshHz = { deviceInfo.display().refreshRate },
             touchscreen = { touchBackend.touchscreen() },
