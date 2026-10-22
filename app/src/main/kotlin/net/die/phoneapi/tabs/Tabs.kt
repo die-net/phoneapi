@@ -54,6 +54,9 @@ class Tabs(
     /** The tab Chrome shows when the screen holder has none forward. */
     @Volatile private var placeholder: String? = null
 
+    /** Whether [sweep] has closed the last run's tabs, so a helper restart closes no live ones. */
+    @Volatile private var swept = false
+
     /** The tab each session last opened or brought forward. */
     private val fronts = ConcurrentHashMap<Holder.Session, String>()
 
@@ -112,17 +115,22 @@ class Tabs(
         }
     }
 
-    /** Closes tabs that sessions opened before the app last stopped. */
+    /**
+     * Closes tabs that sessions opened before the app last stopped. Runs whenever the helper
+     * connects, but closes them only once: after that, the saved tabs are live sessions' own.
+     */
     suspend fun sweep() {
+        if (swept) return
         val left = store.load()
-        if (left.isEmpty()) return
         val open =
             try {
                 base.targets().map { it.id }.toSet()
             } catch (_: ApiException) {
-                // Chrome is not reachable yet; keep the list for the next start.
+                // Chrome is not reachable yet; keep the list for the helper's next start.
                 return
             }
+        swept = true
+        if (left.isEmpty()) return
         for (id in left.filter { it in open }) closeQuietly(id)
         mutex.withLock { saveOpened() }
     }

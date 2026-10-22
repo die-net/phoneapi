@@ -59,6 +59,18 @@ class TimerWatchTest {
     }
 
     @Test
+    fun `waits keep a found stop`() = runBlocking {
+        timerFires = false
+        val watch = watch()
+        val tab = "$CHROME_SOCKET~t"
+        watch.watch(tab)
+        withTimeout(WATCH_MS * 2) { while (!watch.stalled(tab)) delay(10) }
+        // A wait that starts its own check must not reset one that found the timers stopped.
+        watch.watch(tab)
+        assertTrue(watch.stalled(tab))
+    }
+
+    @Test
     fun `revived tabs clear`() = runBlocking {
         timerFires = false
         val watch = watch()

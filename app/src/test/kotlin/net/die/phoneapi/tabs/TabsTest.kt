@@ -67,6 +67,7 @@ class TabsTest {
         browser.stalled = setOf(tab.id)
         val wait = WaitRequest(all = listOf(WaitCondition.BrowserUrl(target = tab.id)))
         assertEquals("tab_frozen", error { tabs.waitsFor(a, RecordingWaits()).wait(wait, SCOPES) })
+        assertEquals(listOf(tab.id), browser.watched)
     }
 
     @Test
@@ -176,9 +177,15 @@ class TabsTest {
     fun `sweep closes leftovers`() = runBlocking {
         val left = browser.add("left")
         store.ids = setOf(left, "chrome_devtools_remote~gone")
-        tabs().sweep()
+        val tabs = tabs()
+        tabs.sweep()
         assertEquals(listOf(left), browser.closed)
         assertEquals(emptySet<String>(), store.ids)
+        // A helper restart sweeps again, and must leave live sessions' tabs open.
+        val live = tabs.browserFor(a).openTab("https://example.com/")
+        tabs.sweep()
+        assertEquals(listOf(left), browser.closed)
+        assertEquals(setOf(live.id), store.ids)
     }
 
     @Test
@@ -314,6 +321,12 @@ class TabsTest {
         var stalled = emptySet<String>()
 
         override suspend fun timersStalled(id: String) = id in stalled
+
+        val watched = mutableListOf<String>()
+
+        override suspend fun watchTimers(id: String) {
+            watched += id
+        }
 
         /** Chrome ignores selecting a tab. */
         var stuck = false

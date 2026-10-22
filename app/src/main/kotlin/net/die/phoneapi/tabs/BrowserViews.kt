@@ -48,6 +48,8 @@ internal class SessionBrowser(
 
     override suspend fun timersStalled(id: String): Boolean = mine(id) { base.timersStalled(id) }
 
+    override suspend fun watchTimers(id: String) = mine(id) { base.watchTimers(id) }
+
     override suspend fun snapshot(id: String, options: BrowserSnapshotOptions): BrowserSnapshot =
         mine(id) { base.snapshot(id, options) }.also { forward(id, options.show) }
 
@@ -117,6 +119,8 @@ internal class SharedBrowser(private val tabs: Tabs, private val base: BrowserSe
     override suspend fun showing(id: String): Boolean = free(id) { base.showing(id) }
 
     override suspend fun timersStalled(id: String): Boolean = free(id) { base.timersStalled(id) }
+
+    override suspend fun watchTimers(id: String) = free(id) { base.watchTimers(id) }
 
     override suspend fun snapshot(id: String, options: BrowserSnapshotOptions): BrowserSnapshot =
         free(id) { base.snapshot(id, options) }

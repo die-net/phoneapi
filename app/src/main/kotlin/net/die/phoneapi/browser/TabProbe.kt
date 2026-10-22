@@ -92,7 +92,7 @@ internal class TabProbe(
         throw ApiException(
             409,
             "tab_frozen",
-            "Chrome has paused this tab, as it does to tabs hidden for about 5 minutes, so the " +
+            "Chrome has paused this tab, as it does to tabs hidden for a while, so the " +
                 "page would not respond to input. Reading it still works. To use it, bring it " +
                 "forward with input touch, or browser_read or browser_snapshot with show, which " +
                 "take the screen. Or reload it with browser_navigate to its URL, which loses " +

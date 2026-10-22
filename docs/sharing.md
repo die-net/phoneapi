@@ -39,7 +39,7 @@ The screen lease and tab ownership are keyed by holder, so the viewer and every 
 - An unknown or expired session id gets 404, as the Streamable HTTP spec says, and the client starts a new session.
 - `DELETE` ends the session. That releases the screen, runs cleanup, and closes the session's tabs.
 - A session with no requests for 20 minutes expires, and expiry does what `DELETE` does. The timeout is a backstop, not the normal release. It is longer than a Legwork turn waiting on an Approve button (up to 15 minutes), so PhoneAPI never ends a live session someone is waiting on. Its screen is another matter, as in [Waiting](#waiting). It is the same for every client, and a client cannot ask for another.
-- The app keeps sessions in memory, so restarting it ends them all. Clients see 404 and start again. PhoneAPI saves the ids of tabs that sessions opened and closes any that are left when it starts, so a restart does not strand them. Tabs a session only claimed are not saved, since they were not its to close.
+- The app keeps sessions in memory, so restarting it ends them all. Clients see 404 and start again. PhoneAPI saves the ids of tabs that sessions opened and closes any that are left when it starts, so a restart does not strand them. It does this once per start, when the helper first connects; a helper that restarts later leaves live sessions' tabs alone. Tabs a session only claimed are not saved, since they were not its to close.
 
 ### Sessions for subagents
 
@@ -257,10 +257,10 @@ So PhoneAPI:
 So a second check, for timers, runs next to the pause check. Chrome runs a hidden tab's timers at most about once a second even when it has not stopped them, so the check has to allow 1.1 seconds, too long to wait before every input. Instead it starts alongside each `cdp` or `cdp-mouse` input, in the background, on its own DevTools connection, and the next call on that tab reads the result:
 
 - the next input to the tab is refused with `tab_frozen`, saying the last input may not have taken effect, after a fresh check confirms the timers are still stopped;
-- a `wait_for` on the tab fails at once, or as soon as the check comes due, rather than running out its timeout;
+- a `wait_for` on the tab fails at once, or as soon as the check comes due, rather than running out its timeout; a wait starts its own check when no input has;
 - a read notes `timersStopped`.
 
-The check's timer has a 1 ms delay: Chrome runs a zero-delay timer at once on a queue it never throttles, which on the emulator fired at once in a tab whose other timers had slowed to once a minute. Bringing the tab forward, reloading it, or navigating clears the check. Both checks run in an isolated world, so the page can neither see them nor fool them by replacing `MessageChannel` or `setTimeout`; Chrome stops that world's timers along with the page's, since it throttles per frame.
+The check's timer has a 1 ms delay: Chrome runs a zero-delay timer at once on a queue it never throttles, which on the emulator fired at once in a tab whose other timers had slowed to once a minute. On the phone, both stopped along with the page's own. Bringing the tab forward, reloading it, or navigating clears the check. Both checks run in an isolated world, so the page can neither see them nor fool them by replacing `MessageChannel` or `setTimeout`; Chrome stops that world's timers along with the page's, since it throttles per frame.
 
 As built, the check is `Inspector.enable` on the page's own connection. Chrome answers it from the browser process and, for a tab with no renderer, sends `Inspector.targetCrashed` first. A script probe with a timeout cannot tell an unloaded tab from a page whose main thread is busy: on the emulator, a page in an 8-second loop answered neither script nor, on a fresh connection, `Runtime.getIsolateId`, and the first build reloaded it. With `Inspector.enable`, that read waited for the loop and kept the page. When `Inspector.enable` gets no answer in 2 seconds, PhoneAPI checks Chrome's browser endpoint on a socket that gives up reading after 2 seconds. A read of an unloaded tab returned the reloaded page in about a second on the emulator, with Chrome's renderers killed to stand in for memory pressure. An unloaded tab answered neither script nor `Page.getFrameTree` there, so "answers page-level commands" above holds for `Page.reload` and `Page.navigate`, not every page command. When Android has frozen Chrome, the page connection's handshake waits out the 15-second read timeout before the browser check, so `browser_frozen` takes about 17 seconds rather than four 15-second retries. Checked with `am freeze --sticky com.android.chrome`.
 
@@ -388,6 +388,17 @@ Checked on the emulators on 2026-10-22, with Chrome 133:
 - A tab closed outside PhoneAPI refused DevTools with 500 "No such target id", which now reads as `not_found`.
 - A tab Chrome opened for `open_intent` became the caller's, and another session did not see it.
 
+Checked on the phone on 2026-10-22, with this branch's dev build beside v0.3.0, over adb with the phone locked:
+
+- `session_conflict` both ways, `screenHolder` as `you`, `agent`, `parent`, and `subagent`, and the cleanup and waited notes.
+- A hidden tab's timers ran once a second until about a minute after it was hidden, then all stopped at once: its `setInterval`, and a 0 ms and a 1 ms timer in an isolated world, none of which fired within 5 seconds. So on Chrome 155 the 1 ms check sees what the page sees.
+- About 2.5 minutes after hiding, the pause check, now in an isolated world, refused the first background key with `tab_frozen`, much sooner than v0.3.0's main-world check caught a pause (7 to 9.5 minutes). A `wait_for` on the tab ran out its 8-second timeout, since that refused key had started no timer check; waits now start their own.
+- The tab Chrome had selected kept running at full rate and reported `visible` with Chrome in the background and the screen off, so only tabs behind another one in Chrome go hidden.
+- Chrome 155 refuses a closed tab with 500 "No such target id", as 133 does, and PhoneAPI reports it as `not_found`.
+- The direct top-task query uses `getTasks(int)` on Android 11, as on Android 10, and `show` brought Chrome forward with it.
+- Two `ui_snapshot` calls at once connected UiAutomation once, with no "already registered". The first snapshot right after connecting saw 0 nodes and 0 windows; the next, 9 seconds later, saw 30 nodes.
+- Restarting the dev helper closed both test tabs a live session had: the startup sweep ran on every helper connection. It now runs once per app start. Kira's own helper also restarted during cleanup, when the USB connection dropped, and her app relaunched it within 30 seconds.
+
 Still to check on the phone:
 - Whether a tab opened while Chrome is in the background becomes Chrome's selected tab. On the Android 16 emulator it does: Chrome selects it as it comes forward, even over a `Page.bringToFront` sent just before, which is why `show` checks that its tab is still showing and tries again. Opening the tab did not bring Chrome forward.
 - Whether the shell user can clear the clipboard on Android 11, without clearing Kira's.
@@ -395,8 +406,7 @@ Still to check on the phone:
 - Whether a release build logs anything from the SDK, such as session ids.
 - That binding Chrome's Custom Tabs service works on a real Android 12 or later phone, and does not change anything visible on Kira's Android 11 phone.
 - That Chrome 155 still sends `Inspector.targetCrashed` on `Inspector.enable` for a tab it unloaded.
-- That the direct top-task query works on Android 11, and the timer check catches the stopped timers there: that a single 1 ms timer stops along with `setInterval`, as the emulator's did not.
-- What Chrome 155 answers a DevTools connection to a closed tab: 500 "No such target id", as Chrome 133 does, or 404.
+- Whether the first `ui_snapshot` after UiAutomation connects can come back empty, as one did, and should wait for windows.
 - Whether a hidden tab's timers also stop while Chrome itself is in front, with the tab behind another, or only while Chrome is in the background.
 - That `show` brings a background tab on screen, including when Chrome is behind another app, and that `shown` and `pending` match what is on screen.
 
