@@ -37,8 +37,8 @@ The screen lease and tab ownership are keyed by holder, not by `Mcp-Session-Id`,
 - A request must carry the token that started the session. A session's tools and scopes are fixed at `initialize`, so another token could otherwise use the first one's scopes. A different token gets the empty 404 an unknown token gets.
 - An unknown or expired session id gets 404, as the Streamable HTTP spec says, and the client starts a new session.
 - `DELETE` ends the session. That releases the screen, runs cleanup, and closes the session's tabs.
-- A session with no requests for 20 minutes expires, and expiry does what `DELETE` does. The timeout is a backstop, not the normal release. It is longer than a Legwork turn waiting on an Approve button (up to 15 minutes), so PhoneAPI never takes the screen from a live session someone is waiting on.
-- The app keeps sessions in memory, so restarting it ends them all. Clients see 404 and start again. PhoneAPI saves the ids of tabs that sessions own and closes any that are left when it starts, so a restart does not strand them.
+- A session with no requests for 20 minutes expires, and expiry does what `DELETE` does. The timeout is a backstop, not the normal release. It is longer than a Legwork turn waiting on an Approve button (up to 15 minutes), so PhoneAPI never takes the screen from a live session someone is waiting on. It is the same for every client, and a client cannot ask for another.
+- The app keeps sessions in memory, so restarting it ends them all. Clients see 404 and start again. PhoneAPI saves the ids of tabs that sessions opened and closes any that are left when it starts, so a restart does not strand them. Tabs a session only claimed are not saved, since they were not its to close.
 
 The MCP SDK (0.15.0) has a stateful transport with session ids, `DELETE`, and open and close callbacks, but no idle timeout, and its Ktor helper keeps the session table private. PhoneAPI therefore owns the `/mcp` route and drives `StreamableHttpServerTransport` itself, so expiry, the token check, and release live in one place.
 
@@ -74,7 +74,7 @@ A call that needs the screen while another holder has it waits in a FIFO queue f
 
 Only `notifications/cancelled`, or the session ending, takes a call out of the queue. A client dropping its connection does not: the prototype's tool ran to the end after its client went away, on today's stateless `/mcp` as well as on stateful sessions. That matches the spec, which says not to treat a disconnect as a cancellation. So a waiting call whose client has gone stays queued until its 60 seconds pass or its session ends, and clients have to send `notifications/cancelled` to stop a wait. Legwork's Go SDK (v1.8.0) does that when a call's context ends, sends `DELETE` when the session closes, and opens the GET stream after `initialize`.
 
-An MCP session keeps the screen while it is idle, including a Legwork turn waiting on approval. Others' screen calls fail with `screen_busy` for that whole time. That is accepted: taking the screen from a live session would leave its next step acting on a screen it did not expect.
+An MCP session keeps the screen while it is idle, including a Legwork turn waiting on approval. Others' screen calls fail with `screen_busy` for that whole time. That is accepted: taking the screen from a live session would leave its next step acting on a screen it did not expect. There is no limit on how long a session holds the screen in total: idle expiry, ending the session from the admin routes, and **Take over** in the viewer cover a stuck client.
 
 ### Cleanup
 
@@ -109,14 +109,16 @@ Agents never take the screen over. They queue behind a viewer like anyone else.
 
 ## Tabs
 
-A tab belongs to the holder that opened it. A REST call that opens a tab leaves it unowned.
+A tab belongs to the holder that opened it, or that claimed it. A REST call that opens a tab leaves it unowned.
 
-- `browser_targets` lists only the caller's tabs.
-- `browser_navigate`, `browser_close`, `browser_read`, `browser_find`, `browser_snapshot`, `browser_eval`, `browser_console`, browser input, and `browser.*` wait conditions refuse a tab the caller does not own, the same way they refuse a tab that does not exist. `browser.newTarget` only matches tabs the caller owns.
+- `browser_targets` lists the caller's tabs and unowned ones, marked as unowned. Other holders' tabs are left out.
+- `browser_navigate`, `browser_close`, `browser_read`, `browser_find`, `browser_snapshot`, `browser_eval`, `browser_console`, browser input, and `browser.*` wait conditions refuse a tab another holder owns, the same way they refuse a tab that does not exist. `browser.newTarget` only matches tabs the caller owns.
 - A tab that a page opens, through `window.open` or a `target=_blank` link, belongs to the owner of the tab that opened it. That needs Chrome's `openerId`, which `/json/list` does not report, so ownership is read from the `Target` domain (`Target.getTargets`, or `Target.setDiscoverTargets` on the browser connection). On the emulator `Target.getTargets` reported `openerId` for both, with the opener on screen, behind another tab, and with Chrome in the background.
-- Tabs that existed before PhoneAPI started, tabs a person opened by hand, WebViews, and tabs REST opened belong to no holder. A session cannot list or touch them. REST and the raw CDP socket can, and refuse a tab that a live holder owns.
-- Each session can have 4 tabs open, and all sessions 8, not counting the placeholder and unowned tabs. Opening past either fails with `tab_limit` and a message to close one. Under memory pressure Chrome unloads hidden tabs, as in [Tabs that stop answering](#tabs-that-stop-answering). The caps keep that rare, and a few tabs at a time is what a turn needs. On the 2 GB emulator unloading started at 17 tabs, so 8 leaves room for the tab on screen, unowned tabs, and other apps on a 4 GB phone.
-- A session's tabs close when it ends.
+- Tabs that existed before PhoneAPI started, tabs left by a session that died, and tabs REST opened belong to no holder. On these phones they are almost always Kira's own pages from earlier conversations, such as a signed-in shopping tab, so they stay usable. A session claims an unowned tab by using it, and the first session to do so gets it. When that session ends, the tab goes back to being unowned instead of closing.
+- WebViews belong to the app that shows them. The screen holder can use the WebViews of the app in front, which it can already see with `ui_snapshot`. Other sessions cannot.
+- REST and the raw CDP socket can use any tab except one a live holder owns.
+- Each session can have 4 tabs open, and all sessions 8, not counting the placeholder, unowned tabs, or tabs a session claimed. Opening past either fails with `tab_limit` and a message to close one. Under memory pressure Chrome unloads hidden tabs, as in [Tabs that stop answering](#tabs-that-stop-answering). The caps keep that rare, and a few tabs at a time is what a turn needs. On the 2 GB emulator unloading started at 17 tabs, so 8 leaves room for the tab on screen, unowned tabs, and other apps on a 4 GB phone.
+- The tabs a session opened close when it ends. Tabs it claimed go back to being unowned.
 
 Whoever holds the screen can open Chrome's tab switcher and see other holders' tab titles. Given that the accounts are shared anyway, that is accepted.
 
@@ -261,6 +263,4 @@ Still to check on the phone:
 
 ## Open questions
 
-1. Should the holder of the screen be able to read unowned targets, such as an app's WebView it is looking at? As written it cannot.
-2. Is the idle timeout the same for every client, or can a client ask for a shorter one at `initialize`?
-3. Should there also be a cap on how long one session can hold the screen in total, so a stuck client frees it without an admin or a person stepping in?
+None. The last three were settled on 2026-10-21: one idle timeout for every client, no total limit on holding the screen, and unowned tabs visible and claimable, with the screen holder able to use the foreground app's WebViews.
