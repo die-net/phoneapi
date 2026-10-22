@@ -4,7 +4,7 @@ Phase 1, below, is built: MCP sessions, the screen lease with its queue and clea
 
 Several clients can drive one phone at once: two agent conversations, an agent and a person in `/viewer`, or a script on REST. Without rules, one taps while the other types, one navigates a tab the other is reading, or one sees what the other left on screen. This design lets them share the phone without that, and lets background Chrome tabs be used freely while someone else has the screen.
 
-PhoneAPI owns the rules, because only it knows which calls take the screen and which tabs exist. A client only decides how long its MCP session lives. Legwork's side, one session per turn, is in Legwork's [phone-leases.md](../../legwork/docs/phone-leases.md). The model calls no lock tools.
+PhoneAPI owns the rules, because only it knows which calls take the screen and which tabs exist. A client only decides how long its MCP session lives. Legwork's side, one session per turn, is in Legwork's [phone-leases.md](../../legwork/docs/phone-leases.md). A model needs no lock tools. `screen_release` lets one give the screen up early, for clients such as Claude Code or Cursor that keep one session open for as long as they run.
 
 ## Goals and limits
 
@@ -37,7 +37,7 @@ The screen lease and tab ownership are keyed by holder, not by `Mcp-Session-Id`,
 - A request must carry the token that started the session. A session's tools and scopes are fixed at `initialize`, so another token could otherwise use the first one's scopes. A different token gets the empty 404 an unknown token gets.
 - An unknown or expired session id gets 404, as the Streamable HTTP spec says, and the client starts a new session.
 - `DELETE` ends the session. That releases the screen, runs cleanup, and closes the session's tabs.
-- A session with no requests for 20 minutes expires, and expiry does what `DELETE` does. The timeout is a backstop, not the normal release. It is longer than a Legwork turn waiting on an Approve button (up to 15 minutes), so PhoneAPI never takes the screen from a live session someone is waiting on. It is the same for every client, and a client cannot ask for another.
+- A session with no requests for 20 minutes expires, and expiry does what `DELETE` does. The timeout is a backstop, not the normal release. It is longer than a Legwork turn waiting on an Approve button (up to 15 minutes), so PhoneAPI never ends a live session someone is waiting on. Its screen is another matter, as in [Waiting](#waiting). It is the same for every client, and a client cannot ask for another.
 - The app keeps sessions in memory, so restarting it ends them all. Clients see 404 and start again. PhoneAPI saves the ids of tabs that sessions opened and closes any that are left when it starts, so a restart does not strand them. Tabs a session only claimed are not saved, since they were not its to close.
 
 The MCP SDK (0.15.0) has a stateful transport with session ids, `DELETE`, and open and close callbacks, but no idle timeout, and its Ktor helper keeps the session table private. PhoneAPI therefore owns the `/mcp` route and drives `StreamableHttpServerTransport` itself, so expiry, the token check, and release live in one place.
@@ -54,7 +54,7 @@ So `/mcp` answers POSTs with JSON and refuses the GET stream with 405, which the
 
 ## Screen lease
 
-One exclusive lease per phone. The first call that needs the screen takes it, and an MCP session keeps it until the session ends. PhoneAPI decides which calls need it, in the tool catalog:
+One exclusive lease per phone. The first call that needs the screen takes it. An MCP session keeps it until the session ends, it calls `screen_release`, or it makes no screen call for 30 seconds while another client waits. PhoneAPI decides which calls need it, in the tool catalog:
 
 - Device and app tools: `tap`, `swipe`, `type_text`, `press_key`, `ui_act`, `keyboard_*`, `app_*`, `open_intent`, `device_wake`, `device_unlock`, `device_lock`, `device_orientation`.
 - Observing the screen: `ui_snapshot`, `ui_find`, `screenshot`. These would show another holder's screen.
@@ -74,7 +74,13 @@ A call that needs the screen while another holder has it waits in a FIFO queue f
 
 Only `notifications/cancelled`, or the session ending, takes a call out of the queue. A client dropping its connection does not: the prototype's tool ran to the end after its client went away, on today's stateless `/mcp` as well as on stateful sessions. That matches the spec, which says not to treat a disconnect as a cancellation. So a waiting call whose client has gone stays queued until its 60 seconds pass or its session ends, and clients have to send `notifications/cancelled` to stop a wait. Legwork's Go SDK (v1.8.0) does that when a call's context ends, sends `DELETE` when the session closes, and opens the GET stream after `initialize`.
 
-An MCP session keeps the screen while it is idle, including a Legwork turn waiting on approval. Others' screen calls fail with `screen_busy` for that whole time. That is accepted: taking the screen from a live session would leave its next step acting on a screen it did not expect. There is no limit on how long a session holds the screen in total: idle expiry, ending the session from the admin routes, and **Take over** in the viewer cover a stuck client.
+A session that holds the screen and has made no screen call for 30 seconds, while another client waits, loses the screen to that client. Cleanup runs as for any release, and the session keeps its tabs. Its next screen call waits like anyone else's and carries a note that the screen changed hands, so it checks the screen before acting. With nobody waiting, a session keeps the screen however long it is idle, so a lone client keeps its screen state between turns. There is no limit on how long a session holds the screen while it keeps using it.
+
+This is what makes PhoneAPI usable by clients other than Legwork. Claude Code, Cursor, and most MCP clients keep one session open for as long as they run, and any request, a `ping` included, keeps a session from expiring. Without the grace period, one screen call from such a client would keep everyone else off the screen until it was idle for 20 minutes or quit.
+
+The cost is that an idle holder can come back to a home screen and a locked phone. That includes a Legwork turn waiting on an Approve button: if another conversation wants the screen meanwhile, the turn resumes on a cleaned-up screen and has to find its place again. Before the grace period, the other conversation got `screen_busy` instead.
+
+A session can also let the screen go itself with `screen_release`, which does the same as the grace period at once: cleanup, then the next waiter. Idle expiry, ending the session from the admin routes, and **Take over** in the viewer still cover a stuck client.
 
 ### Cleanup
 

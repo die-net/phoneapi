@@ -147,6 +147,20 @@ internal suspend fun waitFor(
     if (body.isNullOrBlank()) header else "$header\n$body"
 }
 
+/** Lets the session's screen go, with cleanup, keeping the session and its tabs. */
+internal suspend fun screenRelease(services: ServerServices): CallToolResult = runTool {
+    val holder = services.holder ?: return@runTool "This call has no MCP session."
+    val held = services.lease.holds(holder)
+    services.lease.release(holder)
+    if (held) {
+        "Released the screen. PhoneAPI hides the keyboard, goes home, and locks the phone " +
+            "before the next client gets it. Your tabs stay yours, and your next call that needs " +
+            "the screen takes it again, waiting if someone else has it."
+    } else {
+        "This session did not hold the screen."
+    }
+}
+
 internal suspend fun keyboardHide(services: ServerServices): CallToolResult = runTool {
     jsonText(services.input.hideIme())
 }

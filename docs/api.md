@@ -44,7 +44,7 @@ ADB `CREATE_TOKEN` (via `phoneapi pair`) grants every scope. Narrower tokens: `P
 
 One client at a time holds the screen, as [sharing.md](sharing.md) describes. Calls that act on the screen or show what is on it take the lease: input, IME, apps and intents, wake, unlock, lock, orientation, the UI tree, screenshots, waits with any condition that is not `browser.*`, browser input with `input` `touch` (and `cdp` for pointer input), and browser reads and snapshots with `show`. Reading a tab, and `cdp` keys, text, and `cdp-mouse` taps, need no lease.
 
-- An MCP session keeps the screen from its first such call until the session ends. A REST call holds it only while it runs.
+- An MCP session keeps the screen from its first such call until the session ends, it calls `screen_release`, or it makes no screen call for 30 s while someone else waits. Then cleanup runs and the waiter gets the screen; the session keeps its tabs, and its next screen call waits again and gets a note. A REST call holds the screen only while it runs.
 - A call that needs the screen while someone else has it waits up to 60 s, then fails with 409 `screen_busy`, saying how long the screen has been held.
 - When a holder lets go, PhoneAPI hides the keyboard, puts Chrome on a blank placeholder tab, goes home, and locks the phone before the next holder gets the screen. A step that failed is reported to the next holder: as a `# note:` line first in an MCP tool result, or an `X-PhoneAPI-Note` header on REST.
 - While Chrome is in front, it shows the screen holder's tab or the placeholder, never another MCP session's tab. A session without the screen that opens a tab, or whose page opens a popup, gets it behind, with `tookScreen` false.
@@ -237,6 +237,7 @@ Run `phoneapi server` and point a Streamable HTTP client at `http://127.0.0.1:<p
 | Tool | Scope | Summary |
 | --- | --- | --- |
 | `device_info` | observe | Device + helper + capabilities |
+| `screen_release` | observe | Let the screen go for now, with cleanup; tabs stay the session's |
 | `ui_snapshot` | observe | Compact UI outline |
 | `ui_find` | observe | Find by selector |
 | `ui_act` | control | Action on a ref; `mode` `real` or `semantic` |

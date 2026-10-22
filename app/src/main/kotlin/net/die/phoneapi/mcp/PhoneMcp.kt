@@ -133,6 +133,7 @@ private fun phoneServer(
         shared.copy(
             browser = shared.tabs.browserFor(holder),
             waits = shared.tabs.waitsFor(holder, shared.waits),
+            holder = holder,
         )
     val tools = visibleMcpTools(scopes, services.device.capabilities())
     val resources = mcpResources(scopes)

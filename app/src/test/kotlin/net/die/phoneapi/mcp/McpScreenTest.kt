@@ -69,6 +69,7 @@ class McpScreenTest {
         val NO_SCREEN =
             setOf(
                 "device_info",
+                "screen_release",
                 "logcat_tail",
                 "browser_targets",
                 "browser_open",
