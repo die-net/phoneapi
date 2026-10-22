@@ -15,6 +15,7 @@ import net.die.phoneapi.helperclient.ShellResult
 import net.die.phoneapi.lease.ForegroundWatch
 import net.die.phoneapi.lease.Holder
 import net.die.phoneapi.lease.ScreenLease
+import net.die.phoneapi.mcp.SessionControl
 import net.die.phoneapi.model.Capabilities
 import net.die.phoneapi.model.CreatedToken
 import net.die.phoneapi.model.DeviceInfo
@@ -56,6 +57,8 @@ data class ServerServices(
     val foreground: ForegroundWatch,
     /** The MCP session these services are for, in a session's copy; null for REST. */
     val holder: Holder.Session? = null,
+    /** What that session's tools can do with sessions; null for REST. */
+    val sessions: SessionControl? = null,
 )
 
 /** Per-connection logcat. Not part of [ServerServices.events]; only clients that ask receive it. */

@@ -87,9 +87,12 @@ class McpCatalogTest {
                 (0 until tool.arguments.descriptor.elementsCount).map { index ->
                     tool.arguments.descriptor.getElementName(index)
                 }
-            assertEquals(names.toSet(), properties.keys, tool.name)
+            // Every tool but the session tools also takes session, which PhoneAPI strips.
+            val session = if (tool.name in SESSION_TOOLS) emptySet() else setOf(SESSION_ARGUMENT)
+            assertEquals(names.toSet() + session, properties.keys, tool.name)
             val defs = tool.schema.defs ?: JsonObject(emptyMap())
-            val sample = sampleObject(properties, tool.schema.required.orEmpty(), defs)
+            val decoded = JsonObject(properties - session)
+            val sample = sampleObject(decoded, tool.schema.required.orEmpty(), defs)
             ApiJson.decodeFromJsonElement(tool.arguments, sample)
         }
         val tap = mcpToolTemplates().first { it.name == "tap" }.schema.properties!!

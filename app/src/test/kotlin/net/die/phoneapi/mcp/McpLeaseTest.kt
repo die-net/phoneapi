@@ -116,6 +116,68 @@ class McpLeaseTest {
         }
     }
 
+    @Test
+    fun `subagents take turns`() = testApplication {
+        application { phoneApiModule(api.services) }
+        apiClient().use { http ->
+            val parent = initialize(http)
+            val child = start(http, parent)
+            val tap = """{"x":1,"y":2,"session":"$child"}"""
+            assertFalse(call(http, parent, "tap", tap).contains("isError\":true"))
+            val busy = call(http, parent, "tap", """{"x":1,"y":2}""")
+            assertTrue(busy.contains("screen_busy"), busy)
+            val listed = http.get("/v1/sessions") { bearer(token) }.bodyAsText()
+            assertTrue(listed.contains(PARENT), listed)
+
+            val ended = call(http, parent, "session_end", """{"session":"$child"}""")
+            assertTrue(ended.contains("Ended the session"), ended)
+            settle { api.cleanups == 1 }
+            assertFalse(call(http, parent, "tap", """{"x":1,"y":2}""").contains("isError\":true"))
+            val gone = call(http, parent, "tap", tap)
+            assertTrue(gone.contains("No such session"), gone)
+        }
+    }
+
+    @Test
+    fun `subagents keep their tabs`() = testApplication {
+        application { phoneApiModule(api.services) }
+        apiClient().use { http ->
+            val parent = initialize(http)
+            val child = start(http, parent)
+            val open = """{"url":"https://example.com/","session":"$child"}"""
+            assertTrue(call(http, parent, "browser_open", open).contains("~t"))
+            val target = """"target":"chrome_devtools_remote~t""""
+            val theirs = call(http, parent, "browser_read", "{$target}")
+            assertTrue(theirs.contains("not_found"), theirs)
+            val mine = call(http, parent, "browser_read", """{$target,"session":"$child"}""")
+            assertFalse(mine.contains("isError\":true"), mine)
+        }
+    }
+
+    @Test
+    fun `subagents end with parent`() = testApplication {
+        application { phoneApiModule(api.services) }
+        apiClient().use { http ->
+            val parent = initialize(http)
+            val child = start(http, parent)
+            val other = initialize(http)
+            val borrowed = call(http, other, "device_info", """{"session":"$child"}""")
+            assertTrue(borrowed.contains("No such session"), borrowed)
+            val direct = http.post("/mcp") { headers(child) }
+            assertEquals(HttpStatusCode.NotFound, direct.status)
+            http.delete("/mcp") { headers(parent) }
+            settle { !http.get("/v1/sessions") { bearer(token) }.bodyAsText().contains("parent") }
+            val listed = http.get("/v1/sessions") { bearer(token) }.bodyAsText()
+            assertFalse(listed.contains(PARENT), listed)
+        }
+    }
+
+    private suspend fun start(http: HttpClient, parent: String): String {
+        val started = call(http, parent, "session_start", "{}")
+        return Regex("session=([0-9a-f]+)").find(started)?.groupValues?.get(1)
+            ?: error("no session: $started")
+    }
+
     private suspend fun initialize(http: HttpClient): String {
         val response =
             http.post("/mcp") {
@@ -145,7 +207,7 @@ class McpLeaseTest {
         if (id != null) header("Mcp-Session-Id", id)
     }
 
-    private suspend fun settle(done: () -> Boolean) {
+    private suspend fun settle(done: suspend () -> Boolean) {
         repeat(50) {
             if (done()) return
             delay(20)
@@ -153,6 +215,7 @@ class McpLeaseTest {
     }
 
     private companion object {
+        const val PARENT = """"parent":""""
         const val INITIALIZE =
             """{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18",""" +
                 """"capabilities":{},"clientInfo":{"name":"test","version":"0"}}}"""

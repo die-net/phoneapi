@@ -25,6 +25,7 @@ A lease belongs to a holder. There are three kinds:
 | Holder | Starts | Ends |
 | --- | --- | --- |
 | MCP session | `initialize` on `/mcp` | `DELETE`, or idle expiry |
+| Started session | `session_start`, from an MCP session | `session_end`, idle expiry, or the session that started it ending |
 | Viewer | Its input socket opening | The socket closing |
 | REST call | The request | The response |
 
@@ -39,6 +40,19 @@ The screen lease and tab ownership are keyed by holder, not by `Mcp-Session-Id`,
 - `DELETE` ends the session. That releases the screen, runs cleanup, and closes the session's tabs.
 - A session with no requests for 20 minutes expires, and expiry does what `DELETE` does. The timeout is a backstop, not the normal release. It is longer than a Legwork turn waiting on an Approve button (up to 15 minutes), so PhoneAPI never ends a live session someone is waiting on. Its screen is another matter, as in [Waiting](#waiting). It is the same for every client, and a client cannot ask for another.
 - The app keeps sessions in memory, so restarting it ends them all. Clients see 404 and start again. PhoneAPI saves the ids of tabs that sessions opened and closes any that are left when it starts, so a restart does not strand them. Tabs a session only claimed are not saved, since they were not its to close.
+
+### Sessions for subagents
+
+One MCP client is usually one session, so its subagents share a turn at the screen and a set of tabs, and parallel ones tap over each other. `session_start` gives a subagent or parallel task a session of its own:
+
+- It returns a new session id, under the session that called it and bound to the same token. Every other tool takes an optional `session` argument naming it, and a call with it acts as that session: its own place in the screen queue, its own tabs, its own grace period and notes. Without the argument, a call acts as the caller's own session.
+- A session can name only itself or sessions it started. Another session's id, or one that has ended, fails with `not_found` and a message to call `session_start`.
+- `session_end` ends one, as `DELETE` would: cleanup if it held the screen, and the tabs it opened close. It also ends after 20 minutes unused, and when the session that started it ends.
+- A started session has no transport, so `/mcp` answers its id in `Mcp-Session-Id` with 404. It counts toward the session caps and shows in `GET /v1/sessions` with `parent`, the hash of the session that started it.
+
+This is also the shape MCP's stateless revision (2026-07-28) asks for: it drops protocol sessions, and servers that need state across calls mint handles that clients pass as tool arguments. PhoneAPI's MCP SDK (0.15.0) does not speak that revision yet, so such clients still cannot connect, but the tools would carry over.
+
+The model carries the id, so it can forget it or pass a stale one. A forgotten id makes the call act as the caller's own session, and a stale one fails loudly. The id sits in the model's context and the client's logs, where the header kept it out of sight, but it is useless with any other token.
 
 The MCP SDK (0.15.0) has a stateful transport with session ids, `DELETE`, and open and close callbacks, but no idle timeout, and its Ktor helper keeps the session table private. PhoneAPI therefore owns the `/mcp` route and drives `StreamableHttpServerTransport` itself, so expiry, the token check, and release live in one place.
 

@@ -16,4 +16,6 @@ public data class SessionInfo(
         "Times a call from it brought an app forward while it did not hold the screen, failing with took_screen."
     )
     val tookScreen: Int = 0,
+    @Doc("For a session made with session_start, the hash of the session that started it.")
+    val parent: String? = null,
 )
