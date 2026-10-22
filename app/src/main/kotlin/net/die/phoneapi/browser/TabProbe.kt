@@ -26,6 +26,7 @@ internal class TabProbe(
     private val websocketKey: () -> String,
     private val probeMs: Long = PROBE_MS,
     private val reloadMs: Long = RELOAD_MS,
+    private val frozenMs: Long = FROZEN_MS,
 ) {
     /** Whether [socket] is Chrome's and its browser endpoint does not answer. */
     suspend fun frozen(socket: String): Boolean = socket == CHROME_SOCKET && !browserAnswers(socket)
@@ -72,6 +73,32 @@ internal class TabProbe(
     }
 
     /**
+     * Fails with `tab_frozen` when Chrome has paused [cdp]'s hidden tab, as it does after about 5
+     * minutes in the background. DevTools input still reaches a paused page, but its scripts do not
+     * run, so a click or keystroke appears to do nothing, which costs an agent more time than
+     * reloading or bringing the tab forward. Reading a paused tab is fine.
+     *
+     * A paused page still evaluates DevTools script but runs none of its own tasks, so a message
+     * posted to itself never arrives. A page busy running script answers neither, and is let
+     * through.
+     */
+    suspend fun requireRunning(cdp: CdpSession, socket: String) {
+        if (socket != CHROME_SOCKET) return
+        if (withTimeoutOrNull(probeMs) { evaluate(cdp, "0") } == null) return
+        val ran = withTimeoutOrNull(frozenMs) { evaluate(cdp, SELF_MESSAGE, awaitPromise = true) }
+        if (ran != null) return
+        throw ApiException(
+            409,
+            "tab_frozen",
+            "Chrome has paused this tab, as it does to tabs hidden for about 5 minutes, so the " +
+                "page would not respond to input. Reading it still works. To use it, bring it " +
+                "forward with input touch, or browser_read or browser_snapshot with show, which " +
+                "take the screen. Or reload it with browser_navigate to its URL, which loses " +
+                "anything typed or scrolled.",
+        )
+    }
+
+    /**
      * Whether the tab has no renderer. `Inspector.enable` says so with `Inspector.targetCrashed`,
      * from the browser side, so a page whose main thread is busy is not taken for an unloaded one,
      * as a script probe with a timeout would.
@@ -84,12 +111,17 @@ internal class TabProbe(
         return cdp.seen("Inspector.targetCrashed")
     }
 
-    private suspend fun evaluate(cdp: CdpSession, expression: String): JsonElement? =
+    private suspend fun evaluate(
+        cdp: CdpSession,
+        expression: String,
+        awaitPromise: Boolean = false,
+    ): JsonElement? =
         cdp.call(
                 "Runtime.evaluate",
                 buildJsonObject {
                     put("expression", expression)
                     put("returnByValue", true)
+                    put("awaitPromise", awaitPromise)
                 },
             )
             .let { (it["result"] as? JsonObject)?.get("value") }
@@ -109,6 +141,11 @@ internal class TabProbe(
     companion object {
         const val PROBE_MS = 2_000L
         private const val RELOAD_MS = 10_000L
+        /** How long a running page has to deliver a message to itself. */
+        private const val FROZEN_MS = 200L
+        private const val SELF_MESSAGE =
+            "new Promise((done) => { const c = new MessageChannel(); " +
+                "c.port1.onmessage = () => done(true); c.port2.postMessage(0); })"
         private const val POLL_MS = 250L
     }
 }

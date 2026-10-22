@@ -76,6 +76,35 @@ class TabProbeTest {
     }
 
     @Test
+    fun `running tab takes input`() {
+        val page = StallingSocket(harness.switched() + value(1, "0") + value(2, "true"))
+        assertEquals(
+            "no error",
+            onPage(page) { failure { probe().requireRunning(it, CHROME_SOCKET) } },
+        )
+    }
+
+    @Test
+    fun `frozen tab refuses input`() {
+        // DevTools script runs, but the page's own message never arrives.
+        val page = StallingSocket(harness.switched() + value(1, "0"))
+        assertEquals(
+            "tab_frozen",
+            onPage(page) { failure { probe().requireRunning(it, CHROME_SOCKET) } },
+        )
+    }
+
+    @Test
+    fun `busy tab takes input`() {
+        // A busy main thread answers no script at all, which is not a pause.
+        val page = StallingSocket(harness.switched())
+        assertEquals(
+            "no error",
+            onPage(page) { failure { probe().requireRunning(it, CHROME_SOCKET) } },
+        )
+    }
+
+    @Test
     fun `webviews are not probed`() {
         val page = StallingSocket(harness.switched())
         val reloaded = onPage(page) { probe().revive(it, "webview_devtools_remote_1", true) }

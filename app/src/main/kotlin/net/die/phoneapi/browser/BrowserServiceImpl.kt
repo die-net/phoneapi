@@ -323,6 +323,8 @@ internal class BrowserServiceImpl(
             val result =
                 usePage(socket, chromeId) { cdp ->
                     probe?.revive(cdp, socket, reading = false)
+                    // Touch brings the tab on screen, which wakes it.
+                    if (input !in TOUCH_INPUTS) probe?.requireRunning(cdp, socket)
                     if (pointer && input == BrowserInput.CDP) requireShowing(cdp)
                     block(cdp, pkg)
                 }
