@@ -65,15 +65,60 @@ class ScreenLeaseTest {
     }
 
     @Test
-    fun `wait ends in screen busy`() = runTest {
+    fun `idle holder yields to waiter`() = runTest {
         val lease = lease()
         lease.withScreen(a) {}
+        // The grace counts from the holder's last screen call.
+        val waiting = async { lease.withScreen(b) { "b ran" } }
+        advanceTimeBy(ScreenLease.GRACE_MS - 1)
+        assertFalse(waiting.isCompleted)
+        advanceTimeBy(2)
+        runCurrent()
+        assertEquals("b ran", waiting.await().value)
+        assertEquals(1, cleanups)
+        assertTrue(lease.holds(b))
+        lease.release(b)
+        val notes = lease.withScreen(a) {}.notes
+        assertTrue(notes.single().contains("went to another client"), notes.toString())
+    }
+
+    @Test
+    fun `active holder keeps screen`() = runTest {
+        val lease = lease()
+        lease.withScreen(a) {}
+        val waiting = async { apiError { lease.withScreen(b) {} } }
+        repeat(6) {
+            advanceTimeBy(ScreenLease.GRACE_MS / 2)
+            lease.withScreen(a) {}
+        }
+        assertEquals("screen_busy", waiting.await().error)
+        assertTrue(lease.holds(a))
+        assertEquals(0, cleanups)
+    }
+
+    @Test
+    fun `no waiter, no yield`() = runTest {
+        val lease = lease()
+        lease.withScreen(a) {}
+        advanceTimeBy(10 * ScreenLease.GRACE_MS)
+        assertTrue(lease.holds(a))
+        assertEquals(0, cleanups)
+    }
+
+    @Test
+    fun `wait ends in screen busy`() = runTest {
+        val lease = lease()
+        // A holder in a long call keeps the screen, however long it runs.
+        val going = CompletableDeferred<Unit>()
+        val holding = async { lease.withScreen(a) { going.await() } }
         advanceTimeBy(5_000)
         val waiting = async { apiError { lease.withScreen(b) {} } }
         advanceTimeBy(ScreenLease.WAIT_MS + 1)
         val error = waiting.await()
         assertEquals("screen_busy", error.error)
         assertTrue(error.message.orEmpty().contains("65 s"))
+        going.complete(Unit)
+        holding.await()
         lease.release(a)
         runCurrent()
         assertNull(lease.state.value.holder)

@@ -51,6 +51,22 @@ class McpLeaseTest {
     }
 
     @Test
+    fun `release lets others in`() = testApplication {
+        application { phoneApiModule(api.services) }
+        apiClient().use { http ->
+            val first = initialize(http)
+            val second = initialize(http)
+            call(http, first, "tap", """{"x":1,"y":2}""")
+            assertTrue(call(http, first, "screen_release", "{}").contains("Released the screen"))
+            settle { api.cleanups == 1 }
+            assertEquals(1, api.cleanups)
+            val turn = call(http, second, "tap", """{"x":1,"y":2}""")
+            assertFalse(turn.contains("isError\":true"), turn)
+            assertTrue(call(http, first, "screen_release", "{}").contains("did not hold"))
+        }
+    }
+
+    @Test
     fun `rest waits for sessions`() = testApplication {
         application { phoneApiModule(api.services) }
         apiClient().use { http ->

@@ -92,6 +92,16 @@ private val MCP_TOOLS: List<McpTool> =
             call = { graph, _, _ -> deviceInfo(graph) },
         ),
         McpTool(
+            name = "screen_release",
+            description =
+                "Let the screen go when you are done with it for now, so other clients can use the phone. PhoneAPI goes home and locks it. Your tabs stay yours and background browser work keeps going. The next call that needs the screen takes it again, waiting if someone else has it. Holding the screen idle while another client waits also lets it go, after 30 s.",
+            scope = Scope.OBSERVE,
+            available = always,
+            arguments = serializer<EmptyArgs>(),
+            annotations = changes,
+            call = { graph, _, _ -> screenRelease(graph) },
+        ),
+        McpTool(
             name = "ui_snapshot",
             description =
                 "Compact outline of the visible nodes on screen. Covers app windows, plus system windows such as dialogs and the notification shade when they are focused or large. The keyboard is listed without its contents. maxNodes and maxChars cap the output. When anything is left out, the first line ends with truncated and the next lines say how much. textOnly drops positions, ids, states, and actions. Password and one-time-code fields and card numbers are masked unless redact is false. Prefer this over screenshot. Take a new one after each action. Canvas content such as maps shows little, so use screenshot there. Right after an action the tree can still be the old screen: wait_for first.",
