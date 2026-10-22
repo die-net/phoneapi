@@ -150,3 +150,4 @@ The mirror only draws when the screen changes, and some encoders ignore `KEY_REP
 - End-user install and quick start: [README](../README.md)
 - HTTP, WebSocket, MCP, and OpenAPI: [api.md](api.md)
 - Building, `phoneapi-dev`, tests and linters: [development.md](development.md)
+- Sharing the phone between clients (design, not built yet): [sharing.md](sharing.md)
