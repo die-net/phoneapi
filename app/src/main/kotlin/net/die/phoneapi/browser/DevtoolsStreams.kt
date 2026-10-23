@@ -4,7 +4,7 @@ import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.SocketTimeoutException
-import net.die.phoneapi.core.ApiException
+import net.die.phoneapi.model.ApiException
 
 /**
  * Runs [block] on this socket's streams and turns a socket failure into an [ApiException]. A close

@@ -18,7 +18,6 @@ import net.die.phoneapi.core.AppsService
 import net.die.phoneapi.core.BrowserService
 import net.die.phoneapi.core.InputService
 import net.die.phoneapi.core.PowerService
-import net.die.phoneapi.core.SnapshotOptions
 import net.die.phoneapi.core.UiService
 import net.die.phoneapi.core.WaitService
 import net.die.phoneapi.helperclient.ShellResult
@@ -63,6 +62,7 @@ import net.die.phoneapi.model.PointerFrame
 import net.die.phoneapi.model.Scope
 import net.die.phoneapi.model.ScreenState
 import net.die.phoneapi.model.SessionStarted
+import net.die.phoneapi.model.SnapshotOptions
 import net.die.phoneapi.model.SwipeRequest
 import net.die.phoneapi.model.TapRequest
 import net.die.phoneapi.model.TextRequest

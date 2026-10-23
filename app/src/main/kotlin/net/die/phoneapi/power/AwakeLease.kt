@@ -13,7 +13,7 @@ import net.die.phoneapi.core.SettingsStore
  * work for an activity that is actually showing; this has to hold across other apps' screens.
  */
 class AwakeLease(context: Context, private val settings: SettingsStore) {
-    @Suppress("DEPRECATION")
+    @Suppress("DEPRECATION") // A service has no window for FLAG_KEEP_SCREEN_ON.
     private val lock =
         context
             .getSystemService(PowerManager::class.java)

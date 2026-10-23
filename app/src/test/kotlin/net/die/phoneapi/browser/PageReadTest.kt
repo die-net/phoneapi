@@ -1,8 +1,8 @@
 package net.die.phoneapi.browser
 
 import kotlinx.coroutines.runBlocking
-import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.core.ApiJson
+import net.die.phoneapi.model.ApiException
 import net.die.phoneapi.model.BrowserFindRequest
 import net.die.phoneapi.model.BrowserReadRequest
 import net.die.phoneapi.model.FindKind

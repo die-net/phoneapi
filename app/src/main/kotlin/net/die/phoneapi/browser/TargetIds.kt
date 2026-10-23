@@ -1,6 +1,6 @@
 package net.die.phoneapi.browser
 
-import net.die.phoneapi.core.ApiException
+import net.die.phoneapi.model.ApiException
 
 internal const val CHROME_SOCKET = "chrome_devtools_remote"
 internal const val CHROME_PACKAGE = "com.android.chrome"

@@ -11,7 +11,6 @@ import android.util.Log
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.withContext
-import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.core.AppsService
 import net.die.phoneapi.core.DeviceStateTracker
 import net.die.phoneapi.core.EventBus
@@ -19,6 +18,7 @@ import net.die.phoneapi.core.awaitDeviceState
 import net.die.phoneapi.helperclient.HelperShell
 import net.die.phoneapi.helperclient.failureMessage
 import net.die.phoneapi.model.ActionResult
+import net.die.phoneapi.model.ApiException
 import net.die.phoneapi.model.AppInfo
 import net.die.phoneapi.model.IntentRequest
 import net.die.phoneapi.model.LaunchRequest
@@ -115,7 +115,7 @@ class AppsServiceImpl(
     ): ApiException =
         when (failure) {
             AmFailure.UNRESOLVED ->
-                ApiException(404, "not_found", "Nothing handles ${describe(request)}: $message")
+                ApiException.notFound("Nothing handles ${describe(request)}: $message")
             AmFailure.DENIED ->
                 ApiException(403, "forbidden", "Android refused ${describe(request)}: $message")
             AmFailure.OTHER ->
@@ -229,7 +229,7 @@ class AppsServiceImpl(
     }
 
     /** Apps with a launcher entry, which is what the manifest's `<queries>` makes visible. */
-    @Suppress("DEPRECATION")
+    @Suppress("DEPRECATION") // The ResolveInfoFlags overload needs API 33.
     private fun launchablePackages(): Set<String> {
         val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
         return packages.queryIntentActivities(intent, 0).mapNotNullTo(LinkedHashSet()) {
@@ -241,7 +241,10 @@ class AppsServiceImpl(
      * Android 11 hides packages an app hasn't declared an interest in, so this is everything this
      * app can see rather than everything installed. The helper's `pm list packages` sees them all.
      */
-    @Suppress("DEPRECATION", "QueryPermissionsNeeded")
+    @Suppress(
+        "DEPRECATION", // The PackageInfoFlags overload needs API 33.
+        "QueryPermissionsNeeded", // The partial list is what this wants, as above.
+    )
     private fun installedPackages(): List<String> =
         packages.getInstalledPackages(0).map { it.packageName }
 

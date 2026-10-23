@@ -7,8 +7,8 @@ import android.view.ViewConfiguration
 import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
-import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.helperclient.HelperConnection
+import net.die.phoneapi.model.ApiException
 
 /** Key events through the helper's `InputManager.injectInputEvent`. */
 class InjectKeyBackend(

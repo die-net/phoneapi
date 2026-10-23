@@ -1,10 +1,13 @@
 package net.die.phoneapi.model.schema
 
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
+import kotlinx.serialization.descriptors.SerialDescriptor
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -164,3 +167,23 @@ private sealed interface Shape {
 @Doc("A named thing.")
 @Serializable
 private data class Named(@Doc("What it is called.") val name: String)
+
+/**
+ * Builds a JSON Schema document for [descriptor]. Classes, sealed types, and objects are named in
+ * `$defs` (or [refPrefix]) and referenced from there, so nested and recursive types stay finite.
+ * The returned object is the root schema with a `$defs` member when any named type was used.
+ */
+@OptIn(ExperimentalSerializationApi::class)
+private fun jsonSchema(
+    descriptor: SerialDescriptor,
+    config: SchemaConfig = SchemaConfig(),
+    refPrefix: String = "#/\$defs/",
+): JsonObject {
+    val schemas = JsonSchemas(config, refPrefix)
+    val root = schemas.inline(descriptor)
+    if (schemas.definitions.isEmpty()) return root
+    return buildJsonObject {
+        root.forEach { key, value -> put(key, value) }
+        put("\$defs", JsonObject(schemas.definitions))
+    }
+}

@@ -7,6 +7,7 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.testing.testApplication
+import kotlin.coroutines.cancellation.CancellationException
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.withTimeout
 import net.die.phoneapi.model.Scope
@@ -98,6 +99,8 @@ class AuthRoutesTest {
                         },
                     ) {}
                     false
+                } catch (e: CancellationException) {
+                    throw e
                 } catch (_: IllegalStateException) {
                     // The test client reports a refused handshake this way.
                     true

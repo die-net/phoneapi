@@ -11,10 +11,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.helper.IHelper
 import net.die.phoneapi.helper.TouchscreenInfo
 import net.die.phoneapi.helperclient.HelperConnection
+import net.die.phoneapi.model.ApiException
 import net.die.phoneapi.model.PointerFrame
 import net.die.phoneapi.model.TimedPoint
 
@@ -271,7 +271,6 @@ private fun pointerAction(base: Int, active: Map<Int, TouchSample>, pointer: Int
     return base or (index shl MotionEvent.ACTION_POINTER_INDEX_SHIFT)
 }
 
-@Suppress("DEPRECATION")
 private fun obtain(
     downTime: Long,
     eventTime: Long,

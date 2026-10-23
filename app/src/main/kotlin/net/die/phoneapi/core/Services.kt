@@ -30,6 +30,7 @@ import net.die.phoneapi.model.NodeActionRequest
 import net.die.phoneapi.model.OrientationRequest
 import net.die.phoneapi.model.PointerFrame
 import net.die.phoneapi.model.Scope
+import net.die.phoneapi.model.SnapshotOptions
 import net.die.phoneapi.model.SwipeRequest
 import net.die.phoneapi.model.TapRequest
 import net.die.phoneapi.model.TextRequest
@@ -40,8 +41,6 @@ import net.die.phoneapi.model.WaitResult
 
 // Shared by the REST routes and the MCP tools. Implementations throw ApiException for
 // client-visible failures.
-
-typealias SnapshotOptions = net.die.phoneapi.model.SnapshotOptions
 
 interface UiService {
     suspend fun snapshot(options: SnapshotOptions): UiSnapshot

@@ -15,7 +15,7 @@ import io.ktor.websocket.CloseReason
 import io.ktor.websocket.close
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import net.die.phoneapi.core.ApiException
+import net.die.phoneapi.model.ApiException
 import net.die.phoneapi.model.Scope
 import net.die.phoneapi.server.ServerServices
 import net.die.phoneapi.server.VIEWER_COOKIE

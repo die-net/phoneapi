@@ -6,7 +6,7 @@ import java.io.FileInputStream
 import java.io.FileOutputStream
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
-import net.die.phoneapi.core.ApiException
+import net.die.phoneapi.model.ApiException
 
 /**
  * Android 10 DevTools. The helper connects to [USB_DEVTOOLS_SOCKET], which exists only after the

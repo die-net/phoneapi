@@ -8,14 +8,14 @@ import io.ktor.server.response.respondBytes
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
-import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.core.ScreenshotScale
-import net.die.phoneapi.core.SnapshotOptions
 import net.die.phoneapi.core.windowId
+import net.die.phoneapi.model.ApiException
 import net.die.phoneapi.model.FindRequest
 import net.die.phoneapi.model.NodeActionRequest
 import net.die.phoneapi.model.Scope
 import net.die.phoneapi.model.SnapshotFormat
+import net.die.phoneapi.model.SnapshotOptions
 import net.die.phoneapi.server.ServerServices
 import net.die.phoneapi.server.scoped
 import net.die.phoneapi.server.withScreen

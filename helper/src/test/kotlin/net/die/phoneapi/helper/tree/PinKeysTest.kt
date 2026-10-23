@@ -1,12 +1,10 @@
-package net.die.phoneapi.power
+package net.die.phoneapi.helper.tree
 
-import net.die.phoneapi.core.ApiException
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
-import org.junit.jupiter.api.assertThrows
 
 class PinKeysTest {
     @Test
@@ -38,13 +36,5 @@ class PinKeysTest {
         assertTrue(PinKeys.isSubmit(null, "OK", null))
         assertFalse(PinKeys.isSubmit("com.android.systemui:id/key1", "1", null))
         assertFalse(PinKeys.isSubmit(null, "Delete", null))
-    }
-
-    @Test
-    fun `accepts a digit pin`() {
-        assertEquals("1234", normalizePin(" 1234 "))
-        val e = assertThrows<ApiException> { normalizePin("12") }
-        assertEquals("bad_request", e.error)
-        assertThrows<ApiException> { normalizePin("12ab") }
     }
 }

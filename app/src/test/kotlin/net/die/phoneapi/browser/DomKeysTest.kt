@@ -1,6 +1,6 @@
 package net.die.phoneapi.browser
 
-import net.die.phoneapi.core.ApiException
+import net.die.phoneapi.model.ApiException
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertThrows

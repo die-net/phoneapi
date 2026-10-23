@@ -13,7 +13,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.core.DeviceStateTracker
 import net.die.phoneapi.core.EventBus
 import net.die.phoneapi.core.PowerService
@@ -24,6 +23,7 @@ import net.die.phoneapi.helperclient.failureMessage
 import net.die.phoneapi.input.SwipeSpec
 import net.die.phoneapi.input.TouchInput
 import net.die.phoneapi.model.ActionResult
+import net.die.phoneapi.model.ApiException
 import net.die.phoneapi.model.DisplayInfo
 import net.die.phoneapi.model.OrientationRequest
 import net.die.phoneapi.model.PinpadKeys
@@ -271,7 +271,7 @@ class PowerServiceImpl(
         val result = shell.exec(listOf("settings", "put", "system", key, value.toString()))
         if (result.ok) return
         val detail = result.failureMessage().ifBlank { "settings put $key failed" }
-        throw ApiException(503, "helper_error", detail)
+        throw ApiException.unavailable("helper_error", detail)
     }
 
     private companion object {

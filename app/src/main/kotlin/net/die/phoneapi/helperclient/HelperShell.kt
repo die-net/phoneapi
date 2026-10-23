@@ -3,8 +3,8 @@ package net.die.phoneapi.helperclient
 import android.os.RemoteException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
-import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.helper.ShellResult as HelperShellResult
+import net.die.phoneapi.model.ApiException
 
 /** One finished helper command. Output is truncated by the helper, not here. */
 data class ShellResult(val exit: Int, val stdout: String = "", val stderr: String = "") {

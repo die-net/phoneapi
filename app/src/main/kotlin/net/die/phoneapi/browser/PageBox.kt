@@ -3,18 +3,17 @@ package net.die.phoneapi.browser
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
-import kotlin.random.Random
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
-import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.input.HumanGesture
 import net.die.phoneapi.input.Humanizer
 import net.die.phoneapi.input.PLAIN_TAP_HOLD_MS
 import net.die.phoneapi.input.SwipeSpec
+import net.die.phoneapi.model.ApiException
 import net.die.phoneapi.model.Point
 import net.die.phoneapi.model.Rect
 import net.die.phoneapi.model.SwipeDirection
@@ -66,27 +65,6 @@ internal fun screenTarget(quads: JsonArray, metrics: JsonObject, content: Rect):
         }
     }
     return best ?: throw ApiException(409, "offscreen", "The node is outside the page on screen")
-}
-
-/**
- * A point inside the largest quad that sits in the CSS viewport, the coordinate space of
- * `Input.dispatchTouchEvent`. Quads are already viewport CSS pixels.
- */
-internal fun viewportTap(
-    quads: JsonArray,
-    metrics: JsonObject,
-    humanize: Boolean,
-    random: Random = Random.Default,
-): Point {
-    val frame = viewport(metrics)
-    if (humanize) {
-        val first = cdpTapPath(quads, metrics, humanize = true, Humanizer(random)).first()
-        return Point(first.x, first.y)
-    }
-    val box =
-        largestCss(quads, CssBox(0.0, 0.0, frame.cssWidth, frame.cssHeight))
-            ?: throw ApiException(409, "offscreen", "The node is outside the viewport")
-    return cssPoint(box)
 }
 
 /**

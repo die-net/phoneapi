@@ -4,8 +4,8 @@ import android.util.Log
 import java.io.File
 import java.io.IOException
 import java.security.GeneralSecurityException
-import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.core.KeystoreAes
+import net.die.phoneapi.model.ApiException
 
 /** A lock-screen PIN this app can type: 4 to 16 digits, which is what Android accepts. */
 internal fun normalizePin(pin: String): String {

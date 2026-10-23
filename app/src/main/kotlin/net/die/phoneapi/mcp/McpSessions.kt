@@ -143,7 +143,9 @@ class McpSessions(
             session.server?.close()
         } catch (e: CancellationException) {
             throw e
-        } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+        } catch (
+            @Suppress("TooGenericExceptionCaught") // onEnd must run whatever closing throws.
+            e: Exception) {
             runCatching { Log.w(TAG, "Closing MCP session ${hashOf(id)} failed", e) }
         }
         onEnd(id)

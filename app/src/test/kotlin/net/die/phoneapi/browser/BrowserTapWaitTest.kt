@@ -1,8 +1,8 @@
 package net.die.phoneapi.browser
 
 import kotlinx.coroutines.runBlocking
-import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.model.ActionResult
+import net.die.phoneapi.model.ApiException
 import net.die.phoneapi.model.BrowserTapRequest
 import net.die.phoneapi.model.Rect
 import org.junit.jupiter.api.Assertions.assertEquals

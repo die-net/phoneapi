@@ -39,7 +39,7 @@ class McpScreenTest {
     @Test
     fun `every tool is classified`() {
         val known = SCREEN_TOOLS + SOMETIMES_SCREEN_TOOLS + NO_SCREEN
-        val unclassified = mcpToolTemplates().map { it.name }.filter { it !in known }
+        val unclassified = MCP_TOOLS.map { it.name }.filter { it !in known }
         assertEquals(emptyList<String>(), unclassified)
     }
 
