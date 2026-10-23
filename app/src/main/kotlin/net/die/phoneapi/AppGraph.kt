@@ -368,7 +368,7 @@ class AppGraph(
         )
     }
 
-    @Suppress("MissingUseCall")
+    @Suppress("MissingUseCall") // BrowserServiceImpl closes each socket it opens.
     private fun browserService(): BrowserService =
         BrowserServiceImpl(
             io = ioDispatcher,

@@ -13,10 +13,10 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.helperclient.AdbEndpointFinder
 import net.die.phoneapi.helperclient.KeystorePrivateKeyStore
 import net.die.phoneapi.helperclient.SecureSettings
+import net.die.phoneapi.model.ApiException
 
 /**
  * Opens Chrome's DevTools socket by asking adbd to connect. The helper runs as shell and cannot

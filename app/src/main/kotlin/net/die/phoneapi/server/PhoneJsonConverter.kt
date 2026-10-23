@@ -52,7 +52,7 @@ internal object PhoneJsonConverter : ContentConverter {
             is JSONRPCMessage -> encodeMessage(value)
             is List<*> ->
                 if (value.all { it is JSONRPCMessage }) {
-                    @Suppress("UNCHECKED_CAST")
+                    @Suppress("UNCHECKED_CAST") // Every element was just checked.
                     McpJson.encodeToString(
                         serializer<List<JSONRPCMessage>>(),
                         value as List<JSONRPCMessage>,

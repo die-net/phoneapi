@@ -42,8 +42,6 @@ internal fun visibleMcpTools(scopes: Set<Scope>, capabilities: Capabilities): Li
             if (note == null) tool else tool.copy(description = "${tool.description} $note")
         }
 
-internal fun mcpToolTemplates(): List<McpTool> = MCP_TOOLS
-
 private val readOnly = ToolAnnotations(readOnlyHint = true, openWorldHint = false)
 
 private val changes =
@@ -466,7 +464,7 @@ private val TOOLS: List<McpTool> =
     )
 
 /** Every tool but the session tools also takes `session`. */
-private val MCP_TOOLS: List<McpTool> = TOOLS.map {
+internal val MCP_TOOLS: List<McpTool> = TOOLS.map {
     if (it.name in SESSION_TOOLS) it else it.withSessionArgument()
 }
 

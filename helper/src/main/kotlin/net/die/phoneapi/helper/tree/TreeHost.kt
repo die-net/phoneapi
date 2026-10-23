@@ -12,7 +12,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.runBlocking
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -20,12 +19,21 @@ import kotlinx.serialization.serializer
 import net.die.phoneapi.helper.ITreeClient
 import net.die.phoneapi.model.ActionResult
 import net.die.phoneapi.model.ApiException
-import net.die.phoneapi.model.DeviceStateSummary
 import net.die.phoneapi.model.FindRequest
 import net.die.phoneapi.model.ImeState
 import net.die.phoneapi.model.NodeSelector
-import net.die.phoneapi.model.SnapshotOptions
+import net.die.phoneapi.model.TreeActCall
+import net.die.phoneapi.model.TreeFocusCall
+import net.die.phoneapi.model.TreeFocusedText
+import net.die.phoneapi.model.TreeFound
+import net.die.phoneapi.model.TreeGlobalCall
+import net.die.phoneapi.model.TreePackageCall
 import net.die.phoneapi.model.TreeResult
+import net.die.phoneapi.model.TreeScreened
+import net.die.phoneapi.model.TreeSetTextCall
+import net.die.phoneapi.model.TreeSnapshotCall
+import net.die.phoneapi.model.TreeTitleCall
+import net.die.phoneapi.model.TreeTouchCall
 
 /** UI tree for the shell helper. Live nodes stay in this process. */
 @Suppress("InjectDispatcher") // The helper process has no app graph to inject a dispatcher from.
@@ -77,7 +85,7 @@ internal class TreeHost(private val client: () -> ITreeClient?) {
     }
 
     fun call(op: String, payload: String): String {
-        val screened = json.decodeFromString(serializer<Screened>(), payload)
+        val screened = json.decodeFromString(serializer<TreeScreened>(), payload)
         screen.set(0, 0, screened.widthPx.coerceAtLeast(1), screened.heightPx.coerceAtLeast(1))
         return try {
             done(dispatch(op, screened.body.ifBlank { "{}" }))
@@ -109,7 +117,7 @@ internal class TreeHost(private val client: () -> ITreeClient?) {
     private fun read(op: String, body: String): String =
         when (op) {
             "snapshot" -> {
-                val call = json.decodeFromString(serializer<SnapshotCall>(), body)
+                val call = json.decodeFromString(serializer<TreeSnapshotCall>(), body)
                 val shot = runBlocking { snapshots.snapshot(call.options, call.summary) }
                 json.encodeToString(shot)
             }
@@ -120,15 +128,15 @@ internal class TreeHost(private val client: () -> ITreeClient?) {
             "keyboard" -> json.encodeToString(withWindows { ImeKeyboard.scan(it) })
             "pinpad" -> json.encodeToString(withWindows { PinPad.keys(it) })
             "contentBounds" -> {
-                val call = json.decodeFromString(serializer<PackageCall>(), body)
+                val call = json.decodeFromString(serializer<TreePackageCall>(), body)
                 json.encodeToString(withWindows { ContentFrame.find(it, call.packageName) })
             }
             "windowTitle" -> {
-                val call = json.decodeFromString(serializer<TitleCall>(), body)
+                val call = json.decodeFromString(serializer<TreeTitleCall>(), body)
                 val found = withWindows { windows ->
                     windows.any { it.title?.contains(call.text, ignoreCase = true) == true }
                 }
-                json.encodeToString(Found(found))
+                json.encodeToString(TreeFound(found))
             }
             else -> throw ApiException.badRequest("Unknown tree op '$op'")
         }
@@ -155,13 +163,13 @@ internal class TreeHost(private val client: () -> ITreeClient?) {
     private fun write(op: String, body: String): String =
         when (op) {
             "act" -> {
-                val call = json.decodeFromString(serializer<ActCall>(), body)
+                val call = json.decodeFromString(serializer<TreeActCall>(), body)
                 val result = nodes.withNode(call.ref) { semantic(it, call.action, call.text) }
                 snapshots.invalidate()
                 json.encodeToString(result)
             }
             "touchTarget" -> {
-                val call = json.decodeFromString(serializer<TouchCall>(), body)
+                val call = json.decodeFromString(serializer<TreeTouchCall>(), body)
                 val rect = runBlocking {
                     nodes.withNode(call.ref) { node ->
                         targeting.touchTarget(node, session.windows(), call.force)
@@ -170,15 +178,15 @@ internal class TreeHost(private val client: () -> ITreeClient?) {
                 json.encodeToString(rect)
             }
             "global" -> {
-                val call = json.decodeFromString(serializer<GlobalCall>(), body)
+                val call = json.decodeFromString(serializer<TreeGlobalCall>(), body)
                 json.encodeToString(ActionResult(ok = session.performGlobalAction(call.action)))
             }
             "setText" -> {
-                val call = json.decodeFromString(serializer<SetTextCall>(), body)
+                val call = json.decodeFromString(serializer<TreeSetTextCall>(), body)
                 json.encodeToString(setText(call))
             }
             "focus" -> {
-                val call = json.decodeFromString(serializer<FocusCall>(), body)
+                val call = json.decodeFromString(serializer<TreeFocusCall>(), body)
                 json.encodeToString(focus(call.selector))
             }
             "selectFocused" -> json.encodeToString(selectFocused())
@@ -226,7 +234,7 @@ internal class TreeHost(private val client: () -> ITreeClient?) {
         )
     }
 
-    private fun setText(call: SetTextCall): ActionResult {
+    private fun setText(call: TreeSetTextCall): ActionResult {
         val node =
             session.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.takeIf { it.isEditable }
                 ?: throw ApiException(409, "no_editor", "No text field is focused")
@@ -264,18 +272,18 @@ internal class TreeHost(private val client: () -> ITreeClient?) {
         }
     }
 
-    private fun selectFocused(): FocusedText {
-        val node = session.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return FocusedText(0)
+    private fun selectFocused(): TreeFocusedText {
+        val node = session.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) ?: return TreeFocusedText(0)
         try {
             val length = if (node.isShowingHintText) 0 else node.text?.length ?: 0
-            if (length == 0) return FocusedText(0)
+            if (length == 0) return TreeFocusedText(0)
             val args =
                 Bundle().apply {
                     putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, 0)
                     putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, length)
                 }
             node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, args)
-            return FocusedText(length)
+            return TreeFocusedText(length)
         } finally {
             NodeCompat.recycle(node)
         }
@@ -367,36 +375,6 @@ internal class TreeHost(private val client: () -> ITreeClient?) {
             notify { it.onSeq(seq, windowsVersion, lastChangeMs) }
         }
     }
-
-    @Serializable
-    private data class Screened(val widthPx: Int, val heightPx: Int, val body: String = "{}")
-
-    @Serializable
-    private data class SnapshotCall(val options: SnapshotOptions, val summary: DeviceStateSummary)
-
-    @Serializable
-    private data class ActCall(val ref: String, val action: String, val text: String? = null)
-
-    @Serializable private data class TouchCall(val ref: String, val force: Boolean = false)
-
-    @Serializable private data class GlobalCall(val action: Int)
-
-    @Serializable
-    private data class SetTextCall(
-        val text: String,
-        val clear: Boolean = false,
-        val submit: Boolean = false,
-    )
-
-    @Serializable private data class FocusCall(val selector: NodeSelector? = null)
-
-    @Serializable private data class PackageCall(val packageName: String = "")
-
-    @Serializable private data class TitleCall(val text: String)
-
-    @Serializable private data class Found(val found: Boolean)
-
-    @Serializable private data class FocusedText(val length: Int)
 
     private companion object {
         const val TAG = "PhoneApiHelper"

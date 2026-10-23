@@ -30,26 +30,6 @@ public data class SchemaConfig(
     val ignoreUnknownKeys: Boolean = true,
 )
 
-/**
- * Builds a JSON Schema document for [descriptor]. Classes, sealed types, and objects are named in
- * `$defs` (or [refPrefix]) and referenced from there, so nested and recursive types stay finite.
- * The returned object is the root schema with a `$defs` member when any named type was used.
- */
-@OptIn(ExperimentalSerializationApi::class)
-public fun jsonSchema(
-    descriptor: SerialDescriptor,
-    config: SchemaConfig = SchemaConfig(),
-    refPrefix: String = "#/\$defs/",
-): JsonObject {
-    val schemas = JsonSchemas(config, refPrefix)
-    val root = schemas.inline(descriptor)
-    if (schemas.definitions.isEmpty()) return root
-    return buildJsonObject {
-        root.forEach { key, value -> put(key, value) }
-        put("\$defs", JsonObject(schemas.definitions))
-    }
-}
-
 /** Walks descriptors into JSON Schema, sharing one definition map across several roots. */
 @OptIn(ExperimentalSerializationApi::class)
 public class JsonSchemas(

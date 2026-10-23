@@ -8,10 +8,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.core.DeviceStateTracker
 import net.die.phoneapi.core.InputService
 import net.die.phoneapi.model.ActionResult
+import net.die.phoneapi.model.ApiException
 import net.die.phoneapi.model.DisplayInfo
 import net.die.phoneapi.model.FindRequest
 import net.die.phoneapi.model.GestureRequest

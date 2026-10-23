@@ -4,7 +4,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
-import net.die.phoneapi.core.ApiException
+import net.die.phoneapi.model.ApiException
 import net.die.phoneapi.model.WaitCondition
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse

@@ -3,13 +3,13 @@ package net.die.phoneapi.browser
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
-import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.helper.TouchscreenInfo
 import net.die.phoneapi.input.FingerMotion
 import net.die.phoneapi.input.Humanizer
 import net.die.phoneapi.input.SwipeSpec
 import net.die.phoneapi.input.fallbackTouchscreen
 import net.die.phoneapi.model.ActionResult
+import net.die.phoneapi.model.ApiException
 import net.die.phoneapi.model.BrowserGestureRequest
 import net.die.phoneapi.model.BrowserInput
 import net.die.phoneapi.model.BrowserKeyRequest

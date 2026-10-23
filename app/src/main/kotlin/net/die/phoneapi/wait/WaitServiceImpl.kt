@@ -13,13 +13,13 @@ import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import net.die.phoneapi.browser.DevtoolsSocket
-import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.core.BrowserService
 import net.die.phoneapi.core.DeviceStateTracker
 import net.die.phoneapi.core.EventBus
-import net.die.phoneapi.core.SnapshotOptions
 import net.die.phoneapi.core.WaitService
+import net.die.phoneapi.model.ApiException
 import net.die.phoneapi.model.Scope
+import net.die.phoneapi.model.SnapshotOptions
 import net.die.phoneapi.model.WaitRequest
 import net.die.phoneapi.model.WaitResult
 import net.die.phoneapi.tree.TreeSession

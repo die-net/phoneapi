@@ -6,8 +6,8 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
-import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.core.ApiJson
+import net.die.phoneapi.model.ApiException
 
 /** What the snapshot's page check returns. */
 @Serializable

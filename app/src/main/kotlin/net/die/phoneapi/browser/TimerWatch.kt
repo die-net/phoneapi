@@ -5,7 +5,7 @@ import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
-import net.die.phoneapi.core.ApiException
+import net.die.phoneapi.model.ApiException
 
 /**
  * Whether a tab's timers still run. On an Android 11 phone, Chrome stopped a hidden tab's timers

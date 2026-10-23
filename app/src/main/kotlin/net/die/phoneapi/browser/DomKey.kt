@@ -1,6 +1,6 @@
 package net.die.phoneapi.browser
 
-import net.die.phoneapi.core.ApiException
+import net.die.phoneapi.model.ApiException
 
 /** A key the page can receive through `Input.dispatchKeyEvent`. */
 internal data class DomKey(

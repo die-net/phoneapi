@@ -68,7 +68,7 @@ class McpCatalogTest {
         val noTree =
             visibleMcpTools(setOf(Scope.CONTROL), allOn().copy(uiSnapshot = false)).map { it.name }
         assertFalse("keyboard_show" in noTree)
-        val show = mcpToolTemplates().first { it.name == "keyboard_show" }
+        val show = MCP_TOOLS.first { it.name == "keyboard_show" }
         assertTrue(show.schema.properties!!.keys.containsAll(listOf("selector", "autoWake")))
     }
 
@@ -80,7 +80,7 @@ class McpCatalogTest {
 
     @Test
     fun `schemas match decoded types`() {
-        mcpToolTemplates().forEach { tool ->
+        MCP_TOOLS.forEach { tool ->
             assertEquals("object", tool.schema.type)
             val properties = tool.schema.properties ?: JsonObject(emptyMap())
             val names =
@@ -95,21 +95,17 @@ class McpCatalogTest {
             val sample = sampleObject(decoded, tool.schema.required.orEmpty(), defs)
             ApiJson.decodeFromJsonElement(tool.arguments, sample)
         }
-        val tap = mcpToolTemplates().first { it.name == "tap" }.schema.properties!!
+        val tap = MCP_TOOLS.first { it.name == "tap" }.schema.properties!!
         assertTrue(tap.keys.containsAll(listOf("count", "holdMs", "force", "autoWake")))
-        assertTrue(
-            "autoWake" in mcpToolTemplates().first { it.name == "ui_act" }.schema.properties!!.keys
-        )
+        assertTrue("autoWake" in MCP_TOOLS.first { it.name == "ui_act" }.schema.properties!!.keys)
         assertFalse(
-            mcpToolTemplates()
-                .first { it.name == "wait_for" }
+            MCP_TOOLS.first { it.name == "wait_for" }
                 .schema
                 .properties!!
                 .containsKey("snapshotFormat")
         )
         val waitItems =
-            mcpToolTemplates()
-                .first { it.name == "wait_for" }
+            MCP_TOOLS.first { it.name == "wait_for" }
                 .schema
                 .properties!!
                 .getValue("all")
@@ -118,7 +114,7 @@ class McpCatalogTest {
             waitItems.jsonObject.containsKey("\$ref") || waitItems.jsonObject.containsKey("oneOf")
         )
         ApiJson.decodeFromJsonElement(
-            mcpToolTemplates().first { it.name == "tap" }.arguments,
+            MCP_TOOLS.first { it.name == "tap" }.arguments,
             buildJsonObject { put("count", 2) },
         )
     }
@@ -139,7 +135,7 @@ class McpCatalogTest {
         val failure =
             assertThrows<SerializationException> {
                 ApiJson.decodeFromJsonElement(
-                    mcpToolTemplates().first { it.name == "wait_for" }.arguments,
+                    MCP_TOOLS.first { it.name == "wait_for" }.arguments,
                     buildJsonObject {
                         put(
                             "all",

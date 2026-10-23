@@ -6,7 +6,7 @@ import io.ktor.server.response.respond
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
-import net.die.phoneapi.core.ApiException
+import net.die.phoneapi.model.ApiException
 import net.die.phoneapi.model.IntentRequest
 import net.die.phoneapi.model.LaunchRequest
 import net.die.phoneapi.model.Scope

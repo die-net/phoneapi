@@ -15,7 +15,7 @@ internal object NodeCompat {
         if (pooled) node.recycle()
     }
 
-    @Suppress("DEPRECATION")
+    @Suppress("DEPRECATION") // Like recycle(node), a no-op from API 33.
     fun recycle(window: AccessibilityWindowInfo) {
         if (pooled) window.recycle()
     }

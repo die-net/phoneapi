@@ -5,7 +5,7 @@ import java.util.regex.PatternSyntaxException
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
 import net.die.phoneapi.browser.decodeCdp
-import net.die.phoneapi.core.ApiException
+import net.die.phoneapi.model.ApiException
 import net.die.phoneapi.model.LogLevel
 import net.die.phoneapi.model.Scope
 import net.die.phoneapi.model.WaitCondition

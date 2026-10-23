@@ -22,13 +22,13 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.serializer
-import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.core.ApiJson
 import net.die.phoneapi.core.BrowserService
 import net.die.phoneapi.helper.TouchscreenInfo
 import net.die.phoneapi.input.SwipeSpec
 import net.die.phoneapi.input.fallbackTouchscreen
 import net.die.phoneapi.model.ActionResult
+import net.die.phoneapi.model.ApiException
 import net.die.phoneapi.model.BrowserFindRequest
 import net.die.phoneapi.model.BrowserFindResult
 import net.die.phoneapi.model.BrowserGestureRequest

@@ -11,7 +11,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.put
-import net.die.phoneapi.core.ApiException
+import net.die.phoneapi.model.ApiException
 
 /**
  * Tells, within a couple of seconds rather than the 15-second DevTools timeout, why a Chrome tab

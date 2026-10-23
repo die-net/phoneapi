@@ -1,5 +1,7 @@
 package net.die.phoneapi.core
 
+import net.die.phoneapi.model.ApiException
+
 internal const val DEFAULT_LOG_LEVEL = "I"
 
 internal val LOG_LEVELS = setOf("V", "D", "I", "W", "E", "F")

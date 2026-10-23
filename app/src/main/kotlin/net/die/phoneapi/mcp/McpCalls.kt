@@ -12,14 +12,13 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.serializer
-import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.core.ApiJson
 import net.die.phoneapi.core.ScreenshotScale
-import net.die.phoneapi.core.SnapshotOptions
 import net.die.phoneapi.core.checkLogTag
 import net.die.phoneapi.core.windowId
 import net.die.phoneapi.helperclient.failureMessage
 import net.die.phoneapi.model.ActionMode
+import net.die.phoneapi.model.ApiException
 import net.die.phoneapi.model.BROWSER_INPUT_DOC
 import net.die.phoneapi.model.BROWSER_WAKE_DOC
 import net.die.phoneapi.model.BrowserGestureRequest
@@ -45,6 +44,7 @@ import net.die.phoneapi.model.Point
 import net.die.phoneapi.model.SHOW_DOC
 import net.die.phoneapi.model.Scope
 import net.die.phoneapi.model.SnapshotFormat
+import net.die.phoneapi.model.SnapshotOptions
 import net.die.phoneapi.model.SwipeDirection
 import net.die.phoneapi.model.SwipeRequest
 import net.die.phoneapi.model.TAP_WAIT_DOC
@@ -473,7 +473,7 @@ internal suspend fun logcatTail(
     val result = services.shell(argv)
     if (!result.ok) {
         val detail = result.failureMessage().ifBlank { "logcat exited ${result.exit}" }
-        throw ApiException(503, "helper_error", detail)
+        throw ApiException.unavailable("helper_error", detail)
     }
     if (tag == null) result.stdout else tailLines(result.stdout, args.lines)
 }

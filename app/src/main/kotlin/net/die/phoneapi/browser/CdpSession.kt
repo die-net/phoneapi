@@ -19,8 +19,8 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
-import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.core.ApiJson
+import net.die.phoneapi.model.ApiException
 
 internal data class CdpEvent(val method: String, val params: JsonObject)
 
@@ -65,7 +65,7 @@ internal class CdpSession(
             // Only this call's own timeout is cdp_timeout. A caller's shorter one stays a
             // cancellation, so withTimeoutOrNull around a call works.
             withTimeoutOrNull(CALL_TIMEOUT_MS) { roundTrip(method, params) }
-                ?: throw ApiException(503, "cdp_timeout", "DevTools did not answer in time")
+                ?: throw ApiException.unavailable("cdp_timeout", "DevTools did not answer in time")
         } catch (e: CancellationException) {
             throw e
         } catch (e: ApiException) {

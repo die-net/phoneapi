@@ -9,6 +9,7 @@ import java.io.ByteArrayOutputStream
 import kotlin.math.roundToInt
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
+import net.die.phoneapi.model.ApiException
 
 /** PNG screenshots from the helper's `screencap`. */
 class Screenshotter(

@@ -17,7 +17,7 @@ import io.ktor.server.routing.RoutingResolveContext
 import io.ktor.util.AttributeKey
 import java.net.URI
 import java.net.URISyntaxException
-import net.die.phoneapi.core.ApiException
+import net.die.phoneapi.model.ApiException
 import net.die.phoneapi.model.Scope
 import net.die.phoneapi.model.TokenInfo
 

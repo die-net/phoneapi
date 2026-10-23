@@ -16,8 +16,8 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
-import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.core.LogcatFilter
+import net.die.phoneapi.model.ApiException
 import net.die.phoneapi.model.Event
 import net.die.phoneapi.model.EventTypes
 import net.die.phoneapi.model.Scope

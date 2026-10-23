@@ -7,21 +7,18 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.serializer
-import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.core.ApiJson
 import net.die.phoneapi.core.DeviceStateTracker
 import net.die.phoneapi.core.EventBus
-import net.die.phoneapi.core.SnapshotOptions
 import net.die.phoneapi.helper.IHelper
 import net.die.phoneapi.helper.ITreeClient
 import net.die.phoneapi.helperclient.HelperConnection
 import net.die.phoneapi.model.ActionResult
-import net.die.phoneapi.model.DeviceStateSummary
+import net.die.phoneapi.model.ApiException
 import net.die.phoneapi.model.DisplayInfo
 import net.die.phoneapi.model.FindRequest
 import net.die.phoneapi.model.FindResult
@@ -29,8 +26,20 @@ import net.die.phoneapi.model.ImeState
 import net.die.phoneapi.model.NodeSelector
 import net.die.phoneapi.model.PinpadKeys
 import net.die.phoneapi.model.Rect
+import net.die.phoneapi.model.SnapshotOptions
+import net.die.phoneapi.model.TreeActCall
+import net.die.phoneapi.model.TreeFocusCall
+import net.die.phoneapi.model.TreeFocusedText
+import net.die.phoneapi.model.TreeFound
+import net.die.phoneapi.model.TreeGlobalCall
 import net.die.phoneapi.model.TreeKey
+import net.die.phoneapi.model.TreePackageCall
 import net.die.phoneapi.model.TreeResult
+import net.die.phoneapi.model.TreeScreened
+import net.die.phoneapi.model.TreeSetTextCall
+import net.die.phoneapi.model.TreeSnapshotCall
+import net.die.phoneapi.model.TreeTitleCall
+import net.die.phoneapi.model.TreeTouchCall
 import net.die.phoneapi.model.UiSnapshot
 
 /**
@@ -80,8 +89,8 @@ class TreeSession(
     fun snapshot(options: SnapshotOptions): UiSnapshot {
         val body =
             ApiJson.encodeToString(
-                serializer<SnapshotCall>(),
-                SnapshotCall(options, state.refresh()),
+                serializer<TreeSnapshotCall>(),
+                TreeSnapshotCall(options, state.refresh()),
             )
         return decode(rpc("snapshot", body))
     }
@@ -89,21 +98,21 @@ class TreeSession(
     fun find(request: FindRequest): FindResult = decode(rpc("find", encode(request)))
 
     fun act(ref: String, action: String, text: String?): ActionResult =
-        decode(rpc("act", encode(ActCall(ref, action, text))))
+        decode(rpc("act", encode(TreeActCall(ref, action, text))))
 
     fun touchTarget(ref: String, force: Boolean): Rect =
-        decode(rpc("touchTarget", encode(TouchCall(ref, force))))
+        decode(rpc("touchTarget", encode(TreeTouchCall(ref, force))))
 
     fun global(action: Int): Boolean {
-        val result = decode<ActionResult>(rpc("global", encode(GlobalCall(action))))
+        val result = decode<ActionResult>(rpc("global", encode(TreeGlobalCall(action))))
         return result.ok
     }
 
     fun setText(text: String, clear: Boolean, submit: Boolean): ActionResult =
-        decode(rpc("setText", encode(SetTextCall(text, clear, submit))))
+        decode(rpc("setText", encode(TreeSetTextCall(text, clear, submit))))
 
     fun focus(selector: NodeSelector?): ActionResult =
-        decode(rpc("focus", encode(FocusCall(selector))))
+        decode(rpc("focus", encode(TreeFocusCall(selector))))
 
     fun keyboard(): List<TreeKey> =
         ApiJson.decodeFromString(ListSerializer(TreeKey.serializer()), rpc("keyboard", "{}"))
@@ -111,10 +120,10 @@ class TreeSession(
     fun pinpad(): PinpadKeys = decode(rpc("pinpad", "{}"))
 
     fun contentBounds(packageName: String): Rect =
-        decode(rpc("contentBounds", encode(PackageCall(packageName))))
+        decode(rpc("contentBounds", encode(TreePackageCall(packageName))))
 
     fun windowTitle(text: String): Boolean {
-        val found = decode<Found>(rpc("windowTitle", encode(TitleCall(text))))
+        val found = decode<TreeFound>(rpc("windowTitle", encode(TreeTitleCall(text))))
         return found.found
     }
 
@@ -124,7 +133,7 @@ class TreeSession(
 
     /** Characters currently in the focused field, after selecting them. Zero when it is empty. */
     fun selectFocused(): Int {
-        val focused = decode<FocusedText>(rpc("selectFocused", "{}"))
+        val focused = decode<TreeFocusedText>(rpc("selectFocused", "{}"))
         return focused.length
     }
 
@@ -188,8 +197,8 @@ class TreeSession(
     private fun envelope(body: String): String {
         val screen = display()
         return ApiJson.encodeToString(
-            serializer<Screened>(),
-            Screened(screen.widthPx, screen.heightPx, body),
+            serializer<TreeScreened>(),
+            TreeScreened(screen.widthPx, screen.heightPx, body),
         )
     }
 
@@ -198,34 +207,4 @@ class TreeSession(
 
     private inline fun <reified T> decode(body: String): T =
         ApiJson.decodeFromString(serializer<T>(), body)
-
-    @Serializable
-    private data class Screened(val widthPx: Int, val heightPx: Int, val body: String = "{}")
-
-    @Serializable
-    private data class SnapshotCall(val options: SnapshotOptions, val summary: DeviceStateSummary)
-
-    @Serializable
-    private data class ActCall(val ref: String, val action: String, val text: String? = null)
-
-    @Serializable private data class TouchCall(val ref: String, val force: Boolean = false)
-
-    @Serializable private data class GlobalCall(val action: Int)
-
-    @Serializable
-    private data class SetTextCall(
-        val text: String,
-        val clear: Boolean = false,
-        val submit: Boolean = false,
-    )
-
-    @Serializable private data class FocusCall(val selector: NodeSelector? = null)
-
-    @Serializable private data class PackageCall(val packageName: String = "")
-
-    @Serializable private data class TitleCall(val text: String)
-
-    @Serializable private data class Found(val found: Boolean)
-
-    @Serializable private data class FocusedText(val length: Int)
 }

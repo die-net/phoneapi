@@ -22,8 +22,8 @@ import net.die.phoneapi.browser.DevtoolsSocket
 import net.die.phoneapi.browser.FrameTreeResult
 import net.die.phoneapi.browser.decodeCdp
 import net.die.phoneapi.browser.parseBrowserTargetId
-import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.core.BrowserService
+import net.die.phoneapi.model.ApiException
 import net.die.phoneapi.model.ElementBy
 import net.die.phoneapi.model.ElementState
 import net.die.phoneapi.model.WaitCondition

@@ -246,7 +246,9 @@ class ScreenLease(
             cleanup()
         } catch (e: CancellationException) {
             throw e
-        } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
+        } catch (
+            @Suppress("TooGenericExceptionCaught") // A failed step is reported, not thrown.
+            e: Exception) {
             listOf(e.message ?: "cleanup failed")
         }
 

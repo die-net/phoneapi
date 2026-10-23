@@ -10,9 +10,9 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
-import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.input.SwipeSpec
 import net.die.phoneapi.model.ActionResult
+import net.die.phoneapi.model.ApiException
 import net.die.phoneapi.model.BrowserInput
 import net.die.phoneapi.model.BrowserTapRequest
 import net.die.phoneapi.model.KeyRequest
@@ -545,7 +545,7 @@ class BrowserServiceTest {
         }
     }
 
-    @Suppress("MissingUseCall")
+    @Suppress("MissingUseCall") // BrowserServiceImpl closes each socket it opens.
     internal fun service(
         response: ByteArray,
         sockets: String,

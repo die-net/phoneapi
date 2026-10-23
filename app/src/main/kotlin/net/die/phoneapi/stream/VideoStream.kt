@@ -33,8 +33,8 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.helperclient.HelperConnection
+import net.die.phoneapi.model.ApiException
 import net.die.phoneapi.model.DisplayInfo
 
 data class VideoSpec(val maxSize: Int, val fps: Int, val bitRate: Int)

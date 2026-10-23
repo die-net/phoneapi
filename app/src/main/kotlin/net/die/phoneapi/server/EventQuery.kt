@@ -1,10 +1,10 @@
 package net.die.phoneapi.server
 
-import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.core.DEFAULT_LOG_LEVEL
 import net.die.phoneapi.core.LOG_LEVELS
 import net.die.phoneapi.core.LogcatFilter
 import net.die.phoneapi.core.checkLogTag
+import net.die.phoneapi.model.ApiException
 import net.die.phoneapi.model.EventTypes
 
 /**

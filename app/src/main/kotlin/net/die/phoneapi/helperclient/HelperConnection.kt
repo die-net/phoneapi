@@ -9,10 +9,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
-import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.core.EventBus
 import net.die.phoneapi.helper.IHelper
 import net.die.phoneapi.helper.Registration
+import net.die.phoneapi.model.ApiException
 import net.die.phoneapi.model.EventTypes
 import net.die.phoneapi.model.HelperStatus
 

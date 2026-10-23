@@ -17,11 +17,11 @@ import io.ktor.server.websocket.WebSockets
 import io.ktor.server.websocket.pingPeriod
 import kotlin.time.Duration.Companion.seconds
 import kotlinx.serialization.SerializationException
-import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.lease.Holder
 import net.die.phoneapi.mcp.McpSessions
 import net.die.phoneapi.mcp.installPhoneMcp
 import net.die.phoneapi.model.ApiError
+import net.die.phoneapi.model.ApiException
 import net.die.phoneapi.server.routes.appRoutes
 import net.die.phoneapi.server.routes.browserRoutes
 import net.die.phoneapi.server.routes.deviceRoutes
@@ -61,10 +61,6 @@ class ApiServer(
         server?.stop(gracePeriodMillis = 200, timeoutMillis = 1_000)
         server = null
     }
-
-    private companion object {
-        const val TAG = "PhoneApiServer"
-    }
 }
 
 fun Application.phoneApiModule(
@@ -97,7 +93,7 @@ fun Application.phoneApiModule(
             call.respond(HttpStatusCode.BadRequest, ApiError("bad_request", e.message))
         }
         exception<Throwable> { call, e ->
-            Log.e("PhoneApiServer", "Unhandled error", e)
+            Log.e(TAG, "Unhandled error", e)
             call.respond(HttpStatusCode.InternalServerError, ApiError("internal", e.message))
         }
     }
@@ -120,3 +116,5 @@ fun Application.phoneApiModule(
 }
 
 private fun Throwable.rootMessage(): String? = generateSequence(this) { it.cause }.last().message
+
+private const val TAG = "PhoneApiServer"

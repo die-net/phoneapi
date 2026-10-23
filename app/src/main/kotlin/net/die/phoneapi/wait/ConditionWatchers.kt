@@ -3,8 +3,8 @@ package net.die.phoneapi.wait
 import android.os.SystemClock
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
-import net.die.phoneapi.core.ApiException
 import net.die.phoneapi.core.DeviceStateTracker
+import net.die.phoneapi.model.ApiException
 import net.die.phoneapi.model.DeviceStateSummary
 import net.die.phoneapi.model.FindRequest
 import net.die.phoneapi.model.ScreenState
