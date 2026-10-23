@@ -329,8 +329,8 @@ public enum class FindKind {
 public data class BrowserFindRequest(
     @Doc(
         "text (default) finds query in the content. links lists links in the content; in article " +
-            "scope, when the article has none, as on a listing page, the whole page is searched " +
-            "and extracted says page."
+            "scope, when none are found, filtered or not, as on a listing page, the whole page is " +
+            "searched and extracted says page."
     )
     val kind: FindKind = FindKind.TEXT,
     @Doc(FIND_QUERY_DOC) val query: String? = null,
