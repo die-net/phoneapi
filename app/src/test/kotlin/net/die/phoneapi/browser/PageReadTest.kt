@@ -142,34 +142,41 @@ class PageReadTest {
 
     @Test
     fun `links fall back to the page`() = runBlocking {
-        // Readability picked a fragment of a listing page without its links.
+        // Readability picked a fragment of a listing page without its results.
         val fragment =
             extract.copy(blocks = listOf(PageBlock(k = "p", r = listOf(PageRun(t = "Results")))))
+        val result = PageRun(t = "Widget", h = "https://example.com/dp/1")
+        val page =
+            extract.copy(
+                extracted = "page",
+                blocks = extract.blocks + PageBlock(k = "p", r = listOf(result)),
+            )
         val asked = mutableListOf<ReadScope>()
-        val links = BrowserFindRequest(kind = FindKind.LINKS)
-        val found =
-            findWithFallback(links) { scope ->
+        suspend fun find(request: BrowserFindRequest, article: PageExtract = extract) =
+            findWithFallback(request) { scope ->
                 asked += scope
-                if (scope == ReadScope.ARTICLE) fragment else extract.copy(extracted = "page")
+                if (scope == ReadScope.ARTICLE) article else page
             }
-        assertEquals(listOf(ReadScope.ARTICLE, ReadScope.PAGE), asked)
-        assertEquals(2, found.total)
-        assertEquals("page", found.extracted)
-        // A filter that matches none of the article's links, or a text find, stays in the article.
+        val links = BrowserFindRequest(kind = FindKind.LINKS)
+
+        // No links in the article at all.
+        val bare = find(links, fragment)
+        assertEquals(3 to "page", bare.total to bare.extracted)
+        // Links in the article, but none the filter wants.
+        val wanted = find(links.copy(hrefContains = "/dp/"))
+        assertEquals(1 to "page", wanted.total to wanted.extracted)
+        assertEquals(List(2) { listOf(ReadScope.ARTICLE, ReadScope.PAGE) }.flatten(), asked)
+
+        // Nothing on the page either: the article's empty result stands.
         asked.clear()
-        val none = links.copy(hrefContains = "missing")
-        assertEquals(
-            0,
-            findWithFallback(none) {
-                    asked += it
-                    extract
-                }
-                .total,
-        )
-        findWithFallback(BrowserFindRequest(query = "Results")) {
-            asked += it
-            fragment
-        }
+        val none = find(links.copy(hrefContains = "missing"))
+        assertEquals(0 to "article", none.total to none.extracted)
+        assertEquals(listOf(ReadScope.ARTICLE, ReadScope.PAGE), asked)
+
+        // Links the article has, and text finds, stay in the article.
+        asked.clear()
+        assertEquals(2, find(links).total)
+        find(BrowserFindRequest(query = "Results"), fragment)
         assertEquals(listOf(ReadScope.ARTICLE, ReadScope.ARTICLE), asked)
     }
 
