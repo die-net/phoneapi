@@ -92,6 +92,9 @@ internal class CdpSession(
 
     override fun close() {
         socket.close()
+        // Closing cancels the reader, which never runs at all if it had not started yet, so the
+        // session is marked closed here too.
+        failAll(IOException(DEVTOOLS_CLOSED))
     }
 
     private suspend fun roundTrip(method: String, params: JsonObject?): JsonObject {
@@ -100,7 +103,8 @@ internal class CdpSession(
         val ready =
             synchronized(gate) {
                 early.remove(id)
-                    ?: closedBy?.let { Result.failure(IOException(it.message, it)) }
+                    // A session that has already stopped has nowhere to send to.
+                    ?: closedBy?.let { throw IOException(it.message, it) }
                     ?: run {
                         pending[id] = deferred
                         null
@@ -164,7 +168,8 @@ internal class CdpSession(
     private fun failAll(error: IOException) {
         val waiting =
             synchronized(gate) {
-                closedBy = error
+                // The first reason the session stopped is the one later commands report.
+                if (closedBy == null) closedBy = error
                 val values = pending.values.toList()
                 pending.clear()
                 values

@@ -7,6 +7,7 @@ import io.ktor.websocket.RawWebSocket
 import io.ktor.websocket.WebSocketSession
 import io.ktor.websocket.readText
 import java.io.Closeable
+import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import kotlin.coroutines.CoroutineContext
@@ -15,6 +16,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
@@ -46,8 +48,15 @@ internal class ChromeSocket(
 
     fun launch(block: suspend CoroutineScope.() -> Unit): Job = scope.launch(block = block)
 
+    /** Sends a text frame. On a socket that has closed, this fails with an IOException. */
     suspend fun sendText(text: String) {
-        socket().send(Frame.Text(text))
+        val frame = Frame.Text(text)
+        val outgoing = socket().outgoing
+        // close() cancels this socket's scope, and a suspending send would then throw a
+        // cancellation, as if the caller had been cancelled. trySend reports it as closed.
+        val sent = outgoing.trySend(frame)
+        if (sent.isClosed || !scope.isActive) throw IOException(DEVTOOLS_CLOSED)
+        if (sent.isFailure) outgoing.send(frame)
     }
 
     /** Text frames in order. Ping frames are answered and not delivered. */
