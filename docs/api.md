@@ -15,7 +15,7 @@ Install, pairing, and the helper lifecycle are in the [README](../README.md). De
 | Mechanism | Where |
 | --- | --- |
 | `Authorization: Bearer <token>` | All REST calls and `POST /mcp` |
-| Cookie `phoneapi` | Set by `GET /viewer?access_token=`; sent on later requests, including WebSocket upgrades |
+| Cookie `phoneapi` | Set by `GET /viewer?access_token=`. Accepted only on `GET /viewer`, `GET /v1/device`, and WebSocket upgrades, which is what the viewer page uses |
 | `?access_token=<token>` | Only that viewer URL (it redirects and drops the query) and WebSocket upgrades |
 
 Missing or unknown tokens get an **empty HTTP 404** (no JSON body). Authenticated calls that lack a required scope get **403** `forbidden`.
