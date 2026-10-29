@@ -19,7 +19,7 @@ Usage: $(basename "$0") <command> [<options>]
     server    - Expose the on-device PhoneAPI server on localhost
     papi      - Call the HTTP/WebSocket API
     session   - Show or end the session papi keeps (session id|end)
-    helper    - Start the listener and shell helper over ADB
+    helper    - Start the listener and shell helper over ADB (helper [package])
     setup     - Build, install, pair, and start the helper
     help      - Display this text
 "

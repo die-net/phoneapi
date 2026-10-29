@@ -29,7 +29,7 @@ export PATH="$ANDROID_HOME/platform-tools:$PATH"
 | Session file | `~/.config/phoneapi/session` | `.dev/session` |
 | `setup` | no | yes |
 
-Override with `PHONEAPI_PKG` or `PAPI_PAIRING` if needed.
+Override with `PHONEAPI_PKG`, `PHONEAPI_STATE` (the directory for the pairing and session files), or `PAPI_PAIRING` if needed.
 
 ## First-time device setup
 
@@ -56,6 +56,7 @@ The APK is `app/build/outputs/apk/debug/app-debug.apk`.
 scripts/phoneapi-dev pair --name laptop   # mint a token into .dev/pairing.json
 scripts/phoneapi-dev server               # adb-forward the API to localhost
 scripts/phoneapi-dev helper               # start listener + shell helper
+scripts/phoneapi-dev helper net.die.phoneapi  # same, for another package
 ```
 
 Open the app for screen reading and taps, wireless debugging, and the computers that have access.
