@@ -232,7 +232,9 @@ public const val READ_SCOPE_DOC: String =
     "article (default) is the main content, without navigation, footers, and ads, and falls back to page when no article is found. page is all visible text."
 
 public const val READ_SELECTOR_DOC: String =
-    "CSS selector for one element to read instead of scope, such as a table or an article body."
+    "CSS selector to read instead of scope, such as a table or an article body. Every match is read, in page order."
+
+public const val SELECTED_DOC: String = "How many elements the selector matched."
 
 public const val SHOW_DOC: String =
     "Bring the tab on screen first, waking the phone, and wait until its text stops growing, so content that loads only when drawn can load. Takes the screen, like touch input."
@@ -264,9 +266,24 @@ public data class BrowserReadRequest(
     val outline: Boolean = false,
     @Doc("Character offset to start at, such as nextOffset or a match's offset.")
     val offset: Int = 0,
-    @Doc("Most characters to return, 1 to 100000. Defaults to 8000. Cut at a line or a space.")
-    val maxChars: Int = 8_000,
+    @Doc(READ_MAX_CHARS_DOC) val maxChars: Int = 8_000,
     @Doc(SHOW_DOC) val show: Boolean = false,
+    @Doc(READ_VERSION_DOC) val version: String? = null,
+)
+
+public const val READ_MAX_CHARS_DOC: String =
+    "Most characters to return, 1 to 100000. Defaults to 8000. Cut at a line or a space. Each extra call re-reads the client's whole context, so to read a whole page, 20000 to 30000 in one call costs less than several default slices; to check one thing, find costs less than any slice."
+
+public const val READ_VERSION_DOC: String =
+    "A version from an earlier result. If the content still has it, the result has changed false and no content. Otherwise changed is true and the content is returned."
+
+/** A feed a page links to with `<link rel="alternate">`. */
+@Serializable
+public data class FeedLink(
+    val url: String,
+    @Doc("rss, atom, or json.") val type: String,
+    @Doc("The link's title, which tells feeds of one page apart, such as posts from comments.")
+    val title: String? = null,
 )
 
 /** A heading in rendered content, at the offset its line starts. */
@@ -288,6 +305,12 @@ public data class BrowserReadResult(
         "The page has under 200 characters of visible text, so it may still be loading or need scripts."
     )
     val sparse: Boolean = false,
+    @Doc("The page's JSON-LD says its content is not free to read.") val paywall: Boolean = false,
+    @Doc("Feeds the page links to. Open one to read its items.")
+    val feeds: List<FeedLink> = emptyList(),
+    @Doc("The next page, when the page links to one with rel=next.") val next: String? = null,
+    @Doc("The page's canonical URL, when it names one that differs from its own.")
+    val canonical: String? = null,
     @Doc(PENDING_DOC) val pending: List<String> = emptyList(),
     @Doc(SHOWN_DOC) val shown: Boolean? = null,
     @Doc(RELOADED_DOC) val reloaded: Boolean = false,
@@ -297,8 +320,11 @@ public data class BrowserReadResult(
     val timersStopped: Boolean = false,
     @Doc("What was read: article, page (also when no article was found), or selector.")
     val extracted: String,
+    @Doc(SELECTED_DOC) val selected: Int? = null,
     @Doc("Changes when the rendered content changes, so offsets from another call still apply.")
     val version: String,
+    @Doc("Set when version was passed. False means the content is unchanged and was not returned.")
+    val changed: Boolean? = null,
     @Doc("Length of the whole rendered content.") val totalChars: Int,
     val offset: Int,
     val returnedChars: Int,
@@ -386,6 +412,7 @@ public data class BrowserFindResult(
     val title: String? = null,
     val url: String? = null,
     val extracted: String,
+    @Doc(SELECTED_DOC) val selected: Int? = null,
     val version: String,
     val totalChars: Int,
     @Doc("How many results there are in all. Only the first limit are returned.") val total: Int,

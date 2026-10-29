@@ -15,7 +15,8 @@ const BLOCK = new Set([
 ]);
 const STYLE = { STRONG: "b", B: "b", EM: "i", I: "i", CODE: "code", KBD: "code", SAMP: "code" };
 
-function walk(root, live) {
+// Walks roots in order, as one piece of content.
+function walk(roots, live) {
   const blocks = [];
   let runs = [];
   let kind = { k: "p" };
@@ -128,8 +129,10 @@ function walk(root, live) {
     }
   }
 
-  visit(root, {});
-  flush();
+  for (const root of roots) {
+    visit(root, {});
+    flush();
+  }
   return { blocks: blocks, clipped: chars > MAX_CHARS };
 }
 
@@ -149,13 +152,9 @@ function published() {
     const value = document.querySelector(selector)?.getAttribute("content");
     if (value && value.trim()) return value.trim();
   }
-  for (const script of document.querySelectorAll('script[type="application/ld+json"]')) {
-    try {
-      const found = datePublished(JSON.parse(script.textContent));
-      if (found) return found;
-    } catch (e) {
-      // Malformed JSON-LD is common; skip it.
-    }
+  for (const value of ldJson) {
+    const found = datePublished(value);
+    if (found) return found;
   }
   return document.querySelector("time[datetime]")?.getAttribute("datetime") || null;
 }
@@ -173,6 +172,59 @@ function datePublished(value) {
   return datePublished(value["@graph"]);
 }
 
+// Whether any JSON-LD object says isAccessibleForFree is false, as a paywalled article's does.
+function paywalled(value) {
+  if (!value || typeof value !== "object") return false;
+  if (Array.isArray(value)) return value.some(paywalled);
+  const free = value.isAccessibleForFree;
+  if (free === false || (typeof free === "string" && free.trim().toLowerCase() === "false")) {
+    return true;
+  }
+  return Object.values(value).some(paywalled);
+}
+
+const FEED_TYPES = {
+  "application/rss+xml": "rss",
+  "application/atom+xml": "atom",
+  "application/feed+json": "json",
+};
+const MAX_FEEDS = 10;
+
+// What the page's link elements, and anchors with a rel, say about it: its feeds, its canonical
+// URL when that differs from its own, and the next page. An anchor's next counts only when no
+// link element gave one.
+function relations() {
+  const out = { feeds: [], next: null, canonical: null };
+  let nextFromLink = false;
+  const web = (href) => /^https?:/i.test(href || "");
+  for (const el of document.querySelectorAll("link[rel][href], a[rel][href]")) {
+    const isLink = el.tagName === "LINK";
+    const href = el.href;
+    if (!web(href)) continue;
+    for (const rel of el.rel.toLowerCase().split(/\s+/)) {
+      if (rel === "alternate" && isLink && out.feeds.length < MAX_FEEDS) {
+        const type = FEED_TYPES[(el.type || "").trim().toLowerCase()];
+        const title = (el.title || "").replace(/\s+/g, " ").trim();
+        const feed = { url: href, type: type };
+        if (title) feed.title = title;
+        if (type) out.feeds.push(feed);
+      } else if (rel === "next" && (!out.next || (isLink && !nextFromLink))) {
+        out.next = href;
+        nextFromLink = isLink;
+      } else if (rel === "canonical" && isLink && !out.canonical && !samePage(href)) {
+        out.canonical = href;
+      }
+    }
+  }
+  return out;
+}
+
+// Whether href is this page, ignoring the fragment and a trailing slash.
+function samePage(href) {
+  const trim = (url) => url.replace(/#.*$/, "").replace(/\/$/, "");
+  return trim(href) === trim(location.href);
+}
+
 function blocked(status, text) {
   const captcha =
     'iframe[src*="recaptcha"], iframe[src*="hcaptcha"], iframe[src*="challenges.cloudflare.com"],' +
@@ -185,22 +237,39 @@ function blocked(status, text) {
   return null;
 }
 
+const ldJson = [];
+for (const script of document.querySelectorAll('script[type="application/ld+json"]')) {
+  try {
+    ldJson.push(JSON.parse(script.textContent));
+  } catch (e) {
+    // Malformed JSON-LD is common; skip it.
+  }
+}
 const nav = performance.getEntriesByType("navigation")[0];
 const status = (nav && nav.responseStatus) || 0;
 const bodyText = document.body ? document.body.innerText : "";
 let extracted = options.scope;
 let walked = null;
 let articlePublished = null;
+let selected = null;
 if (options.selector) {
-  const el = document.querySelector(options.selector);
-  if (!el) return { missing: true };
-  walked = walk(el, true);
+  const matches = document.querySelectorAll(options.selector);
+  if (matches.length === 0) return { missing: true };
+  // Matches come in document order, so one inside an earlier match is inside the last one kept.
+  // It is left out, since its text is already in that one.
+  const roots = [];
+  for (const el of matches) {
+    const last = roots[roots.length - 1];
+    if (!last || !last.contains(el)) roots.push(el);
+  }
+  walked = walk(roots, true);
   extracted = "selector";
+  selected = matches.length;
 } else if (options.scope === "article") {
   try {
     const article = new Readability(document.cloneNode(true), { serializer: (el) => el }).parse();
     if (article && article.content && article.textContent.trim()) {
-      walked = walk(article.content, false);
+      walked = walk([article.content], false);
       articlePublished = article.publishedTime || null;
     }
   } catch (e) {
@@ -211,8 +280,10 @@ if (options.selector) {
     extracted = "page";
   }
 }
-if (!walked && document.body) walked = walk(document.body, true);
+if (!walked && document.body) walked = walk([document.body], true);
 if (!walked) walked = { blocks: [], clipped: false };
+
+const related = relations();
 
 return {
   title: document.title || null,
@@ -223,11 +294,16 @@ return {
   status: status,
   published: published() || articlePublished,
   blocked: blocked(status, bodyText),
+  paywall: ldJson.some(paywalled),
+  feeds: related.feeds,
+  next: related.next,
+  canonical: related.canonical,
   pageChars: bodyText.trim().length,
   links: document.links.length,
   tables: document.querySelectorAll("table").length,
   forms: document.forms.length,
   extracted: extracted,
+  selected: selected,
   clipped: walked.clipped,
   blocks: walked.blocks,
 };

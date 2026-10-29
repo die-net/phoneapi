@@ -5,6 +5,7 @@ import net.die.phoneapi.core.ApiJson
 import net.die.phoneapi.model.ApiException
 import net.die.phoneapi.model.BrowserFindRequest
 import net.die.phoneapi.model.BrowserReadRequest
+import net.die.phoneapi.model.FeedLink
 import net.die.phoneapi.model.FindKind
 import net.die.phoneapi.model.ReadFormat
 import net.die.phoneapi.model.ReadScope
@@ -101,6 +102,53 @@ class PageReadTest {
         assertThrows(ApiException::class.java) {
             readPage(extract, BrowserReadRequest(offset = whole.totalChars + 1))
         }
+    }
+
+    @Test
+    fun `unchanged version has no text`() {
+        val whole = readPage(extract, BrowserReadRequest())
+        assertNull(whole.changed)
+        val same = readPage(extract, BrowserReadRequest(version = whole.version))
+        assertEquals(false, same.changed)
+        assertNull(same.content)
+        assertNull(same.nextOffset)
+        assertEquals(0, same.returnedChars)
+        assertEquals(whole.totalChars, same.totalChars)
+        val sameOutline =
+            readPage(extract, BrowserReadRequest(version = whole.version, outline = true))
+        assertNull(sameOutline.headings)
+        // An unchanged page needs no slice, so an offset past its end is not an error.
+        val pastEnd =
+            readPage(
+                extract,
+                BrowserReadRequest(version = whole.version, offset = whole.totalChars + 1),
+            )
+        assertEquals(false, pastEnd.changed)
+
+        val other = readPage(extract, BrowserReadRequest(version = "00000000", maxChars = 12))
+        assertEquals(true, other.changed)
+        assertEquals("# Title\n\n", other.content)
+    }
+
+    @Test
+    fun `carries notes and match count`() {
+        val noted =
+            extract.copy(
+                paywall = true,
+                feeds = listOf(FeedLink("https://example.com/feed", "atom")),
+                next = "https://example.com/a?page=2",
+                canonical = "https://example.com/c",
+                extracted = "selector",
+                selected = 2,
+            )
+        val read = readPage(noted, BrowserReadRequest())
+        assertTrue(read.paywall)
+        assertEquals(noted.feeds, read.feeds)
+        assertEquals(noted.next, read.next)
+        assertEquals(noted.canonical, read.canonical)
+        assertEquals(2, read.selected)
+        val found = findInPage(noted, BrowserFindRequest(query = "first"))
+        assertEquals(2, found.selected)
     }
 
     @Test

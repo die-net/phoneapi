@@ -15,6 +15,7 @@ import net.die.phoneapi.model.BrowserFindResult
 import net.die.phoneapi.model.BrowserReadRequest
 import net.die.phoneapi.model.BrowserReadResult
 import net.die.phoneapi.model.EvalResult
+import net.die.phoneapi.model.FeedLink
 import net.die.phoneapi.model.FindKind
 import net.die.phoneapi.model.MAX_FIND_QUERIES
 import net.die.phoneapi.model.PageHeading
@@ -43,11 +44,17 @@ internal data class PageExtract(
     val status: Int = 0,
     val published: String? = null,
     val blocked: String? = null,
+    val paywall: Boolean = false,
+    val feeds: List<FeedLink> = emptyList(),
+    val next: String? = null,
+    val canonical: String? = null,
     val pageChars: Int = 0,
     val links: Int = 0,
     val tables: Int = 0,
     val forms: Int = 0,
     val extracted: String = "page",
+    /** How many elements the selector matched, when there was one. */
+    val selected: Int? = null,
     val clipped: Boolean = false,
     val blocks: List<PageBlock> = emptyList(),
 )
@@ -228,6 +235,9 @@ private class PageRenderer(private val markdown: Boolean) {
     }
 }
 
+/** The most results a find returns for one query. */
+internal const val MAX_FIND_RESULTS = 200
+
 internal fun checkRead(request: BrowserReadRequest) {
     if (request.maxChars !in 1..MAX_READ_CHARS) {
         throw ApiException.badRequest("maxChars must be 1 to $MAX_READ_CHARS")
@@ -289,37 +299,53 @@ internal fun decodeExtract(result: EvalResult, selector: String?): PageExtract {
     return extract
 }
 
+/**
+ * [request]'s slice or outline of the page [extract] gives. When [BrowserReadRequest.version] is
+ * still the content's version, the result carries no content, so a client checking for a change
+ * pays only for the header.
+ */
 internal fun readPage(extract: PageExtract, request: BrowserReadRequest): BrowserReadResult {
     val page = renderPage(extract.blocks, request.format)
     val total = page.text.length
+    val changed = request.version?.let { it != page.version }
+    val header =
+        BrowserReadResult(
+            title = extract.title,
+            url = extract.url,
+            published = extract.published,
+            readyState = extract.readyState,
+            status = extract.status.takeIf { it > 0 },
+            blocked = extract.blocked,
+            sparse = extract.pageChars < SPARSE_CHARS,
+            paywall = extract.paywall,
+            feeds = extract.feeds,
+            next = extract.next,
+            canonical = extract.canonical,
+            pending = extract.pending,
+            extracted = extract.extracted,
+            selected = extract.selected,
+            version = page.version,
+            changed = changed,
+            totalChars = total,
+            offset = request.offset,
+            returnedChars = 0,
+            truncated = false,
+            clipped = extract.clipped,
+            links = extract.links,
+            tables = extract.tables,
+            forms = extract.forms,
+        )
+    if (changed == false) return header
     if (request.offset !in 0..total) {
         throw ApiException.badRequest("offset must be 0 to $total, the content's length")
     }
-    val end =
-        if (request.outline) request.offset
-        else cutPoint(page.text, request.offset, request.maxChars)
-    return BrowserReadResult(
-        title = extract.title,
-        url = extract.url,
-        published = extract.published,
-        readyState = extract.readyState,
-        status = extract.status.takeIf { it > 0 },
-        blocked = extract.blocked,
-        sparse = extract.pageChars < SPARSE_CHARS,
-        pending = extract.pending,
-        extracted = extract.extracted,
-        version = page.version,
-        totalChars = total,
-        offset = request.offset,
+    if (request.outline) return header.copy(headings = page.headings)
+    val end = cutPoint(page.text, request.offset, request.maxChars)
+    return header.copy(
         returnedChars = end - request.offset,
-        nextOffset = end.takeIf { it < total && !request.outline },
-        truncated = !request.outline && (request.offset > 0 || end < total),
-        clipped = extract.clipped,
-        content = if (request.outline) null else page.text.substring(request.offset, end),
-        headings = if (request.outline) page.headings else null,
-        links = extract.links,
-        tables = extract.tables,
-        forms = extract.forms,
+        nextOffset = end.takeIf { it < total },
+        truncated = request.offset > 0 || end < total,
+        content = page.text.substring(request.offset, end),
     )
 }
 
@@ -369,6 +395,7 @@ internal fun findInPage(extract: PageExtract, request: BrowserFindRequest): Brow
             title = extract.title,
             url = extract.url,
             extracted = extract.extracted,
+            selected = extract.selected,
             version = page.version,
             totalChars = page.text.length,
             total = 0,
@@ -566,7 +593,6 @@ private fun origin(url: String): String? =
     }
 
 private const val MAX_READ_CHARS = 100_000
-private const val MAX_FIND_RESULTS = 200
 private const val MAX_CONTEXT_CHARS = 2_000
 private const val MAX_SELECTOR = 1_000
 private const val MAX_HEADING = 6
