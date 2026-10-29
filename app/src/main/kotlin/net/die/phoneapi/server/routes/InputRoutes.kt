@@ -1,10 +1,21 @@
 package net.die.phoneapi.server.routes
 
+import io.ktor.http.ContentType
+import io.ktor.server.request.contentLength
 import io.ktor.server.request.receive
+import io.ktor.server.request.receiveChannel
 import io.ktor.server.response.respond
+import io.ktor.server.response.respondBytes
 import io.ktor.server.routing.Route
+import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.websocket.webSocket
+import io.ktor.utils.io.readBuffer
+import kotlinx.io.readByteArray
+import net.die.phoneapi.core.ClipImage
+import net.die.phoneapi.model.ApiException
+import net.die.phoneapi.model.ClipboardReadRequest
+import net.die.phoneapi.model.ClipboardWriteRequest
 import net.die.phoneapi.model.GestureRequest
 import net.die.phoneapi.model.ImeShowRequest
 import net.die.phoneapi.model.KeyRequest
@@ -17,8 +28,8 @@ import net.die.phoneapi.server.scoped
 import net.die.phoneapi.server.withScreen
 
 /**
- * `POST /v1/input/tap|swipe|gesture|key|text`, `WS /v1/input/pointer`, and `POST
- * /v1/ime/hide|show`.
+ * `POST /v1/input/tap|swipe|gesture|key|text`, `WS /v1/input/pointer`, `POST /v1/ime/hide|show`,
+ * `POST /v1/clipboard/read|write`, and `GET|POST /v1/clipboard/image`.
  */
 fun Route.inputRoutes(services: ServerServices) {
     scoped(Scope.CONTROL) {
@@ -50,5 +61,30 @@ fun Route.inputRoutes(services: ServerServices) {
             val request = call.receive<ImeShowRequest>()
             call.respond(withScreen(call, services) { services.input.showIme(request) })
         }
+        post("/v1/clipboard/read") {
+            val request = call.receive<ClipboardReadRequest>()
+            call.respond(withScreen(call, services) { services.clipboard.read(request) })
+        }
+        post("/v1/clipboard/write") {
+            val request = call.receive<ClipboardWriteRequest>()
+            call.respond(withScreen(call, services) { services.clipboard.write(request) })
+        }
+        get("/v1/clipboard/image") {
+            val image =
+                withScreen(call, services) { services.clipboard.image() }
+                    ?: throw ApiException.notFound("The clipboard holds no image")
+            call.respondBytes(image.bytes, ContentType.parse(image.mimeType))
+        }
+        post("/v1/clipboard/image") {
+            val limit = ClipImage.MAX_BYTES.toLong()
+            if ((call.request.contentLength() ?: 0) > limit) throw imageTooLarge()
+            val bytes = call.receiveChannel().readBuffer(limit + 1).readByteArray()
+            if (bytes.size > limit) throw imageTooLarge()
+            val paste = call.request.queryParameters["paste"] == "true"
+            call.respond(withScreen(call, services) { services.clipboard.writeImage(bytes, paste) })
+        }
     }
 }
+
+private fun imageTooLarge() =
+    ApiException(413, "too_large", "The image is over ${ClipImage.MAX_BYTES} bytes")

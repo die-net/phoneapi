@@ -16,6 +16,8 @@ import kotlinx.coroutines.flow.emptyFlow
 import net.die.phoneapi.core.ApiJson
 import net.die.phoneapi.core.AppsService
 import net.die.phoneapi.core.BrowserService
+import net.die.phoneapi.core.ClipImage
+import net.die.phoneapi.core.ClipboardService
 import net.die.phoneapi.core.InputService
 import net.die.phoneapi.core.PowerService
 import net.die.phoneapi.core.UiService
@@ -38,6 +40,9 @@ import net.die.phoneapi.model.BrowserTapRequest
 import net.die.phoneapi.model.BrowserTarget
 import net.die.phoneapi.model.BrowserTextRequest
 import net.die.phoneapi.model.Capabilities
+import net.die.phoneapi.model.ClipboardContent
+import net.die.phoneapi.model.ClipboardReadRequest
+import net.die.phoneapi.model.ClipboardWriteRequest
 import net.die.phoneapi.model.ConsoleRequest
 import net.die.phoneapi.model.ConsoleResult
 import net.die.phoneapi.model.CreatedToken
@@ -122,6 +127,12 @@ internal class FakeApi(leaseWaitMs: Long = ScreenLease.WAIT_MS) {
     var inputTaps = 0
     var imeShow: ImeShowRequest? = null
     var orientation: OrientationRequest? = null
+    /** The fake phone's clipboard, and what the last clipboard call asked for. */
+    @Volatile var clip: String? = "on the phone"
+    @Volatile var clipWrite: ClipboardWriteRequest? = null
+    @Volatile var clipRead: ClipboardReadRequest? = null
+    @Volatile var clipImage: ClipImage? = null
+    @Volatile var clipPasted = false
     val pointerSessions = Channel<List<PointerFrame>>(capacity = Channel.UNLIMITED)
     @Volatile var cleanups = 0
 
@@ -187,6 +198,37 @@ internal class FakeApi(leaseWaitMs: Long = ScreenLease.WAIT_MS) {
                 object : PowerService by FakePower {
                     override suspend fun orientation(request: OrientationRequest): ActionResult {
                         this@FakeApi.orientation = request
+                        return acted()
+                    }
+                },
+            clipboard =
+                object : ClipboardService {
+                    override suspend fun read(request: ClipboardReadRequest): ClipboardContent {
+                        clipRead = request
+                        return ClipboardContent(
+                            text = clip,
+                            mimeTypes =
+                                listOfNotNull(clip?.let { "text/plain" }, clipImage?.mimeType),
+                            changed = if (request.copy) false else null,
+                        )
+                    }
+
+                    override suspend fun write(request: ClipboardWriteRequest): ActionResult {
+                        clipWrite = request
+                        clip = request.text
+                        clipImage = null
+                        return acted()
+                    }
+
+                    override suspend fun image(): ClipImage? = clipImage
+
+                    override suspend fun writeImage(
+                        bytes: ByteArray,
+                        paste: Boolean,
+                    ): ActionResult {
+                        clip = null
+                        clipImage = ClipImage(bytes, "image/png")
+                        clipPasted = paste
                         return acted()
                     }
                 },
@@ -264,6 +306,7 @@ internal fun allCapabilities() =
         encoderLowLatency = true,
         adbWireless = true,
         settingsSecure = true,
+        clipboard = true,
     )
 
 private fun deviceInfo(capabilities: Capabilities) =

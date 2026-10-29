@@ -29,6 +29,8 @@ import net.die.phoneapi.model.BrowserSnapshotOptions
 import net.die.phoneapi.model.BrowserSwipeRequest
 import net.die.phoneapi.model.BrowserTapRequest
 import net.die.phoneapi.model.BrowserTextRequest
+import net.die.phoneapi.model.ClipboardReadRequest
+import net.die.phoneapi.model.ClipboardWriteRequest
 import net.die.phoneapi.model.ConsoleRequest
 import net.die.phoneapi.model.DEFAULT_TAP_WAIT_MS
 import net.die.phoneapi.model.EvalRequest
@@ -140,6 +142,46 @@ internal suspend fun pressKey(services: ServerServices, request: CallToolRequest
     runTool {
         jsonText(services.input.key(request.args<KeyRequest>()))
     }
+
+internal suspend fun clipboardRead(
+    services: ServerServices,
+    request: CallToolRequest,
+): CallToolResult = runContent {
+    val clip = services.clipboard.read(request.args<ClipboardReadRequest>())
+    val image =
+        if (clip.text == null && clip.mimeTypes.any { it.startsWith("image/") }) {
+            services.clipboard.image()
+        } else {
+            null
+        }
+    when {
+        image == null -> listOf(TextContent(text = jsonText(clip)))
+        image.bytes.size > MAX_IMAGE_BYTES ->
+            listOf(
+                TextContent(text = jsonText(clip)),
+                TextContent(
+                    text =
+                        "The image is ${image.bytes.size} bytes, too large to return here. " +
+                            "GET /v1/clipboard/image returns it."
+                ),
+            )
+        else ->
+            listOf(
+                TextContent(text = jsonText(clip)),
+                ImageContent(
+                    data = Base64.getEncoder().encodeToString(image.bytes),
+                    mimeType = image.mimeType,
+                ),
+            )
+    }
+}
+
+internal suspend fun clipboardWrite(
+    services: ServerServices,
+    request: CallToolRequest,
+): CallToolResult = runTool {
+    jsonText(services.clipboard.write(request.args<ClipboardWriteRequest>()))
+}
 
 internal suspend fun waitFor(
     services: ServerServices,
@@ -446,7 +488,7 @@ internal suspend fun screenshot(
 
 private suspend fun screenshotContent(services: ServerServices, scale: Float): ImageContent {
     val png = services.screenshots(scale)
-    if (png.size > MAX_PNG_BYTES) {
+    if (png.size > MAX_IMAGE_BYTES) {
         throw ApiException.badRequest("Screenshot is too large; pass a smaller scale")
     }
     return ImageContent(data = Base64.getEncoder().encodeToString(png), mimeType = "image/png")
@@ -713,5 +755,5 @@ internal data class WaitArgs(
 
 /** The most nodes an MCP snapshot shows unless asked for more, as for browser_snapshot. */
 private const val DEFAULT_SNAPSHOT_NODES = 400
-private const val MAX_PNG_BYTES = 1_500_000
+private const val MAX_IMAGE_BYTES = 1_500_000
 private const val MAX_LOG_LINES = 400

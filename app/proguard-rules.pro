@@ -4,6 +4,8 @@
 # The helper is started by app_process via reflection on its main class.
 -keep class net.die.phoneapi.helper.Main { public static void main(java.lang.String[]); }
 -keep class net.die.phoneapi.helper.** { *; }
+# The helper's copy of a hidden framework interface, which the framework's own class replaces.
+-keep class android.content.IOnPrimaryClipChangedListener** { *; }
 
 # Netty / Ktor reference optional classes that are not present on Android.
 -dontwarn io.netty.**

@@ -13,6 +13,8 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlinx.serialization.serializer
 import net.die.phoneapi.model.Capabilities
+import net.die.phoneapi.model.ClipboardReadRequest
+import net.die.phoneapi.model.ClipboardWriteRequest
 import net.die.phoneapi.model.ImeShowRequest
 import net.die.phoneapi.model.IntentRequest
 import net.die.phoneapi.model.KeyRequest
@@ -192,6 +194,26 @@ private val TOOLS: List<McpTool> =
             arguments = serializer<KeyRequest>(),
             annotations = changes,
             call = { graph, _, request -> pressKey(graph, request) },
+        ),
+        McpTool(
+            name = "clipboard_read",
+            description =
+                "Read the phone's clipboard as text, with its MIME types, or as an image when it holds one. copy true presses KEYCODE_COPY first, so the focused app copies its selection, and changed says whether the clipboard changed. The clipboard is the phone user's and can hold a password (sensitive true): read it only for the task at hand. Uses the screen. Requires the shell helper.",
+            scope = Scope.CONTROL,
+            available = Capabilities::clipboard,
+            arguments = serializer<ClipboardReadRequest>(),
+            annotations = changes,
+            call = { graph, _, request -> clipboardRead(graph, request) },
+        ),
+        McpTool(
+            name = "clipboard_write",
+            description =
+                "Put plain text on the phone's clipboard, replacing what the phone user copied. paste true then presses KEYCODE_PASTE into the focused field, which is faster than type_text for long text, though the app sees a paste rather than typing. Uses the screen. Requires the shell helper.",
+            scope = Scope.CONTROL,
+            available = Capabilities::clipboard,
+            arguments = serializer<ClipboardWriteRequest>(),
+            annotations = destructive,
+            call = { graph, _, request -> clipboardWrite(graph, request) },
         ),
         McpTool(
             name = "wait_for",

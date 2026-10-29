@@ -46,6 +46,7 @@ class McpScreenTest {
     @Test
     fun `arguments decide some tools`() {
         assertTrue(takesScreen("tap", null))
+        assertTrue(takesScreen("clipboard_read", null))
         assertFalse(takesScreen("browser_read", null))
         assertTrue(takesScreen("browser_read", args("""{"show":true}""")))
         assertTrue(takesScreen("browser_tap", null))

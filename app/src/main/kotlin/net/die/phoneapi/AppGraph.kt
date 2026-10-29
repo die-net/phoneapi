@@ -28,6 +28,7 @@ import net.die.phoneapi.browser.UsbDevtools
 import net.die.phoneapi.browser.freezerOn
 import net.die.phoneapi.core.AppsService
 import net.die.phoneapi.core.BrowserService
+import net.die.phoneapi.core.ClipboardService
 import net.die.phoneapi.core.DeviceInfoProvider
 import net.die.phoneapi.core.DeviceStateTracker
 import net.die.phoneapi.core.EventBus
@@ -44,6 +45,7 @@ import net.die.phoneapi.helperclient.HelperStatusNotifier
 import net.die.phoneapi.helperclient.HelperSupervisor
 import net.die.phoneapi.helperclient.KeystorePrivateKeyStore
 import net.die.phoneapi.helperclient.WirelessPairing
+import net.die.phoneapi.input.ClipboardServiceImpl
 import net.die.phoneapi.input.Humanizer
 import net.die.phoneapi.input.InjectKeyBackend
 import net.die.phoneapi.input.InjectTouchBackend
@@ -187,6 +189,7 @@ class AppGraph(
             state = state,
             display = { deviceInfo.display() },
         )
+    val clipboard: ClipboardService = ClipboardServiceImpl(context, helper, input, ioDispatcher)
     val apps: AppsService =
         AppsServiceImpl(
             context = context,
@@ -243,6 +246,7 @@ class AppGraph(
             waits = waits,
             browser = browser,
             power = power,
+            clipboard = clipboard,
             tokens = tokens,
             ioDispatcher = ioDispatcher,
             device = GraphDevice(deviceInfo),

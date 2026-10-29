@@ -15,6 +15,9 @@ import net.die.phoneapi.model.BrowserSwipeRequest
 import net.die.phoneapi.model.BrowserTapRequest
 import net.die.phoneapi.model.BrowserTarget
 import net.die.phoneapi.model.BrowserTextRequest
+import net.die.phoneapi.model.ClipboardContent
+import net.die.phoneapi.model.ClipboardReadRequest
+import net.die.phoneapi.model.ClipboardWriteRequest
 import net.die.phoneapi.model.ConsoleRequest
 import net.die.phoneapi.model.ConsoleResult
 import net.die.phoneapi.model.EvalRequest
@@ -70,6 +73,30 @@ interface InputService {
     suspend fun hideIme(): ActionResult
 
     suspend fun showIme(request: ImeShowRequest): ActionResult
+}
+
+/** The primary clip, through the shell helper. */
+interface ClipboardService {
+    /** With copy, presses KEYCODE_COPY first and waits for the clipboard to change. */
+    suspend fun read(request: ClipboardReadRequest): ClipboardContent
+
+    /** Replaces the clip with plain text, then presses KEYCODE_PASTE when asked. */
+    suspend fun write(request: ClipboardWriteRequest): ActionResult
+
+    /** The clip's image, or null when it holds none. */
+    suspend fun image(): ClipImage?
+
+    /** Replaces the clip with a PNG, JPEG, GIF, or WebP, then presses KEYCODE_PASTE when asked. */
+    suspend fun writeImage(bytes: ByteArray, paste: Boolean): ActionResult
+}
+
+/** An image from the clipboard, and its MIME type. */
+@Suppress("UseDataClass") // A data class would compare the bytes by reference.
+class ClipImage(val bytes: ByteArray, val mimeType: String) {
+    companion object {
+        /** The largest image the clipboard calls move in either direction. */
+        const val MAX_BYTES: Int = 20 * 1024 * 1024
+    }
 }
 
 interface PowerService {

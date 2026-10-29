@@ -70,6 +70,13 @@
             android:exported="true"
             tools:ignore="ExportedContentProvider" />
 
+        <!-- The image PhoneAPI last put on the clipboard. The clipboard grants readers access. -->
+        <provider
+            android:name=".input.ClipProvider"
+            android:authorities="${applicationId}.clip"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+
         <!-- Only shell and root hold DUMP, so only `adb shell am start-foreground-service` can start this. -->
         <service
             android:name=".server.ListenerService"

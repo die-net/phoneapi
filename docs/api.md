@@ -122,6 +122,8 @@ Authenticated errors are JSON:
 | 409 | `tab_reloaded` | Chrome had unloaded the hidden tab, so PhoneAPI reloaded it instead of sending input or script to a page the caller has not seen |
 | 409 | `tab_frozen` | `cdp` or `cdp-mouse` input into a tab Chrome has paused, or whose timers it has stopped, as it does to tabs hidden in the background. Also a wait on such a tab. Bring it forward with `touch` or `show`, or reload it |
 | 409 | `session_conflict` | A screen call while the session that started the caller with `session_start`, or one the caller started, holds the screen |
+| 409 | `clipboard_unreadable` | The helper could not read the clipboard's image from the app that copied it |
+| 413 | `too_large` | A clipboard image over 20 MB, sent or on the clipboard |
 | 503 | `browser_frozen` | Android froze Chrome in the background, so nothing in it answers |
 | 429 | `too_many_sessions` | `initialize` or `POST /v1/sessions` past 16 sessions for the token or 32 in all |
 | 503 | `helper_unavailable` | Helper down or dropped; message may say starting / needs pairing / needs USB / stopped |
@@ -161,10 +163,16 @@ Authenticated errors are JSON:
 | `POST` | `/v1/input/text` | control | `TextRequest`; `mode` `auto` / `keyboard` / `keyevent` / `setText` |
 | `POST` | `/v1/ime/hide` | control | Hide soft keyboard |
 | `POST` | `/v1/ime/show` | control | Focus editable + show IME (`ImeShowRequest`) |
+| `POST` | `/v1/clipboard/read` | control | `ClipboardReadRequest` → `ClipboardContent`: the clip's text, MIME types, and whether the copying app marked it `sensitive`. `copy` presses `KEYCODE_COPY` first and waits up to 1 s; `changed` says whether the clip changed |
+| `POST` | `/v1/clipboard/write` | control | `ClipboardWriteRequest`: plain text, up to 100000 characters. `paste` presses `KEYCODE_PASTE` after |
+| `GET` | `/v1/clipboard/image` | control | The clip's image, in the type the copying app gave it; 404 when it holds none |
+| `POST` | `/v1/clipboard/image` | control | A PNG, JPEG, GIF, or WebP body, up to 20 MB, for the clipboard. `?paste=true` presses `KEYCODE_PASTE` after |
 
 `autoWake` (default true) turns the screen on and leaves the keyguard up. Dismiss the keyguard with `POST /v1/device/unlock`. Browser input with `input` `cdp` or `cdp-mouse` ignores it and leaves the screen as it is.
 
 Browser pointer input has three `input` modes. `touch` brings the tab to the front and injects a hardware touch. `cdp` sends touch events over DevTools without bringing the tab forward, but Chrome only takes them on the tab it is showing, with Chrome on screen, so `cdp` fails with `not_visible` otherwise. `cdp-mouse` taps with a DevTools mouse click, which reaches a background tab even with Chrome hidden and the screen off; the page sees a mouse rather than a finger. Keys and text with `cdp` work with Chrome hidden. All of these are trusted input. A click or scroll made from `evaluate` is not (`isTrusted` is false), which bot detection can see, and with Chrome hidden there is no trusted way to scroll: Chrome holds wheel and scroll input as it does touch.
+
+The clipboard calls need the shell helper (`clipboard`), which reads the clip as the shell user, since Android 10 and later let only the app in front or the keyboard read it. They take the screen: the clipboard belongs to whoever is using the phone, a write replaces what they copied, and both show on the phone: Android 12 and later toast "Shell pasted from your clipboard" on a read, and Android 13 and later preview a write. An image on the clipboard is a `content://` URI, which the helper reads with `content read`; reading the clip grants the shell read access to it. An image written to the clipboard is served by PhoneAPI's own provider, which only the clip's readers may open, and PhoneAPI keeps only the newest one. An app that does not take images, which includes plain text fields before Android 12, pastes the URI as text.
 
 `/viewer` does not post a finished swipe. It streams the canvas on `WS /v1/input/pointer` so the phone moves while the finger is still down.
 
@@ -228,16 +236,16 @@ Auth: Bearer header, the `phoneapi` cookie, or `access_token` on the upgrade URL
 | Path | Scope | Summary |
 | --- | --- | --- |
 | `/v1/events` | observe | JSON event frames (see Conventions) |
-| `/v1/input/pointer` | control | The viewer's input: live pointer contacts (`PointerFrame` JSON text frames), keys, text, orientation, and taking the screen over. The socket is a holder of the screen lease |
+| `/v1/input/pointer` | control | The viewer's input: live pointer contacts (`PointerFrame` JSON text frames), keys, text, orientation, copy and paste, and taking the screen over. The socket is a holder of the screen lease |
 | `/v1/browser/targets/{id}/cdp` | browser | Raw CDP |
 | `/v1/stream/video` | stream | H.264; query `maxSize`, `fps`, `bitRate` |
 | `/v1/stream/audio` | stream | Device audio (submix capability) |
 
 `/v1/input/pointer` frames are `{"op":"down"|"move"|"up","id":0,"x":1,"y":2,"tMs":0}` or `{"op":"cancel"}`. `id` is the contact, 0 through 9. `tMs` is milliseconds since that gesture's first `down`, shared by every contact. `x` and `y` are screen pixels. The first `down` is `ACTION_DOWN`; another finger is `ACTION_POINTER_DOWN`. A `move` carries the latest point of every finger still down. The last `up` is `ACTION_UP`. `cancel`, a bad frame, or the socket closing while a contact is down injects `ACTION_CANCEL` and releases the touch. An 11th `down`, or a `move`/`up` for an id that is not down, is ignored. Closing with nothing down injects nothing.
 
-The socket also takes `{"op":"key","key":"HOME"}` (a `KeyRequest`), `{"op":"text","text":"hi"}` (a `TextRequest`), `{"op":"orientation","orientation":"90"}` (an `OrientationRequest`), and `{"op":"take"}`. It holds the screen lease for the person using it: the first `down`, key, text, or orientation takes the screen if no one has it. While someone else has it, input is dropped, a whole gesture at a time. `take` takes the screen at once, even from an MCP session, which gets it back without cleanup when the socket lets go. The socket lets the screen go after 30 s without input, and when it closes. The server sends `{"op":"lease","holder":"none"|"you"|"agent"|"person"|"script","heldMs":12000}` when the holder changes, with `"takenFrom":"agent"` after a take over, and `{"op":"error","message":"..."}` when a key, text, or orientation fails.
+The socket also takes `{"op":"key","key":"HOME"}` (a `KeyRequest`), `{"op":"text","text":"hi"}` (a `TextRequest`), `{"op":"orientation","orientation":"90"}` (an `OrientationRequest`), `{"op":"paste","text":"hi"}` (puts the text on the clipboard and presses `KEYCODE_PASTE`), `{"op":"copy","id":1}` (presses `KEYCODE_COPY` and answers `{"op":"clipboard","id":1,"text":"...","changed":true}`, with no `text` when the clip has none; for an image, `"image":"image/png"` in place of `text`, and the image's bytes in the next binary frame, the only kind the server sends), a binary frame (an image to put on the clipboard and paste), and `{"op":"take"}`. It holds the screen lease for the person using it: the first `down`, key, text, or orientation takes the screen if no one has it. While someone else has it, input is dropped, a whole gesture at a time. `take` takes the screen at once, even from an MCP session, which gets it back without cleanup when the socket lets go. The socket lets the screen go after 30 s without input, and when it closes. The server sends `{"op":"lease","holder":"none"|"you"|"agent"|"person"|"script","heldMs":12000}` when the holder changes, with `"takenFrom":"agent"` after a take over, and `{"op":"error","message":"..."}` when a key, text, orientation, copy, or paste fails, with the request's `id` if it had one. A copy while someone else has the screen gets no answer.
 
-`GET /viewer?access_token=` (stream) sets the `phoneapi` cookie and redirects to `/viewer`. The page then uses that cookie. It closes the video socket while the page is hidden and opens it again when the page is visible. While visible, it reopens the video socket after a close, and after 5 s with no picture, backing off to one attempt every 10 s. The video socket sends at least one frame a second, even from a still screen, and closes with `The shell helper stopped` if the helper dies. It opens the audio socket only while the browser will play sound. One button cycles `POST /v1/device/orientation` through `auto`, `0`, `90`, `180`, and `270`.
+`GET /viewer?access_token=` (stream) sets the `phoneapi` cookie and redirects to `/viewer`. The page then uses that cookie. It closes the video socket while the page is hidden and opens it again when the page is visible. While visible, it reopens the video socket after a close, and after 5 s with no picture, backing off to one attempt every 10 s. The video socket sends at least one frame a second, even from a still screen, and closes with `The shell helper stopped` if the helper dies. It opens the audio socket only while the browser will play sound. One button cycles `POST /v1/device/orientation` through `auto`, `0`, `90`, `180`, and `270`. Cmd+C or Ctrl+C copies the phone's selection to the computer's clipboard, or the phone's clipboard when nothing is selected. Pasting puts the computer's text, or an image when there is no text, on the phone's clipboard and pastes it into the focused field. Copying an image converts it to PNG, the only image type browsers take. The page writes the type the phone held at the last copy, since the browser needs the type before the phone answers; when that guess is wrong, Chrome writes again, and Safari and Firefox ask for a second Cmd+C.
 
 ## MCP
 
@@ -265,6 +273,7 @@ Run `phoneapi server` and point a Streamable HTTP client at `http://127.0.0.1:<p
 | `swipe` | control | From/to or direction inside selector |
 | `type_text` | control | `mode` auto / keyboard / keyevent / setText |
 | `press_key` | control | Key names |
+| `clipboard_read` / `clipboard_write` | control | The clipboard's text, or its image as image content (up to 1.5 MB) on a read. `copy` presses `KEYCODE_COPY` first; `paste` presses `KEYCODE_PASTE` after. Writes take text only (needs helper) |
 | `wait_for` | observe | Same conditions as `/v1/wait`. `snapshot` adds a capped, masked outline and `screenshot` a PNG. `target` names the tab for browser conditions that name none |
 | `keyboard_hide` / `keyboard_show` | control | Soft keyboard |
 | `app_launch` / `app_stop` / `app_clear` | control | Package control (`stop`/`clear` need helper) |

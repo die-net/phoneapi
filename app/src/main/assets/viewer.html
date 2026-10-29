@@ -449,6 +449,7 @@ function onSocketMessage(data) {
   } catch (ignored) {
     return;
   }
+  if (message.id !== undefined && settleCopy(message)) return;
   if (message.op === "lease") {
     lease = {
       holder: message.holder,
@@ -523,7 +524,11 @@ function connectPointer() {
   }
   const next = socket("/v1/input/pointer");
   pointerSocket = next;
-  next.onmessage = (event) => onSocketMessage(event.data);
+  next.binaryType = "blob";
+  next.onmessage = (event) => {
+    if (event.data instanceof Blob) onImageFrame(event.data);
+    else onSocketMessage(event.data);
+  };
   next.onclose = () => {
     if (pointerSocket !== next) return;
     contacts.clear();
@@ -631,7 +636,152 @@ canvas.addEventListener("pointerup", endContact);
 canvas.addEventListener("pointercancel", cancelContact);
 canvas.addEventListener("contextmenu", (event) => event.preventDefault());
 
+// Cmd+C or Ctrl+C copies the phone's selection to this computer, or the phone's clipboard when
+// nothing is selected, as text or an image. Cmd+V or Ctrl+V puts this computer's text or image on
+// the phone's clipboard and pastes it into the focused field. Images go as binary frames.
+const COPY_TIMEOUT_MS = 10000;
+const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+let copyId = 0;
+const copies = new Map();
+// The copy whose image is in the next binary frame.
+let imageCopy = null;
+// What the phone's clipboard held at the last copy, which decides the type the next copy writes.
+let phoneHoldsImage = false;
+
+function phoneClipboard() {
+  const id = ++copyId;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      copies.delete(id);
+      if (imageCopy && imageCopy.id === id) imageCopy = null;
+      reject(new Error("The phone did not answer the copy. Is the screen yours?"));
+    }, COPY_TIMEOUT_MS);
+    copies.set(id, { id: id, resolve: resolve, reject: reject, timer: timer });
+    sendPointer({ op: "copy", id: id });
+  });
+}
+
+function settleCopy(message) {
+  const pending = copies.get(message.id);
+  if (!pending) return false;
+  if (message.op === "clipboard" && message.image) {
+    pending.message = message;
+    imageCopy = pending;
+    return true;
+  }
+  copies.delete(message.id);
+  clearTimeout(pending.timer);
+  if (message.op === "clipboard" && typeof message.text === "string") pending.resolve(message);
+  else pending.reject(new Error(message.message || "The phone's clipboard has no text or image."));
+  return true;
+}
+
+function onImageFrame(blob) {
+  const pending = imageCopy;
+  imageCopy = null;
+  if (!pending || !copies.has(pending.id)) return;
+  copies.delete(pending.id);
+  clearTimeout(pending.timer);
+  const message = pending.message;
+  pending.resolve(Object.assign({}, message, { blob: new Blob([blob], { type: message.image }) }));
+}
+
+// Browsers take only PNG images for the clipboard.
+async function pngOf(blob) {
+  if (blob.type === "image/png") return blob;
+  const bitmap = await createImageBitmap(blob);
+  const canvas = document.createElement("canvas");
+  canvas.width = bitmap.width;
+  canvas.height = bitmap.height;
+  canvas.getContext("2d").drawImage(bitmap, 0, 0);
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((png) => (png ? resolve(png) : reject(new Error("Could not convert the image."))), "image/png");
+  });
+}
+
+function clipBlob(message, type) {
+  if (type === "image/png") {
+    if (!message.blob) throw new Error("The phone's clipboard holds text, not an image.");
+    return pngOf(message.blob);
+  }
+  if (typeof message.text !== "string") throw new Error("The phone's clipboard holds an image, not text.");
+  return new Blob([message.text], { type: "text/plain" });
+}
+
+// A pending ClipboardItem keeps the key press's user activation while the phone answers, which
+// Safari and Firefox need for the write. Its type has to be named before the answer comes.
+function writeClip(clip, type) {
+  const item = {};
+  item[type] = clip.then((message) => clipBlob(message, type));
+  return navigator.clipboard.write([new ClipboardItem(item)]);
+}
+
+function copyFromPhone() {
+  if (!navigator.clipboard) {
+    status.textContent = "This browser does not let the page write the clipboard here.";
+    return;
+  }
+  const clip = phoneClipboard();
+  clip.then((message) => { phoneHoldsImage = Boolean(message.blob); }, () => {});
+  let written;
+  if (window.ClipboardItem) {
+    const guess = phoneHoldsImage ? "image/png" : "text/plain";
+    written = writeClip(clip, guess).catch(async (error) => {
+      const message = await clip;
+      const actual = message.blob ? "image/png" : "text/plain";
+      if (actual === guess) throw error;
+      // Chrome writes again without a new key press. Safari and Firefox need one.
+      return writeClip(Promise.resolve(message), actual).catch(() => {
+        throw new Error("The phone's clipboard holds " + (message.blob ? "an image" : "text") + ". Copy again to get it.");
+      });
+    });
+  } else {
+    written = clip.then((message) => {
+      if (typeof message.text !== "string") throw new Error("This browser can copy only text.");
+      return navigator.clipboard.writeText(message.text);
+    });
+  }
+  Promise.all([clip, written]).then(
+    ([message]) => {
+      const what = message.blob ? "image" : "text";
+      status.textContent = message.changed
+        ? "Copied the phone's selection."
+        : "Nothing was selected on the phone. Copied its clipboard's " + what + ".";
+    },
+    (error) => {
+      status.textContent = error.message || "Could not copy from the phone.";
+    },
+  );
+}
+
+document.addEventListener("paste", (event) => {
+  event.preventDefault();
+  const data = event.clipboardData;
+  // Text first: Office and other apps put a picture of copied text beside the text.
+  const text = data ? data.getData("text/plain") : "";
+  if (text) {
+    sendPointer({ op: "paste", text: text, autoWake: true });
+    return;
+  }
+  const image = data ? Array.from(data.files).find((file) => file.type.startsWith("image/")) : null;
+  if (!image) {
+    status.textContent = "Only text and images can be pasted to the phone.";
+    return;
+  }
+  if (image.size > MAX_IMAGE_BYTES) {
+    status.textContent = "The image is too large to paste. The limit is 20 MB.";
+    return;
+  }
+  if (pointerSocket && pointerSocket.readyState === WebSocket.OPEN) pointerSocket.send(image);
+});
+
 document.addEventListener("keydown", (event) => {
+  const shortcut = (event.metaKey || event.ctrlKey) && !event.altKey && !event.shiftKey;
+  if (shortcut && event.key.toLowerCase() === "c") {
+    event.preventDefault();
+    copyFromPhone();
+    return;
+  }
   if (event.metaKey || event.ctrlKey || event.altKey || event.isComposing) return;
   if (event.key === "Backspace") {
     event.preventDefault();

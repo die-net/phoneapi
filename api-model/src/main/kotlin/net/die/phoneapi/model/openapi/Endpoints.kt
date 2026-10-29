@@ -17,6 +17,9 @@ import net.die.phoneapi.model.BrowserSwipeRequest
 import net.die.phoneapi.model.BrowserTapRequest
 import net.die.phoneapi.model.BrowserTarget
 import net.die.phoneapi.model.BrowserTextRequest
+import net.die.phoneapi.model.ClipboardContent
+import net.die.phoneapi.model.ClipboardReadRequest
+import net.die.phoneapi.model.ClipboardWriteRequest
 import net.die.phoneapi.model.ConsoleRequest
 import net.die.phoneapi.model.ConsoleResult
 import net.die.phoneapi.model.CreateTokenRequest
@@ -72,11 +75,14 @@ public data class ApiEndpoint(
     public val response: KSerializer<*>? = null,
     public val status: Int = 200,
     public val responseContentType: String? = response?.let { JSON },
+    /** The body's type when it is not JSON, such as an image. */
+    public val requestContentType: String? = null,
 ) {
     public companion object {
         public const val JSON: String = "application/json"
         public const val PNG: String = "image/png"
         public const val HTML: String = "text/html"
+        public const val IMAGE: String = "image/*"
     }
 }
 
@@ -226,6 +232,37 @@ public val phoneApiEndpoints: List<ApiEndpoint> =
             "Focus an editable node and show the soft keyboard.",
             serializer<ImeShowRequest>(),
             serializer<ActionResult>(),
+        ),
+        endpoint(
+            ApiMethod.POST,
+            "/v1/clipboard/read",
+            Scope.CONTROL,
+            "Read the clipboard's text, optionally pressing KEYCODE_COPY first.",
+            serializer<ClipboardReadRequest>(),
+            serializer<ClipboardContent>(),
+        ),
+        endpoint(
+            ApiMethod.POST,
+            "/v1/clipboard/write",
+            Scope.CONTROL,
+            "Put text on the clipboard, optionally pressing KEYCODE_PASTE after.",
+            serializer<ClipboardWriteRequest>(),
+            serializer<ActionResult>(),
+        ),
+        endpoint(
+            ApiMethod.GET,
+            "/v1/clipboard/image",
+            Scope.CONTROL,
+            "The clipboard's image, in the type the copying app gave it. 404 when it holds none.",
+            responseContentType = ApiEndpoint.IMAGE,
+        ),
+        endpoint(
+            ApiMethod.POST,
+            "/v1/clipboard/image",
+            Scope.CONTROL,
+            "Put a PNG, JPEG, GIF, or WebP body on the clipboard. ?paste=true presses KEYCODE_PASTE after.",
+            response = serializer<ActionResult>(),
+            requestContentType = ApiEndpoint.IMAGE,
         ),
         endpoint(
             ApiMethod.GET,
@@ -485,6 +522,7 @@ private fun endpoint(
     response: KSerializer<*>? = null,
     status: Int = if (method == ApiMethod.DELETE && response == null) 204 else 200,
     responseContentType: String? = null,
+    requestContentType: String? = null,
 ): ApiEndpoint =
     ApiEndpoint(
         method = method,
@@ -495,4 +533,5 @@ private fun endpoint(
         response = response,
         status = status,
         responseContentType = responseContentType ?: response?.let { ApiEndpoint.JSON },
+        requestContentType = requestContentType,
     )

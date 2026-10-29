@@ -170,6 +170,7 @@ class McpCatalogTest {
             encoderLowLatency = true,
             adbWireless = true,
             settingsSecure = true,
+            clipboard = true,
         )
 
     private fun sampleObject(

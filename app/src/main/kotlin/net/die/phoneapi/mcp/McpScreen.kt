@@ -27,6 +27,8 @@ internal val SCREEN_TOOLS =
         "swipe",
         "type_text",
         "press_key",
+        "clipboard_read",
+        "clipboard_write",
         "keyboard_hide",
         "keyboard_show",
         "app_launch",

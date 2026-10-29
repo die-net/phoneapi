@@ -6,6 +6,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
 import net.die.phoneapi.core.AppsService
 import net.die.phoneapi.core.BrowserService
+import net.die.phoneapi.core.ClipboardService
 import net.die.phoneapi.core.InputService
 import net.die.phoneapi.core.LogcatFilter
 import net.die.phoneapi.core.PowerService
@@ -36,6 +37,7 @@ data class ServerServices(
     val waits: WaitService,
     val browser: BrowserService,
     val power: PowerService,
+    val clipboard: ClipboardService,
     val tokens: TokenGateway,
     val ioDispatcher: CoroutineDispatcher,
     val device: DeviceFacts,

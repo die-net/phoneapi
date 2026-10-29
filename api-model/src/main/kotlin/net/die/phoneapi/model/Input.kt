@@ -138,6 +138,39 @@ public data class TextRequest(
 )
 
 @Serializable
+public data class ClipboardReadRequest(
+    @Doc(
+        "Press KEYCODE_COPY first, so the focused app copies its selection, and wait up to 1 s for the clipboard to change."
+    )
+    val copy: Boolean = false,
+    @Doc("Turn the screen on first, for copy. Leaves the keyguard up. Defaults to true.")
+    val autoWake: Boolean = true,
+)
+
+@Serializable
+public data class ClipboardContent(
+    @Doc("The clip's text. Absent when the clipboard is empty or holds no text, such as an image.")
+    val text: String? = null,
+    @Doc("The clip's MIME types, such as text/plain. Empty when the clipboard is empty.")
+    val mimeTypes: List<String> = emptyList(),
+    @Doc("The app that copied it marked it sensitive, as password managers do.")
+    val sensitive: Boolean = false,
+    @Doc(
+        "With copy, whether the clipboard changed after KEYCODE_COPY. False means it still holds what was there before."
+    )
+    val changed: Boolean? = null,
+)
+
+@Serializable
+public data class ClipboardWriteRequest(
+    @Doc("Plain text for the clipboard, up to 100000 characters.") val text: String,
+    @Doc("Press KEYCODE_PASTE afterwards, so the focused field pastes it.")
+    val paste: Boolean = false,
+    @Doc("Turn the screen on first, for paste. Leaves the keyguard up. Defaults to true.")
+    val autoWake: Boolean = true,
+)
+
+@Serializable
 public data class ImeShowRequest(
     @Doc(
         "Editable node to focus, the same selector as tap, including ref. Omit to use the field that already has input focus."
