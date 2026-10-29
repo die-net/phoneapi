@@ -13,12 +13,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerializationException
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.put
 import kotlinx.serialization.serializer
 import net.die.phoneapi.core.ApiJson
 import net.die.phoneapi.lease.Holder
@@ -31,6 +30,11 @@ import net.die.phoneapi.model.OrientationRequest
 import net.die.phoneapi.model.PointerFrame
 import net.die.phoneapi.model.PointerOp
 import net.die.phoneapi.model.TextRequest
+import net.die.phoneapi.model.ViewerClipboard
+import net.die.phoneapi.model.ViewerError
+import net.die.phoneapi.model.ViewerHolder
+import net.die.phoneapi.model.ViewerLease
+import net.die.phoneapi.model.ViewerMessage
 import net.die.phoneapi.server.ServerServices
 import net.die.phoneapi.server.SessionsKey
 
@@ -104,23 +108,24 @@ private class ViewerSocket(
 
     /** Handles one message. False for a bad frame, which ends the socket. */
     private suspend fun handle(message: JsonObject): Boolean {
-        val op = (message["op"] as? JsonPrimitive)?.contentOrNull
+        val op = (message["op"] as? JsonPrimitive)?.contentOrNull.orEmpty()
+        val id = message["id"]
         when (op) {
             "take" -> {
                 touched()
                 lease.takeOver(viewer)
             }
-            "key" -> act(message) { services.input.key(decode<KeyRequest>(message)) }
-            "text" -> act(message) { services.input.text(decode<TextRequest>(message)) }
+            "key" -> act(op, id) { services.input.key(decode<KeyRequest>(message)) }
+            "text" -> act(op, id) { services.input.text(decode<TextRequest>(message)) }
             "orientation" ->
-                act(message) { services.power.orientation(decode<OrientationRequest>(message)) }
+                act(op, id) { services.power.orientation(decode<OrientationRequest>(message)) }
             "paste" ->
-                act(message) {
+                act(op, id) {
                     services.clipboard.write(
                         decode<ClipboardWriteRequest>(message).copy(paste = true)
                     )
                 }
-            "copy" -> act(message) { copy(message) }
+            "copy" -> act(op, id) { copy(id) }
             else -> {
                 val frame =
                     try {
@@ -155,7 +160,8 @@ private class ViewerSocket(
         if (forward) frames.send(frame)
     }
 
-    private suspend fun act(message: JsonObject, block: suspend () -> Any) {
+    /** Runs the page's [op] request. A failure is sent back as an error that echoes [id]. */
+    private suspend fun act(op: String, id: JsonElement?, block: suspend () -> Any) {
         touched()
         if (!lease.viewerInput(viewer)) return
         try {
@@ -163,30 +169,14 @@ private class ViewerSocket(
         } catch (e: CancellationException) {
             throw e
         } catch (e: ApiException) {
-            send(
-                buildJsonObject {
-                    put("op", "error")
-                    message["id"]?.let { put("id", it) }
-                    put("message", e.message ?: e.error)
-                }
-            )
+            send(ViewerError(id, e.message ?: e.error))
         } catch (e: SerializationException) {
-            send(
-                buildJsonObject {
-                    put("op", "error")
-                    message["id"]?.let { put("id", it) }
-                    put(
-                        "message",
-                        "Bad ${(message["op"] as? JsonPrimitive)?.contentOrNull.orEmpty()}: " +
-                            e.message.orEmpty(),
-                    )
-                }
-            )
+            send(ViewerError(id, "Bad $op: ${e.message.orEmpty()}"))
         }
     }
 
     /** Copies the phone's selection, or reads its clipboard when nothing is selected. */
-    private suspend fun copy(message: JsonObject) {
+    private suspend fun copy(id: JsonElement?) {
         val clip = services.clipboard.read(ClipboardReadRequest(copy = true))
         val image =
             if (clip.text == null && clip.mimeTypes.any { it.startsWith("image/") }) {
@@ -194,22 +184,14 @@ private class ViewerSocket(
             } else {
                 null
             }
-        send(
-            buildJsonObject {
-                put("op", "clipboard")
-                message["id"]?.let { put("id", it) }
-                clip.text?.let { put("text", it) }
-                image?.let { put("image", it.mimeType) }
-                put("changed", clip.changed == true)
-            }
-        )
+        send(ViewerClipboard(id, clip.text, image?.mimeType, changed = clip.changed == true))
         // The only binary frame this socket sends, so the page takes the next one as the image.
         if (image != null) session.outgoing.send(Frame.Binary(true, image.bytes))
     }
 
     /** A binary frame is an image to paste. */
     private suspend fun pasteImage(bytes: ByteArray) {
-        act(PASTE) { services.clipboard.writeImage(bytes, paste = true) }
+        act("paste", null) { services.clipboard.writeImage(bytes, paste = true) }
     }
 
     private suspend fun onLease(state: LeaseState) {
@@ -218,15 +200,12 @@ private class ViewerSocket(
             state.holder != viewer && synchronized(down) { down.isNotEmpty().also { down.clear() } }
         if (lost) frames.send(PointerFrame(PointerOp.CANCEL))
         send(
-            buildJsonObject {
-                put("op", "lease")
-                put("holder", kind(state.holder))
-                put(
-                    "heldMs",
+            ViewerLease(
+                holder = kind(state.holder),
+                heldMs =
                     if (state.holder == null) 0 else System.currentTimeMillis() - state.sinceMs,
-                )
-                if (state.takenFrom != null) put("takenFrom", "agent")
-            }
+                takenFrom = ViewerHolder.AGENT.takeIf { state.takenFrom != null },
+            )
         )
     }
 
@@ -240,27 +219,28 @@ private class ViewerSocket(
         }
     }
 
-    private fun kind(holder: Holder?): String =
+    private fun kind(holder: Holder?): ViewerHolder =
         when (holder) {
-            null -> "none"
-            viewer -> "you"
-            is Holder.Viewer -> "person"
-            is Holder.Session -> if (sessions.isRest(holder.id)) "script" else "agent"
+            null -> ViewerHolder.NONE
+            viewer -> ViewerHolder.YOU
+            is Holder.Viewer -> ViewerHolder.PERSON
+            is Holder.Session ->
+                if (sessions.isRest(holder.id)) ViewerHolder.SCRIPT else ViewerHolder.AGENT
         }
 
     private fun touched() {
         lastInputMs = System.currentTimeMillis()
     }
 
-    private suspend fun send(message: JsonObject) {
-        session.outgoing.send(Frame.Text(message.toString()))
+    private suspend fun send(message: ViewerMessage) {
+        session.outgoing.send(
+            Frame.Text(ApiJson.encodeToString(ViewerMessage.serializer(), message))
+        )
     }
 
     private inline fun <reified T> decode(message: JsonObject): T =
         ApiJson.decodeFromJsonElement(serializer<T>(), JsonObject(message - "op"))
 }
-
-private val PASTE = buildJsonObject { put("op", "paste") }
 
 /** How long a viewer keeps the screen without input. */
 internal const val VIEWER_IDLE_MS = 30_000L
