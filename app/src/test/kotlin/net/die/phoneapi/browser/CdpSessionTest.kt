@@ -20,7 +20,9 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import net.die.phoneapi.core.ApiJson
+import net.die.phoneapi.model.ApiException
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
@@ -53,6 +55,50 @@ class CdpSessionTest {
                     }
                 }
             }
+        }
+    }
+
+    @Test
+    fun `close ends an unopened session`() = runBlocking {
+        // With no reader running, as when close() lands before the reader starts, closing alone
+        // has to end the session.
+        val harness = BrowserServiceTest()
+        StallingSocket(harness.switched()).use { page ->
+            CdpSession(page.input, page.output, Dispatchers.IO) { BrowserServiceTest.KEY }
+                .use { session ->
+                    session.close()
+                    withTimeout(5_000) { session.awaitClosed() }
+                    val error =
+                        assertThrows(ApiException::class.java) {
+                            runBlocking { session.call("Page.enable") }
+                        }
+                    assertEquals("cdp_error", error.error)
+                }
+        }
+    }
+
+    @Test
+    fun `closed session is a cdp_error`() = runBlocking {
+        val harness = BrowserServiceTest()
+        StallingSocket(harness.switched()).use { page ->
+            CdpSession(page.input, page.output, Dispatchers.IO) { BrowserServiceTest.KEY }
+                .use { session ->
+                    session.open("/devtools/page/abc")
+                    session.close()
+                    // Closing cancels the socket's scope; a command after that must not look like
+                    // this caller being cancelled.
+                    val error =
+                        assertThrows(ApiException::class.java) {
+                            runBlocking { session.call("Page.enable") }
+                        }
+                    assertEquals("cdp_error", error.error)
+                    session.awaitClosed()
+                    val again =
+                        assertThrows(ApiException::class.java) {
+                            runBlocking { session.call("Page.enable") }
+                        }
+                    assertEquals("cdp_error", again.error)
+                }
         }
     }
 

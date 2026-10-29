@@ -162,7 +162,14 @@ class NetworkCaptureTest {
         val ended = BrowserServiceTest.ScriptedSocket(harness.switched() + reply(1, "{}"))
         val pages = sockets(ended, fresh(), closeFirst = ended)
         val capture = NetworkCapture(CoroutineScope(Dispatchers.IO), pages::next)
-        capture.start(TAB)
+        // The watch can close the session before Network.enable is sent, which fails that start.
+        val first =
+            try {
+                capture.start(TAB).toString()
+            } catch (e: ApiException) {
+                e.error
+            }
+        assertTrue(first == "0" || first == "cdp_error", first)
         // A start while one records opens nothing; once it has ended, a start opens a new one.
         withTimeout(WAIT_MS) {
             while (pages.opened < 2) {
