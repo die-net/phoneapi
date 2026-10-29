@@ -168,6 +168,9 @@ internal class NetworkCapture(
         val link = connect(id)
         val capture = Capture(link, CaptureLog(parseBrowserTargetId(id).second))
         capture.used = now()
+        // Listed before the watch starts, so a session that has already closed is removed by the
+        // watch rather than left here with nothing to remove it.
+        captures[id] = capture
         var started = false
         try {
             // Collecting starts before Network does, so no event is missed.
@@ -179,11 +182,11 @@ internal class NetworkCapture(
                     put("maxResourceBufferSize", RESOURCE_BUFFER)
                 },
             )
-            captures[id] = capture
             started = true
             0
         } finally {
             if (!started) {
+                captures.remove(id, capture)
                 capture.job?.cancel()
                 link.close()
             }
