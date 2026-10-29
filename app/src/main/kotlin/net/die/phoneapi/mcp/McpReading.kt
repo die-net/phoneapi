@@ -6,6 +6,7 @@ import kotlinx.coroutines.delay
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import net.die.phoneapi.browser.MAX_FIND_RESULTS
 import net.die.phoneapi.browser.checkFind
 import net.die.phoneapi.model.ApiException
 import net.die.phoneapi.model.BrowserFindRequest
@@ -15,10 +16,13 @@ import net.die.phoneapi.model.BrowserReadResult
 import net.die.phoneapi.model.EvalRequest
 import net.die.phoneapi.model.FIND_QUERIES_DOC
 import net.die.phoneapi.model.FIND_QUERY_DOC
+import net.die.phoneapi.model.FeedLink
 import net.die.phoneapi.model.FindKind
 import net.die.phoneapi.model.READ_FORMAT_DOC
+import net.die.phoneapi.model.READ_MAX_CHARS_DOC
 import net.die.phoneapi.model.READ_SCOPE_DOC
 import net.die.phoneapi.model.READ_SELECTOR_DOC
+import net.die.phoneapi.model.READ_VERSION_DOC
 import net.die.phoneapi.model.ReadFormat
 import net.die.phoneapi.model.ReadScope
 import net.die.phoneapi.model.SHOW_DOC
@@ -45,8 +49,9 @@ internal data class BrowserReadArgs(
     val outline: Boolean = false,
     @Doc("Character offset to start at, such as nextOffset or an offset from browser_find.")
     val offset: Int = 0,
-    @Doc("Most characters to return, 1 to 100000. Defaults to 8000.") val maxChars: Int = 8_000,
+    @Doc(READ_MAX_CHARS_DOC) val maxChars: Int = 8_000,
     @Doc(SHOW_DOC) val show: Boolean = false,
+    @Doc(READ_VERSION_DOC) val version: String? = null,
     @Doc(CLOSE_DOC) val close: Boolean = false,
 )
 
@@ -96,14 +101,18 @@ internal suspend fun browserRead(
             offset = args.offset,
             maxChars = args.maxChars,
             show = args.show,
+            version = args.version,
         )
     val opened = args.url?.let { url -> openAndSettle(services, scopes, url, args.close) }
     val target = opened?.target ?: args.target.orEmpty()
     val text =
         closingAfter(services, target, args.close) {
             val result = services.browser.read(target, read)
-            if (args.outline) outlineText(result, args.maxChars, args.show)
-            else readText(result, args.show)
+            when {
+                result.changed == false -> unchangedText(result, args.show)
+                args.outline -> outlineText(result, args.maxChars, args.show)
+                else -> readText(result, args.show)
+            }
         }
     opened?.let { "${it.line}\n$text" } ?: text
 }
@@ -262,7 +271,45 @@ private fun stateNotes(result: BrowserReadResult, show: Boolean): List<String> =
         add("# readyState=$readyState: the page is still loading")
     }
     if (result.clipped) add("# clipped: the page has more text than reading takes")
+    if (result.paywall) add("# paywall: the page says its content is not free to read")
+    if (result.feeds.isNotEmpty()) add("# feeds: " + feedList(result.feeds))
+    result.next?.let { add("# next: " + oneLine(it)) }
+    result.canonical?.let { add("# canonical: " + oneLine(it)) }
 }
+
+/** Names a page's feeds: each one's type and URL, with its title when the page gave one. */
+private fun feedList(feeds: List<FeedLink>): String {
+    val listed =
+        feeds.take(MAX_LISTED_FEEDS).joinToString(", ") { feed ->
+            feed.type + " " + oneLine(feed.url) + feed.title?.let { " " + quoted(it) }.orEmpty()
+        }
+    val more = feeds.size - MAX_LISTED_FEEDS
+    return if (more > 0) "$listed, and $more more" else listed
+}
+
+/** What was read, as the header names it: the scope, or the selector and how many it matched. */
+private fun what(extracted: String, selected: Int?): String =
+    if (extracted == "selector" && selected != null) "selector content ($selected matched)"
+    else "$extracted content"
+
+/** A read whose content still has the version the client passed, so none is returned. */
+internal fun unchangedText(result: BrowserReadResult, show: Boolean = false): String {
+    val line =
+        "# ${what(result.extracted, result.selected)} unchanged, version ${result.version}, " +
+            "${result.totalChars} chars; content not returned"
+    return (listOf(readPageLine(result)) + stateNotes(result, show) + line).joinToString("\n")
+}
+
+/**
+ * How to see the results a find left out: a larger limit, or, at the most limit allows, a narrower
+ * search. Empty when every result was shown.
+ */
+private fun more(shown: Int, total: Int): String =
+    when {
+        shown >= total -> ""
+        shown >= MAX_FIND_RESULTS -> ", the most limit allows, so narrow the search for the rest"
+        else -> "; raise limit, up to $MAX_FIND_RESULTS, for more"
+    }
 
 /**
  * Notes on whether a tab was drawn. A hidden tab can be missing content that loads when drawn, so
@@ -292,20 +339,26 @@ internal fun drawnNotes(
     }
 }
 
-internal fun readText(result: BrowserReadResult, show: Boolean = false): String {
+/** A read's page line, with when the page was published and its status. */
+private fun readPageLine(result: BrowserReadResult): String {
     val extra = buildString {
         result.published?.let { append(" published=").append(it) }
         result.status?.let { append(" status=").append(it) }
     }
+    return pageLine(result.title, result.url, extra)
+}
+
+internal fun readText(result: BrowserReadResult, show: Boolean = false): String {
     val end = result.offset + result.returnedChars
     val range = buildString {
-        append("# ").append(result.extracted).append(" content, chars ")
+        append("# ").append(what(result.extracted, result.selected)).append(", chars ")
         append(result.offset).append('-').append(end).append(" of ").append(result.totalChars)
         append(", version ").append(result.version)
+        if (result.changed == true) append(" (changed)")
         result.nextOffset?.let { append("; nextOffset=").append(it) }
             ?: append(if (result.totalChars == 0) "; empty" else "; end")
     }
-    val lines = listOf(pageLine(result.title, result.url, extra)) + stateNotes(result, show) + range
+    val lines = listOf(readPageLine(result)) + stateNotes(result, show) + range
     return lines.joinToString("\n") + "\n\n" + result.content.orEmpty()
 }
 
@@ -318,8 +371,10 @@ internal fun outlineText(result: BrowserReadResult, maxChars: Int, show: Boolean
         chars <= maxChars
     }
     val summary = buildString {
-        append("# ").append(result.extracted).append(" content, ").append(result.totalChars)
-        append(" chars, version ").append(result.version).append("; ")
+        append("# ").append(what(result.extracted, result.selected)).append(", ")
+        append(result.totalChars).append(" chars, version ").append(result.version)
+        if (result.changed == true) append(" (changed)")
+        append("; ")
         append(headings.size).append(" headings, @ is each one's offset. On the page: ")
         append(result.links).append(" links, ").append(result.tables).append(" tables, ")
         append(result.forms).append(" forms")
@@ -338,7 +393,8 @@ internal fun matchesText(result: BrowserFindResult): String {
     val queries = result.queries
     if (queries != null) {
         val summary =
-            "# ${plural(queries.size, "query", "queries")} in ${result.extracted} content " +
+            "# ${plural(queries.size, "query", "queries")} in " +
+                "${what(result.extracted, result.selected)} " +
                 "(${result.totalChars} chars, version ${result.version}), " +
                 "${result.total} matches in all; @ is each one's offset"
         val lines = queries.flatMap { query ->
@@ -347,7 +403,8 @@ internal fun matchesText(result: BrowserFindResult): String {
                 when {
                     query.total == 0 -> "## ${quoted(query.query)}: no matches"
                     query.matches.size < query.total ->
-                        "## ${quoted(query.query)}: $count, showing ${query.matches.size}"
+                        "## ${quoted(query.query)}: $count, showing ${query.matches.size}" +
+                            more(query.matches.size, query.total)
                     else -> "## ${quoted(query.query)}: $count"
                 }
             listOf(title) + query.matches.map(::matchLine)
@@ -356,8 +413,9 @@ internal fun matchesText(result: BrowserFindResult): String {
     }
     val matches = result.matches.orEmpty()
     val summary =
-        "# ${result.total} matches in ${result.extracted} content (${result.totalChars} chars, " +
-            "version ${result.version}); showing ${matches.size}, @ is each one's offset"
+        "# ${result.total} matches in ${what(result.extracted, result.selected)} " +
+            "(${result.totalChars} chars, version ${result.version}); showing ${matches.size}" +
+            "${more(matches.size, result.total)}; @ is each one's offset"
     return (head + summary + matches.map(::matchLine)).joinToString("\n")
 }
 
@@ -377,8 +435,9 @@ internal fun linksText(result: BrowserFindResult): String {
         if (result.repeats == 0) ""
         else "; ${plural(result.repeats, "repeat", "repeats")} of a URL above left out"
     val summary =
-        "# ${result.total} links in ${result.extracted} content (version ${result.version}); " +
-            "showing ${links.size}, @ is where each one's text starts$repeats"
+        "# ${result.total} links in ${what(result.extracted, result.selected)} " +
+            "(version ${result.version}); showing ${links.size}${more(links.size, result.total)}; " +
+            "@ is where each one's text starts$repeats"
     val lines = links.map {
         "@${it.offset} ${quoted(it.text)} ${it.href}" + if (it.sameOrigin) " same-origin" else ""
     }
@@ -400,6 +459,7 @@ private fun quoted(text: String): String =
     "\"" + oneLine(text).replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
 private val WHITESPACE = Regex("\\s+")
+private const val MAX_LISTED_FEEDS = 5
 private const val OPEN_LOAD_MS = 15_000L
 private const val AFTER_LOAD_SETTLE_MS = 5_000L
 private const val MS_PER_S = 1_000

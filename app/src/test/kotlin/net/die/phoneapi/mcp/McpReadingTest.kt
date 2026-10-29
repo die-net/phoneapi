@@ -3,6 +3,7 @@ package net.die.phoneapi.mcp
 import net.die.phoneapi.model.BrowserFindResult
 import net.die.phoneapi.model.BrowserReadResult
 import net.die.phoneapi.model.BrowserSnapshot
+import net.die.phoneapi.model.FeedLink
 import net.die.phoneapi.model.PageHeading
 import net.die.phoneapi.model.PageLink
 import net.die.phoneapi.model.QueryMatches
@@ -97,8 +98,8 @@ class McpReadingTest {
             linksText(links).lines()[2],
         )
         assertEquals(
-            "# 4 links in page content (version 1); showing 1, @ is where each one's text " +
-                "starts; 2 repeats of a URL above left out",
+            "# 4 links in page content (version 1); showing 1; raise limit, up to 200, for " +
+                "more; @ is where each one's text starts; 2 repeats of a URL above left out",
             linksText(links.copy(repeats = 2)).lines()[1],
         )
     }
@@ -124,13 +125,83 @@ class McpReadingTest {
                 "#",
                 "# 3 queries in article content (50 chars, version 1), 3 matches in all; @ is " +
                     "each one's offset",
-                """## "gate": 2 matches, showing 1""",
+                """## "gate": 2 matches, showing 1; raise limit, up to 200, for more""",
                 "@12 …a «gate» b…",
                 """## "boarding": no matches""",
                 """## "door": 1 match""",
                 "@12 …a «door» b…",
             ),
             matchesText(found).lines(),
+        )
+    }
+
+    @Test
+    fun `cut find says how to see more`() {
+        val found =
+            BrowserFindResult(
+                extracted = "selector",
+                selected = 3,
+                version = "1",
+                totalChars = 50,
+                total = 4,
+                matches = listOf(TextMatch(12, null, "a ", "b", " c")),
+            )
+        assertEquals(
+            "# 4 matches in selector content (3 matched) (50 chars, version 1); showing 1; " +
+                "raise limit, up to 200, for more; @ is each one's offset",
+            matchesText(found).lines()[1],
+        )
+        val atMost = found.copy(total = 300, matches = List(200) { found.matches!!.first() })
+        assertEquals(
+            "# 300 matches in selector content (3 matched) (50 chars, version 1); showing 200, " +
+                "the most limit allows, so narrow the search for the rest; @ is each one's offset",
+            matchesText(atMost).lines()[1],
+        )
+        val all = found.copy(total = 1)
+        assertEquals(
+            "# 1 matches in selector content (3 matched) (50 chars, version 1); showing 1; @ is " +
+                "each one's offset",
+            matchesText(all).lines()[1],
+        )
+    }
+
+    @Test
+    fun `read notes feeds and paywall`() {
+        val feeds = List(7) { FeedLink("https://example.com/feed$it", "rss") }
+        val noted =
+            read.copy(
+                paywall = true,
+                feeds = listOf(FeedLink("https://example.com/atom", "atom", "Posts")) + feeds,
+                next = "https://example.com/a?page=2",
+                canonical = "https://example.com/canonical",
+            )
+        assertEquals(
+            listOf(
+                "# paywall: the page says its content is not free to read",
+                """# feeds: atom https://example.com/atom "Posts", rss https://example.com/feed0, """ +
+                    "rss https://example.com/feed1, rss https://example.com/feed2, " +
+                    "rss https://example.com/feed3, and 3 more",
+                "# next: https://example.com/a?page=2",
+                "# canonical: https://example.com/canonical",
+            ),
+            readText(noted).lines().subList(1, 5),
+        )
+    }
+
+    @Test
+    fun `unchanged read has no content`() {
+        val unchanged = read.copy(changed = false, content = null, returnedChars = 0)
+        assertEquals(
+            listOf(
+                    """# title="Doc" url=https://example.com/a published=2026-01-02 status=200""",
+                    "# article content unchanged, version 0badf00d, 120 chars; content not returned",
+                )
+                .joinToString("\n"),
+            unchangedText(unchanged),
+        )
+        assertEquals(
+            "# article content, chars 0-8 of 120, version 0badf00d (changed); nextOffset=8",
+            readText(read.copy(changed = true)).lines()[1],
         )
     }
 
