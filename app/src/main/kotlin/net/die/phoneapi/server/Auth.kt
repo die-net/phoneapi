@@ -28,7 +28,8 @@ internal const val VIEWER_PATH = "/viewer"
 
 /**
  * Set when `/viewer` is opened with `access_token`, then sent on later requests so the token is not
- * kept in the address bar. HttpOnly, so the page cannot read it.
+ * kept in the address bar. HttpOnly, so the page cannot read it. The server takes it only where the
+ * viewer page needs it, as [acceptsViewerCookie] says.
  */
 internal const val VIEWER_COOKIE = "phoneapi"
 
@@ -60,7 +61,10 @@ val BearerAuth =
             val cookie = call.request.cookies[VIEWER_COOKIE]?.trim()?.takeIf { it.isNotEmpty() }
             // The query token wins over an older cookie on the viewer and on sockets, so opening a
             // new link replaces the cookie instead of keeping the previous one.
-            val secret = header ?: query?.takeIf { call.acceptsAccessTokenQuery() } ?: cookie
+            val secret =
+                header
+                    ?: query?.takeIf { call.acceptsAccessTokenQuery() }
+                    ?: cookie?.takeIf { call.acceptsViewerCookie() }
             val info = secret?.let(tokens::authenticate)
             if (info == null) {
                 call.respondBytes(ByteArray(0), status = HttpStatusCode.NotFound)
@@ -76,6 +80,18 @@ internal fun ApplicationCall.acceptsAccessTokenQuery(): Boolean {
     if (isWebSocketUpgrade()) return true
     return request.httpMethod == HttpMethod.Get && request.path() == VIEWER_PATH
 }
+
+/**
+ * The browser sends [VIEWER_COOKIE] on every request to this host, including requests a page on
+ * another `127.0.0.1` port starts, so it stands in for the token only on what the viewer page uses:
+ * the page itself, the device status it reads, and its sockets, which check `Origin`.
+ */
+internal fun ApplicationCall.acceptsViewerCookie(): Boolean {
+    if (isWebSocketUpgrade()) return true
+    return request.httpMethod == HttpMethod.Get && request.path() in VIEWER_COOKIE_PATHS
+}
+
+private val VIEWER_COOKIE_PATHS = setOf(VIEWER_PATH, "/v1/device")
 
 private fun ApplicationCall.isWebSocketUpgrade(): Boolean =
     request.headers[HttpHeaders.Upgrade]?.contains("websocket", ignoreCase = true) == true

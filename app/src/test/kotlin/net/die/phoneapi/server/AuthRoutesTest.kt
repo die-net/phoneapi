@@ -1,8 +1,10 @@
 package net.die.phoneapi.server
 
 import io.ktor.client.plugins.websocket.webSocket
+import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.get
 import io.ktor.client.request.header
+import io.ktor.client.request.post
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
@@ -79,6 +81,32 @@ class AuthRoutesTest {
                 ) {}
             }
             client.webSocket("/v1/events?access_token=$observe") {}
+        }
+    }
+
+    @Test
+    fun `cookie only on viewer routes`() = testApplication {
+        val api = FakeApi()
+        val secret = api.tokens.issue("viewer", Scope.entries.toSet())
+        application { phoneApiModule(api.services) }
+        apiClient().use { client ->
+            val cookie: HttpRequestBuilder.() -> Unit = {
+                header(HttpHeaders.Cookie, "$VIEWER_COOKIE=$secret")
+            }
+            // A page on another local port can send the cookie, so it must not act or read.
+            for (refused in
+                listOf(
+                    client.post("/v1/input/tap", cookie),
+                    client.get("/v1/screenshot", cookie),
+                    client.get("/v1/tokens", cookie),
+                    client.post("/mcp", cookie),
+                    client.get("/mcp", cookie),
+                )) {
+                assertEquals(HttpStatusCode.NotFound, refused.status)
+                assertEquals("", refused.bodyAsText())
+            }
+            assertEquals(HttpStatusCode.OK, client.get("/v1/device", cookie).status)
+            assertEquals(HttpStatusCode.OK, client.get("/viewer", cookie).status)
         }
     }
 

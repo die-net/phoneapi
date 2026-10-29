@@ -57,11 +57,13 @@ class PowerServiceImpl(
     private val lease = AwakeLease(context, settings)
     private val mutex = Mutex()
 
-    /** What an unlock attempt did, and why it failed if it did. */
+    /**
+     * What an unlock attempt did, and why it failed if it did. It keeps no touch points: the taps
+     * of a PIN entry would give the PIN away to anyone who reads the result.
+     */
     private data class Attempt(
         val ok: Boolean,
         val backend: String? = null,
-        val points: List<Point> = emptyList(),
         val message: String? = null,
     )
 
@@ -92,7 +94,6 @@ class PowerServiceImpl(
             ok = true,
             backend = attempt.backend,
             woke = woke,
-            points = attempt.points,
             seq = seq.value,
         )
     }
@@ -181,43 +182,35 @@ class PowerServiceImpl(
         }
         WakeActivity.start(context, dismissKeyguard = true)
         if (awaitUnlocked()) return Attempt(ok = true, backend = "requestDismissKeyguard")
-        val points = swipeUp()
+        swipeUp()
         return if (awaitUnlocked()) {
-            Attempt(ok = true, backend = "swipe", points = points)
+            Attempt(ok = true, backend = "swipe")
         } else {
-            Attempt(
-                ok = false,
-                backend = "swipe",
-                points = points,
-                message = "The lock screen would not go away",
-            )
+            Attempt(ok = false, backend = "swipe", message = "The lock screen would not go away")
         }
     }
 
     private suspend fun enterPin(pin: String): Attempt {
-        val points = ArrayList<Point>()
         var keypad = scanKeypad()
         if (!keypad.covers(pin)) {
             // On most devices the keypad sits behind the lock screen until it is swiped away.
-            points += revealBouncer()
+            revealBouncer()
             keypad = scanKeypad()
         }
         if (!keypad.covers(pin)) {
-            return Attempt(ok = false, points = points, message = NO_KEYPAD)
+            return Attempt(ok = false, message = NO_KEYPAD)
         }
         for ((i, digit) in pin.withIndex()) {
             if (i > 0) delay(random.nextLong(MIN_DIGIT_GAP_MS, MAX_DIGIT_GAP_MS))
-            val outcome = touch.tap(checkNotNull(keypad.digits[digit]))
-            points += outcome.points
-            if (!outcome.ok) {
-                return Attempt(ok = false, points = points, message = "A keypad tap was cancelled")
+            if (!touch.tap(checkNotNull(keypad.digits[digit])).ok) {
+                return Attempt(ok = false, message = "A keypad tap was cancelled")
             }
         }
-        keypad.submit?.let { points += touch.tap(it).points }
+        keypad.submit?.let { touch.tap(it) }
         return if (awaitUnlocked()) {
-            Attempt(ok = true, backend = "pin", points = points)
+            Attempt(ok = true, backend = "pin")
         } else {
-            Attempt(ok = false, backend = "pin", points = points, message = "The PIN was rejected")
+            Attempt(ok = false, backend = "pin", message = "The PIN was rejected")
         }
     }
 
@@ -226,26 +219,25 @@ class PowerServiceImpl(
     private fun PinpadKeys.asKeypad(): Keypad =
         Keypad(digits.mapKeys { (digit, _) -> digit.first() }, submit)
 
-    /** Brings up the credential prompt, and returns the points touched doing it. */
-    private suspend fun revealBouncer(): List<Point> {
+    /** Brings up the credential prompt. */
+    private suspend fun revealBouncer() {
         if (shell.isAvailable) {
             val result = shell.exec(listOf("wm", "dismiss-keyguard"))
             if (result.ok) {
                 awaitUiChange()
-                return emptyList()
+                return
             }
         }
-        val points = swipeUp()
+        swipeUp()
         awaitUiChange()
-        return points
     }
 
-    private suspend fun swipeUp(): List<Point> {
+    private suspend fun swipeUp() {
         val screen = display()
         val x = screen.widthPx / 2f
         val from = Point(x, screen.heightPx * SWIPE_FROM)
         val to = Point(x, screen.heightPx * SWIPE_TO)
-        return touch.swipe(from, to, SwipeSpec(durationMs = SWIPE_MS, fling = true)).points
+        touch.swipe(from, to, SwipeSpec(durationMs = SWIPE_MS, fling = true))
     }
 
     /** Lets the bouncer's window settle before reading the tree again. */

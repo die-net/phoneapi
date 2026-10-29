@@ -21,6 +21,7 @@ import kotlin.time.Duration.Companion.seconds
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 /**
@@ -80,6 +81,9 @@ class AbstractHttpEngine(
         server = null
         accept?.join(gracePeriodMillis)
         accept = null
+        // Closing the listening socket only stops new connections. Cancelling the connections
+        // closes their sockets too, so streams and keep-alive clients end with the listener.
+        scope.cancel()
     }
 
     private suspend fun serve(caller: CoroutineScope, client: LocalSocket) {
