@@ -250,7 +250,7 @@ internal class NetworkCapture(
             } else {
                 body.body
             }
-        val json = jsonText(text) ?: return blob(r, missing = "${r.name} is not JSON")
+        val json = jsonText(text) ?: return blob(r, missing = notJson(r))
         return blob(r, text = json)
     }
 
@@ -293,6 +293,10 @@ internal class NetworkCapture(
 
     private fun tooBig(r: CapturedResponse) =
         "${r.name} is ${r.bytes} bytes, more than the $RESOURCE_BUFFER Chrome keeps for one response"
+
+    private fun notJson(r: CapturedResponse) =
+        "${r.name} does not parse as JSON, though its content type says it is JSON, so scope " +
+            "data cannot read it."
 
     private fun gone(r: CapturedResponse) =
         "Chrome no longer has the body of ${r.name}. It keeps the last $TOTAL_BUFFER bytes of " +
@@ -347,7 +351,9 @@ internal const val RESPONSE_PREFIX = "response-"
 
 /**
  * [text] as JSON to read, without a prefix some APIs put before JSON so that it cannot be loaded as
- * a script, or null when it is not JSON.
+ * a script, or null when it is not JSON. A body of several values one after another, as in NDJSON
+ * or a chunked reply that puts each chunk's length on a line before it, becomes an array of those
+ * values; the lengths are numbers, so they are items too.
  */
 internal fun jsonText(text: String): String? {
     val start = text.indexOfFirst { !it.isWhitespace() }
@@ -356,13 +362,32 @@ internal fun jsonText(text: String): String? {
     val json = if (prefix == null) text else text.substring(start + prefix.length)
     return try {
         val scan = JsonScan(json)
-        val root = scan.space(0)
-        // The printer checks every value as it walks, which end() alone does not.
-        JsonPrinter(scan, NullSink).print(root)
-        json.takeIf { scan.space(scan.end(root)) == json.length }
+        val values = ArrayList<Int>()
+        var at = scan.space(0)
+        while (at < json.length) {
+            // The printer checks every value as it walks, which end() alone does not.
+            JsonPrinter(scan, NullSink).print(at)
+            values += at
+            at = scan.space(scan.end(at))
+        }
+        when (values.size) {
+            0 -> null
+            1 -> json
+            else -> sequence(scan, values)
+        }
     } catch (_: IllegalArgumentException) {
         null
     }
+}
+
+/** The values that start at [values] in [scan], as one JSON array. */
+private fun sequence(scan: JsonScan, values: List<Int>): String {
+    val out = StringBuilder(scan.text.length + values.size + 1).append('[')
+    values.forEachIndexed { index, value ->
+        if (index > 0) out.append(',')
+        out.append(scan.text, value, scan.end(value))
+    }
+    return out.append(']').toString()
 }
 
 private val XSSI_PREFIXES = listOf(")]}',", ")]}'", "while(1);", "for(;;);", "for (;;);")

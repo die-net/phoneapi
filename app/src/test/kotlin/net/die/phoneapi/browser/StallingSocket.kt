@@ -66,3 +66,52 @@ private const val LENGTH_BITS = 0x7F
 private const val LENGTH_16 = 126
 private const val MASK_BYTES = 4
 private val METHOD = Regex(""""method":"([^"]+)"""")
+
+/**
+ * A [StallingSocket] that answers the WebSocket handshake for whatever key the client sends, for
+ * code that makes its own key, then plays [frames] and stalls.
+ */
+internal class KeyedSocket(private val frames: ByteArray) : DevtoolsSocket {
+    private val closed = CountDownLatch(1)
+    override val output = ByteArrayOutputStream()
+    private var replies: ByteArray? = null
+    private var at = 0
+    override val input: InputStream =
+        object : InputStream() {
+            override fun read(): Int {
+                val one = ByteArray(1)
+                return if (read(one, 0, 1) < 0) -1 else one[0].toInt() and BYTE
+            }
+
+            override fun read(b: ByteArray, off: Int, len: Int): Int {
+                val bytes = replies ?: handshake().also { replies = it }
+                if (at < bytes.size) {
+                    val n = minOf(len, bytes.size - at)
+                    bytes.copyInto(b, off, at, at + n)
+                    at += n
+                    return n
+                }
+                if (!closed.await(STALL_S, TimeUnit.SECONDS)) throw IOException("not closed")
+                return -1
+            }
+        }
+
+    /** The handshake reply, then [frames], once the client has sent its request. */
+    private fun handshake(): ByteArray {
+        var key: String? = null
+        while (key == null) {
+            val request = synchronized(output) { output.toString(Charsets.ISO_8859_1) }
+            key = KEY_HEADER.find(request)?.groupValues?.get(1)
+            if (key == null && closed.await(POLL_MS, TimeUnit.MILLISECONDS)) {
+                throw IOException("closed")
+            }
+        }
+        val accept = "Sec-WebSocket-Accept: ${websocketAccept(key)}"
+        return asciiLines("HTTP/1.1 101 Switching Protocols", accept) + frames
+    }
+
+    override fun close() = closed.countDown()
+}
+
+private const val POLL_MS = 10L
+private val KEY_HEADER = Regex("""Sec-WebSocket-Key: (\S+)\r\n""")

@@ -16,6 +16,7 @@ import net.die.phoneapi.apps.AppsServiceImpl
 import net.die.phoneapi.apps.RESUMED_ACTIVITY_ARGS
 import net.die.phoneapi.apps.resumedPackage
 import net.die.phoneapi.browser.BrowserServiceImpl
+import net.die.phoneapi.browser.CHROME_PACKAGE
 import net.die.phoneapi.browser.CdpForward
 import net.die.phoneapi.browser.ChromeKeeper
 import net.die.phoneapi.browser.DevtoolsPreconditions
@@ -59,8 +60,10 @@ import net.die.phoneapi.mcp.McpSessions
 import net.die.phoneapi.model.ActionResult
 import net.die.phoneapi.model.ApiException
 import net.die.phoneapi.model.EventTypes
+import net.die.phoneapi.model.FindRequest
 import net.die.phoneapi.model.HelperStatus
 import net.die.phoneapi.model.KeyRequest
+import net.die.phoneapi.model.NodeSelector
 import net.die.phoneapi.model.ScreenState
 import net.die.phoneapi.model.ScreenTakenData
 import net.die.phoneapi.power.PinStore
@@ -227,6 +230,7 @@ class AppGraph(
             io = ioDispatcher,
             browser = browser,
             openDevtools = ::openDevtools,
+            dialogFrom = { host -> chromeDialogShown(host) },
         )
     internal val video =
         VideoStream(
@@ -303,6 +307,29 @@ class AppGraph(
         if (now.screen != ScreenState.ON || now.keyguard.locked) return false
         return topPackage() == pkg
     }
+
+    /**
+     * Whether Chrome shows a page's dialog, and with [host], one whose title names it, as in
+     * "example.com says". Chrome draws an alert, confirm, or prompt in its own views, whose ids may
+     * change between releases; that only loses what this tells.
+     */
+    private suspend fun chromeDialogShown(host: String? = null): Boolean =
+        try {
+            shown(NodeSelector(id = CHROME_DIALOG_ID, packageName = CHROME_PACKAGE)) &&
+                (host == null ||
+                    shown(
+                        NodeSelector(
+                            id = CHROME_DIALOG_TITLE_ID,
+                            textContains = host,
+                            packageName = CHROME_PACKAGE,
+                        )
+                    ))
+        } catch (_: ApiException) {
+            false
+        }
+
+    private suspend fun shown(selector: NodeSelector): Boolean =
+        ui.find(FindRequest(selector, limit = 1)).matches.isNotEmpty()
 
     private suspend fun launchPackage(pkg: String) =
         shell.exec(
@@ -387,6 +414,7 @@ class AppGraph(
             invalidateSnapshots = { tree.invalidate() },
             showPackage = { pkg -> launchPackage(pkg) },
             inFront = { pkg -> appInFront(pkg) },
+            pageDialog = { chromeDialogShown() },
             pageScript = {
                 asset("readability/Readability.js").decodeToString() +
                     "\n" +
@@ -450,6 +478,12 @@ class AppGraph(
 
     private companion object {
         const val DEVTOOLS_READ_MS = 15_000L
+
+        /** The view Chrome draws a page's dialog in. */
+        const val CHROME_DIALOG_ID = "tab_modal_dialog_container"
+
+        /** The dialog's title, which names the page's host. */
+        const val CHROME_DIALOG_TITLE_ID = "title"
         const val TAG = "PhoneApiLease"
     }
 }

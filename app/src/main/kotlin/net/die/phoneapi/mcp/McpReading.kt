@@ -121,7 +121,7 @@ internal suspend fun browserRead(
         }
     val target = opened?.target ?: args.target.orEmpty()
     val text =
-        closingAfter(services, target, args.close) {
+        closingAfter(services, target, args.close, opened != null) {
             val result = services.browser.read(target, read)
             val label = if (args.scope == ReadScope.DATA) dataLabel(args, result) else null
             when {
@@ -137,15 +137,24 @@ private data class Opened(val target: String, val line: String)
 
 /**
  * Runs [block] on [target], then closes the tab when [close] is set, even when [block] failed. A
- * close that fails adds a line saying so.
+ * close that fails adds a line saying so. When the call [opened] the tab and keeps it, a failure
+ * names it, since the result that would have named it is not coming.
  */
 private suspend fun closingAfter(
     services: ServerServices,
     target: String,
     close: Boolean,
+    opened: Boolean,
     block: suspend () -> String,
 ): String {
-    if (!close) return block()
+    if (!close) {
+        if (!opened) return block()
+        return try {
+            block()
+        } catch (e: ApiException) {
+            throw keptOpen(e, target)
+        }
+    }
     val text =
         try {
             block()
@@ -157,6 +166,18 @@ private suspend fun closingAfter(
     return if (closed == null) "$text\n# closed target=$target"
     else "$text\n# close failed: $closed; close it with browser_close"
 }
+
+/** [e], saying that the tab the call opened, [target], is still open. */
+private fun keptOpen(e: ApiException, target: String): ApiException =
+    ApiException(
+        e.status,
+        e.error,
+        (e.message ?: e.error).trimEnd('.') +
+            ". The tab it opened is still open as target=$target: read it again, or close it " +
+            "with browser_close.",
+        e.state,
+        e,
+    )
 
 /** Closes [target], returning why it failed, or null when it closed. */
 private suspend fun closeQuietly(services: ServerServices, target: String): String? =
@@ -262,7 +283,7 @@ internal suspend fun browserFind(
         }
     val target = opened?.target ?: args.target.orEmpty()
     val text =
-        closingAfter(services, target, args.close) {
+        closingAfter(services, target, args.close, opened != null) {
             val result = services.browser.find(target, find)
             if (args.kind == FindKind.LINKS) linksText(result) else matchesText(result)
         }

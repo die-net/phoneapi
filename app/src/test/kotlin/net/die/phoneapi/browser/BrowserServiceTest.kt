@@ -566,6 +566,7 @@ class BrowserServiceTest {
         invalidate: () -> Unit = {},
         inFront: suspend (String) -> Boolean = { true },
         showPackage: suspend (String) -> Unit = {},
+        pageDialog: suspend () -> Boolean = { false },
     ) =
         BrowserServiceImpl(
             io = Dispatchers.IO,
@@ -584,6 +585,7 @@ class BrowserServiceTest {
             invalidateSnapshots = invalidate,
             inFront = inFront,
             showPackage = showPackage,
+            pageDialog = pageDialog,
         )
 
     internal class ScriptedSocket(

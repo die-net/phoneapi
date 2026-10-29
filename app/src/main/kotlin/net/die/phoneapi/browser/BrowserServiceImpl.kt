@@ -95,6 +95,11 @@ internal class BrowserServiceImpl(
     private val invalidateSnapshots: () -> Unit = {},
     private val showPackage: suspend (String) -> Unit = {},
     private val inFront: suspend (String) -> Boolean = { true },
+    /**
+     * Whether Chrome shows a page's dialog, such as an alert, on screen. Such a page answers no
+     * DevTools command until someone dismisses the dialog.
+     */
+    private val pageDialog: suspend () -> Boolean = { false },
     /** Readability.js, page-pending.js, page-data.js, then page-read.js. */
     pageScript: suspend () -> String = { "" },
     /** page-data.js, for reads and finds with scope data. */
@@ -575,6 +580,9 @@ internal class BrowserServiceImpl(
         repeatable: Boolean,
     ): Boolean {
         if (e.status < HTTP_SERVER_ERROR || e.error in FINAL_ERRORS) return false
+        if (e.error == "cdp_timeout" && socket == CHROME_SOCKET && pageDialog()) {
+            throw dialogOpen(e)
+        }
         if (started) return repeatable
         // A page that never answered: if Chrome as a whole does not, retrying is no use.
         if (e.error == "cdp_timeout" && probe?.frozen(socket) == true) throw browserFrozen()
@@ -618,6 +626,15 @@ internal class BrowserServiceImpl(
                 "Use input touch, input cdp-mouse for a tap, or browser_eval.",
         )
     }
+
+    private fun dialogOpen(cause: ApiException) =
+        ApiException(
+            409,
+            "content_unavailable",
+            "Chrome is showing a page's dialog, such as an alert, and that page answers nothing " +
+                "until someone dismisses it. ui_snapshot shows the dialog; tap one of its buttons.",
+            cause = cause,
+        )
 
     private fun browserPackage(socket: DevtoolsSocketInfo?, name: String): String? =
         socket?.packageName ?: if (name == CHROME_SOCKET) CHROME_PACKAGE else null

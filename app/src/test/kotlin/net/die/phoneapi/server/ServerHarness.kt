@@ -13,6 +13,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.serialization.json.JsonPrimitive
 import net.die.phoneapi.core.ApiJson
 import net.die.phoneapi.core.AppsService
 import net.die.phoneapi.core.BrowserService
@@ -26,6 +27,7 @@ import net.die.phoneapi.helperclient.ShellResult
 import net.die.phoneapi.lease.ForegroundWatch
 import net.die.phoneapi.lease.ScreenLease
 import net.die.phoneapi.model.ActionResult
+import net.die.phoneapi.model.ApiException
 import net.die.phoneapi.model.AppInfo
 import net.die.phoneapi.model.BrowserCaptureResult
 import net.die.phoneapi.model.BrowserFindRequest
@@ -124,6 +126,7 @@ internal class RecordingWaits : WaitService {
 internal class FakeApi(leaseWaitMs: Long = ScreenLease.WAIT_MS) {
     val tokens = MemoryTokens()
     val waits = RecordingWaits()
+    private val browser = FakeBrowser()
     var capabilities = allCapabilities()
     var inputTaps = 0
     var imeShow: ImeShowRequest? = null
@@ -135,6 +138,8 @@ internal class FakeApi(leaseWaitMs: Long = ScreenLease.WAIT_MS) {
     @Volatile var clipImage: ClipImage? = null
     @Volatile var clipPasted = false
     val pointerSessions = Channel<List<PointerFrame>>(capacity = Channel.UNLIMITED)
+    /** Runs after a pointer stream's channel closes and before the pointer call returns. */
+    @Volatile var afterPointer: suspend () -> Unit = {}
     @Volatile var cleanups = 0
 
     val tabStore = MemoryTabStore()
@@ -178,6 +183,7 @@ internal class FakeApi(leaseWaitMs: Long = ScreenLease.WAIT_MS) {
                     override suspend fun pointer(frames: ReceiveChannel<PointerFrame>) {
                         val seen = mutableListOf<PointerFrame>()
                         for (frame in frames) seen.add(frame)
+                        afterPointer()
                         pointerSessions.send(seen)
                     }
 
@@ -194,7 +200,7 @@ internal class FakeApi(leaseWaitMs: Long = ScreenLease.WAIT_MS) {
                 },
             apps = FakeApps,
             waits = waits,
-            browser = FakeBrowser,
+            browser = browser,
             power =
                 object : PowerService by FakePower {
                     override suspend fun orientation(request: OrientationRequest): ActionResult {
@@ -254,7 +260,7 @@ internal class FakeApi(leaseWaitMs: Long = ScreenLease.WAIT_MS) {
             viewerText = { "http://127.0.0.1:1/viewer?access_token=TOKEN" },
             logcat = LogcatFeed { _ -> emptyFlow() },
             lease = lease,
-            tabs = Tabs(FakeBrowser, lease, inFront = { false }, store = tabStore),
+            tabs = Tabs(browser, lease, inFront = { false }, store = tabStore),
             foreground = foreground,
         )
 
@@ -365,7 +371,11 @@ private object FakeApps : AppsService {
     override suspend fun intent(request: IntentRequest) = acted()
 }
 
-private object FakeBrowser : BrowserService {
+/** A browser_read with this selector fails, as when the page goes away during the read. */
+internal const val FAILING_SELECTOR = "#fails"
+
+/** A browser with one tab, which [BrowserService.openTab] opens and reads and finds answer. */
+internal open class FakeBrowser : BrowserService {
     override suspend fun targets(): List<BrowserTarget> = emptyList()
 
     override suspend fun openTab(url: String, capture: Boolean) =
@@ -390,8 +400,11 @@ private object FakeBrowser : BrowserService {
     override suspend fun snapshot(id: String, options: BrowserSnapshotOptions) =
         BrowserSnapshot(id = id, compact = "page")
 
-    override suspend fun read(id: String, request: BrowserReadRequest) =
-        BrowserReadResult(
+    override suspend fun read(id: String, request: BrowserReadRequest): BrowserReadResult {
+        if (request.selector == FAILING_SELECTOR) {
+            throw ApiException(502, "cdp_error", "The page went away.")
+        }
+        return BrowserReadResult(
             extracted = "page",
             version = "0",
             totalChars = 4,
@@ -400,6 +413,7 @@ private object FakeBrowser : BrowserService {
             truncated = false,
             content = "page",
         )
+    }
 
     override suspend fun find(id: String, request: BrowserFindRequest) =
         BrowserFindResult(extracted = "page", version = "0", totalChars = 4, total = 0)
@@ -414,7 +428,11 @@ private object FakeBrowser : BrowserService {
 
     override suspend fun text(id: String, request: BrowserTextRequest) = acted()
 
-    override suspend fun evaluate(id: String, request: EvalRequest) = EvalResult()
+    // A tab a url read opens has loaded at once.
+    override suspend fun evaluate(id: String, request: EvalRequest) =
+        if (request.expression == "document.readyState")
+            EvalResult(value = JsonPrimitive("complete"))
+        else EvalResult()
 
     override suspend fun console(id: String, request: ConsoleRequest) = ConsoleResult()
 }

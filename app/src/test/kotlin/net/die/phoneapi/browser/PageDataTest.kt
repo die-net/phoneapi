@@ -136,6 +136,17 @@ class PageDataTest {
     }
 
     @Test
+    fun `names an array of mixed items`() {
+        val text = """[91,[["x"]],[true,false]]"""
+        val page = DataExtract(blobs = listOf(DataBlobText("response-1", "u", text.length, text)))
+        val outline = readData(page, BrowserReadRequest(scope = ReadScope.DATA)).content!!
+        assertTrue(outline.startsWith("response-1: array of 3 items, "), outline)
+        val bools =
+            BrowserReadRequest(scope = ReadScope.DATA, path = "response-1/2", outline = true)
+        assertTrue(readData(page, bools).content!!.startsWith("response-1/2: array of 2 booleans"))
+    }
+
+    @Test
     fun `reads every value a star names`() {
         val names = read("__NEXT_DATA__/props/pageProps/items/*/name")
         assertEquals(2, names.values)
@@ -301,12 +312,16 @@ class PageDataTest {
         assertEquals(listOf("response-1/items"), found.matches.orEmpty().map { it.path })
         val read = BrowserReadRequest(scope = ReadScope.DATA, path = "response-1/items/0")
         assertEquals("1", readData(page, read).content)
-        fun why(path: String) =
+        fun failure(path: String) =
             assertThrows(ApiException::class.java) {
-                    readData(page, BrowserReadRequest(scope = ReadScope.DATA, path = path))
-                }
-                .message
-        assertEquals("Chrome no longer has the body of response-2", why("response-2/x"))
+                readData(page, BrowserReadRequest(scope = ReadScope.DATA, path = path))
+            }
+        fun why(path: String) = failure(path).message
+        // A body Chrome dropped is the page's doing, not a bad path.
+        val gone = failure("response-2/x")
+        assertEquals("page_error", gone.error)
+        assertEquals("Chrome no longer has the body of response-2", gone.message)
+        assertEquals("bad_request", failure("other").error)
         assertTrue(
             why("response-9")
                 .orEmpty()

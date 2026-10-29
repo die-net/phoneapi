@@ -173,7 +173,9 @@ public sealed interface WaitCondition {
         @Doc("HTTP status code.") val status: Int? = null,
     ) : WaitCondition
 
-    @Doc("A JavaScript dialog is open.")
+    @Doc(
+        "A JavaScript dialog, such as an alert, is open. One that opened before the wait counts only while Chrome shows it on screen."
+    )
     @Serializable
     @SerialName("browser.dialog")
     public data class BrowserDialog(

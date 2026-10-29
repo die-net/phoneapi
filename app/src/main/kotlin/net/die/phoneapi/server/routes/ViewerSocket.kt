@@ -64,7 +64,7 @@ private class ViewerSocket(
     private val lease = services.lease
     private val sessions = session.call.application.attributes[SessionsKey]
     private val frames = Channel<PointerFrame>(Channel.UNLIMITED)
-    private val down = HashSet<Int>()
+    private val fingers = ViewerFingers({ lease.holds(viewer) }, frames)
 
     @Volatile private var lastInputMs = System.currentTimeMillis()
 
@@ -142,22 +142,13 @@ private class ViewerSocket(
     }
 
     /**
-     * Forwards a contact while this viewer holds the screen, and drops a whole gesture otherwise.
+     * Forwards a contact while this viewer holds the screen, and drops a whole gesture otherwise. A
+     * touch takes a free screen first.
      */
     private suspend fun pointer(frame: PointerFrame) {
         touched()
-        val forward =
-            when (frame.op) {
-                PointerOp.DOWN -> {
-                    val ok = lease.viewerInput(viewer)
-                    if (ok) synchronized(down) { down += frame.id }
-                    ok
-                }
-                PointerOp.MOVE -> synchronized(down) { frame.id in down }
-                PointerOp.UP -> synchronized(down) { down.remove(frame.id) }
-                PointerOp.CANCEL -> synchronized(down) { down.isNotEmpty().also { down.clear() } }
-            }
-        if (forward) frames.send(frame)
+        if (frame.op == PointerOp.DOWN && !lease.viewerInput(viewer)) return
+        fingers.forward(frame)
     }
 
     /** Runs the page's [op] request. A failure is sent back as an error that echoes [id]. */
@@ -195,10 +186,9 @@ private class ViewerSocket(
     }
 
     private suspend fun onLease(state: LeaseState) {
-        // Another viewer took the screen mid-gesture: release the finger.
-        val lost =
-            state.holder != viewer && synchronized(down) { down.isNotEmpty().also { down.clear() } }
-        if (lost) frames.send(PointerFrame(PointerOp.CANCEL))
+        // Another viewer took the screen mid-gesture: release the finger. The state can be older
+        // than a touch this socket has since forwarded, so the check asks who holds it now.
+        fingers.checkLost()
         send(
             ViewerLease(
                 holder = kind(state.holder),
@@ -213,7 +203,7 @@ private class ViewerSocket(
         while (true) {
             delay(IDLE_CHECK_MS)
             val idle = System.currentTimeMillis() - lastInputMs > VIEWER_IDLE_MS
-            if (idle && lease.holds(viewer) && synchronized(down) { down.isEmpty() }) {
+            if (idle && lease.holds(viewer) && fingers.noneDown()) {
                 lease.release(viewer)
             }
         }
