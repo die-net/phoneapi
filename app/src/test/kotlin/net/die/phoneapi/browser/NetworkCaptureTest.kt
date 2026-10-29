@@ -157,9 +157,10 @@ class NetworkCaptureTest {
 
     @Test
     fun `ends when the tab closes`() = runBlocking {
-        // The page answers, then its socket ends, as when the tab closes.
-        val pages =
-            sockets(BrowserServiceTest.ScriptedSocket(harness.switched() + reply(1, "{}")), fresh())
+        // The page answers, then its socket ends, as when the tab closes. Its session has closed
+        // before start sees it, so the watch ends at once, before start has finished.
+        val ended = BrowserServiceTest.ScriptedSocket(harness.switched() + reply(1, "{}"))
+        val pages = sockets(ended, fresh(), closeFirst = ended)
         val capture = NetworkCapture(CoroutineScope(Dispatchers.IO), pages::next)
         capture.start(TAB)
         // A start while one records opens nothing; once it has ended, a start opens a new one.
@@ -200,18 +201,26 @@ class NetworkCaptureTest {
         capture.stop(TAB)
     }
 
-    /** Hands out [list] in order, one per capture opened, counting them. */
-    private inner class Sockets(private val list: List<DevtoolsSocket>) {
+    /**
+     * Hands out [list] in order, one per capture opened, counting them. The link on [closeFirst] is
+     * handed out only once its session has closed.
+     */
+    private inner class Sockets(
+        private val list: List<DevtoolsSocket>,
+        private val closeFirst: DevtoolsSocket?,
+    ) {
         var opened = 0
             private set
 
-        fun next(id: String): PageLink {
+        suspend fun next(id: String): PageLink {
             check(id == TAB)
-            return link(list[opened++])
+            val page = list[opened++]
+            return link(page).also { if (page === closeFirst) it.cdp.awaitClosed() }
         }
     }
 
-    private fun sockets(vararg list: DevtoolsSocket) = Sockets(list.toList())
+    private fun sockets(vararg list: DevtoolsSocket, closeFirst: DevtoolsSocket? = null) =
+        Sockets(list.toList(), closeFirst)
 
     /** A page that answers Network.enable, then sends nothing more. */
     private fun fresh() = StallingSocket(harness.switched() + reply(1, "{}"))
