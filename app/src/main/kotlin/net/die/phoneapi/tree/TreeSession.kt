@@ -2,14 +2,14 @@ package net.die.phoneapi.tree
 
 import android.os.RemoteException
 import android.os.SystemClock
+import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.builtins.ListSerializer
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.serializer
 import net.die.phoneapi.core.ApiJson
 import net.die.phoneapi.core.DeviceStateTracker
@@ -20,6 +20,8 @@ import net.die.phoneapi.helperclient.HelperConnection
 import net.die.phoneapi.model.ActionResult
 import net.die.phoneapi.model.ApiException
 import net.die.phoneapi.model.DisplayInfo
+import net.die.phoneapi.model.EventData
+import net.die.phoneapi.model.EventTypes
 import net.die.phoneapi.model.FindRequest
 import net.die.phoneapi.model.FindResult
 import net.die.phoneapi.model.ImeState
@@ -27,6 +29,7 @@ import net.die.phoneapi.model.NodeSelector
 import net.die.phoneapi.model.PinpadKeys
 import net.die.phoneapi.model.Rect
 import net.die.phoneapi.model.SnapshotOptions
+import net.die.phoneapi.model.ToastData
 import net.die.phoneapi.model.TreeActCall
 import net.die.phoneapi.model.TreeFocusCall
 import net.die.phoneapi.model.TreeFocusedText
@@ -40,7 +43,9 @@ import net.die.phoneapi.model.TreeSetTextCall
 import net.die.phoneapi.model.TreeSnapshotCall
 import net.die.phoneapi.model.TreeTitleCall
 import net.die.phoneapi.model.TreeTouchCall
+import net.die.phoneapi.model.UiChangedData
 import net.die.phoneapi.model.UiSnapshot
+import net.die.phoneapi.model.WindowChangedData
 
 /**
  * App-side client of the helper's UI tree. Live nodes stay in the helper; this process sends refs
@@ -146,11 +151,18 @@ class TreeSession(
     }
 
     override fun onBus(type: String, json: String) {
-        val body = runCatching {
-            ApiJson.parseToJsonElement(json).jsonObject
+        val data =
+            try {
+                helperEventData(type, json)
+            } catch (e: SerializationException) {
+                Log.w(TAG, "Dropped a malformed $type event from the helper", e)
+                return
+            }
+        if (data == null) {
+            Log.w(TAG, "Dropped an unknown $type event from the helper")
+            return
         }
-            .getOrDefault(JsonObject(emptyMap()))
-        bus.emit(type, body)
+        bus.emit(type, data)
     }
 
     override fun onIme(json: String) {
@@ -208,3 +220,14 @@ class TreeSession(
     private inline fun <reified T> decode(body: String): T =
         ApiJson.decodeFromString(serializer<T>(), body)
 }
+
+/** Decodes an event the helper sent, or returns null for a type the helper does not send. */
+private fun helperEventData(type: String, json: String): EventData? =
+    when (type) {
+        EventTypes.UI_CHANGED -> ApiJson.decodeFromString(UiChangedData.serializer(), json)
+        EventTypes.WINDOW_CHANGED -> ApiJson.decodeFromString(WindowChangedData.serializer(), json)
+        EventTypes.TOAST -> ApiJson.decodeFromString(ToastData.serializer(), json)
+        else -> null
+    }
+
+private const val TAG = "PhoneApiHelper"

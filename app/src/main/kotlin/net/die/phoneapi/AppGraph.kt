@@ -12,8 +12,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
 import net.die.phoneapi.apps.AppsServiceImpl
 import net.die.phoneapi.apps.RESUMED_ACTIVITY_ARGS
 import net.die.phoneapi.apps.resumedPackage
@@ -62,6 +60,7 @@ import net.die.phoneapi.model.EventTypes
 import net.die.phoneapi.model.HelperStatus
 import net.die.phoneapi.model.KeyRequest
 import net.die.phoneapi.model.ScreenState
+import net.die.phoneapi.model.ScreenTakenData
 import net.die.phoneapi.power.PinStore
 import net.die.phoneapi.power.PowerServiceImpl
 import net.die.phoneapi.server.ApiServer
@@ -359,13 +358,7 @@ class AppGraph(
 
     private fun tookScreen(session: String, pkg: String) {
         Log.w(TAG, "MCP session $session brought $pkg forward without holding the screen")
-        bus.emit(
-            EventTypes.SCREEN_TAKEN,
-            buildJsonObject {
-                put("session", session)
-                put("package", pkg)
-            },
-        )
+        bus.emit(EventTypes.SCREEN_TAKEN, ScreenTakenData(session, pkg))
     }
 
     @Suppress("MissingUseCall") // BrowserServiceImpl closes each socket it opens.

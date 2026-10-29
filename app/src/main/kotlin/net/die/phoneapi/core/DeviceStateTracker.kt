@@ -11,10 +11,9 @@ import android.view.Display
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
 import net.die.phoneapi.model.DeviceStateSummary
 import net.die.phoneapi.model.EventTypes
+import net.die.phoneapi.model.ImeData
 import net.die.phoneapi.model.ImeState
 import net.die.phoneapi.model.KeyguardState
 import net.die.phoneapi.model.ScreenState
@@ -78,15 +77,13 @@ class DeviceStateTracker(private val context: Context, private val bus: EventBus
         if (prev.visible != next.visible) {
             bus.emit(
                 if (next.visible) EventTypes.IME_SHOWN else EventTypes.IME_HIDDEN,
-                buildJsonObject {
-                    next.packageName?.let { put("package", it) }
-                    next.bounds?.let {
-                        put("left", it.left)
-                        put("top", it.top)
-                        put("right", it.right)
-                        put("bottom", it.bottom)
-                    }
-                },
+                ImeData(
+                    packageName = next.packageName,
+                    left = next.bounds?.left,
+                    top = next.bounds?.top,
+                    right = next.bounds?.right,
+                    bottom = next.bounds?.bottom,
+                ),
             )
         }
     }

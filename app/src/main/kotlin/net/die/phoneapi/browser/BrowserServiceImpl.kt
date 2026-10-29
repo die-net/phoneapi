@@ -13,7 +13,6 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.JsonArray
@@ -44,6 +43,7 @@ import net.die.phoneapi.model.BrowserTarget
 import net.die.phoneapi.model.BrowserTextRequest
 import net.die.phoneapi.model.ConsoleRequest
 import net.die.phoneapi.model.ConsoleResult
+import net.die.phoneapi.model.DevtoolsSocketInfo
 import net.die.phoneapi.model.EvalRequest
 import net.die.phoneapi.model.EvalResult
 import net.die.phoneapi.model.KeyRequest
@@ -144,7 +144,7 @@ internal class BrowserServiceImpl(
         return found
     }
 
-    private suspend fun queryTargets(sockets: List<HelperSocket>): List<BrowserTarget> =
+    private suspend fun queryTargets(sockets: List<DevtoolsSocketInfo>): List<BrowserTarget> =
         coroutineScope {
             val results = sockets.map { socket -> async { listQuietly(socket) } }.awaitAll()
             val out = ArrayList<BrowserTarget>()
@@ -165,7 +165,7 @@ internal class BrowserServiceImpl(
             out
         }
 
-    private suspend fun listQuietly(socket: HelperSocket): SocketList =
+    private suspend fun listQuietly(socket: DevtoolsSocketInfo): SocketList =
         try {
             SocketList.Ready(listOne(socket))
         } catch (e: CancellationException) {
@@ -495,7 +495,7 @@ internal class BrowserServiceImpl(
         return pkg?.let { inFront(it) }
     }
 
-    private suspend fun listOne(socket: HelperSocket): List<BrowserTarget> {
+    private suspend fun listOne(socket: DevtoolsSocketInfo): List<BrowserTarget> {
         if (socket.name != CHROME_SOCKET) {
             return listJsonTargets(
                 devtools = withContext(io) { open(socket.name) },
@@ -681,7 +681,7 @@ internal class BrowserServiceImpl(
         )
     }
 
-    private fun browserPackage(socket: HelperSocket?, name: String): String? =
+    private fun browserPackage(socket: DevtoolsSocketInfo?, name: String): String? =
         socket?.packageName ?: if (name == CHROME_SOCKET) CHROME_PACKAGE else null
 
     private suspend fun <T> useSocket(
@@ -689,7 +689,7 @@ internal class BrowserServiceImpl(
         block: suspend (InputStream, OutputStream) -> T,
     ): T = withContext(io) { open(name).use { socket -> socket.withStreams(block) } }
 
-    private suspend fun socketList(): List<HelperSocket> =
+    private suspend fun socketList(): List<DevtoolsSocketInfo> =
         withContext(io) {
             val json =
                 try {
@@ -698,7 +698,7 @@ internal class BrowserServiceImpl(
                     throw ApiException.helperDropped(e)
                 }
             try {
-                ApiJson.decodeFromString(serializer<List<HelperSocket>>(), json)
+                ApiJson.decodeFromString(serializer<List<DevtoolsSocketInfo>>(), json)
             } catch (e: SerializationException) {
                 throw ApiException(
                     503,
@@ -774,13 +774,6 @@ private fun nodeRef(ref: String): String {
     }
     return trimmed
 }
-
-@Serializable
-private data class HelperSocket(
-    val name: String,
-    val pid: Int? = null,
-    @SerialName("package") val packageName: String? = null,
-)
 
 @Serializable private data class CreatedTarget(val targetId: String? = null)
 

@@ -399,3 +399,15 @@ public data class BrowserFindResult(
     val repeats: Int = 0,
     @Doc(RELOADED_DOC) val reloaded: Boolean = false,
 )
+
+/**
+ * One DevTools socket from the helper's `listDevtoolsSockets` reply. [pid], [uid], and
+ * [packageName] are missing when the helper could not find the socket's owner.
+ */
+@Serializable
+public data class DevtoolsSocketInfo(
+    val name: String,
+    val pid: Int? = null,
+    val uid: Int? = null,
+    @SerialName("package") val packageName: String? = null,
+)

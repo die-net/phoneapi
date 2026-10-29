@@ -1,6 +1,5 @@
 package net.die.phoneapi.helperclient
 
-import kotlinx.serialization.json.jsonPrimitive
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Test
@@ -17,8 +16,6 @@ class ThreadtimeLogTest {
         assertEquals("I", line.level)
         assertEquals("PhoneApiSmoke", line.tag)
         assertEquals("hello-colon:test", line.message)
-        assertEquals("hello-colon:test", line.json()["message"]!!.jsonPrimitive.content)
-        assertEquals("PhoneApiSmoke", line.json()["tag"]!!.jsonPrimitive.content)
     }
 
     @Test

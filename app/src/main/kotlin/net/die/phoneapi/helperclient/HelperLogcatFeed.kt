@@ -59,7 +59,7 @@ internal class HelperLogcatFeed(
             while (currentCoroutineContext().isActive) {
                 val line = reader.readLine() ?: return
                 val parsed = ThreadtimeLog.parse(line) ?: continue
-                emit(bus.next(EventTypes.LOGCAT, parsed.json()))
+                emit(bus.next(EventTypes.LOGCAT, parsed))
             }
         }
     }

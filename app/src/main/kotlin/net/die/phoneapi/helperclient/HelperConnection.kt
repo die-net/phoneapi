@@ -7,14 +7,13 @@ import java.util.concurrent.CopyOnWriteArrayList
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
 import net.die.phoneapi.core.EventBus
 import net.die.phoneapi.helper.IHelper
 import net.die.phoneapi.helper.Registration
 import net.die.phoneapi.model.ApiException
 import net.die.phoneapi.model.EventTypes
 import net.die.phoneapi.model.HelperStatus
+import net.die.phoneapi.model.HelperStatusData
 
 /** Holds the helper's Binder once it registers, and tracks its liveness. */
 class HelperConnection(private val bus: EventBus, private val idleStatus: HelperStatus) {
@@ -164,7 +163,7 @@ class HelperConnection(private val bus: EventBus, private val idleStatus: Helper
         if (helper != null && next != HelperStatus.RUNNING) return
         if (statusFlow.value == next) return
         statusFlow.value = next
-        bus.emit(EventTypes.HELPER_STATUS, buildJsonObject { put("status", next.name.lowercase()) })
+        bus.emit(EventTypes.HELPER_STATUS, HelperStatusData(next))
     }
 
     private companion object {

@@ -16,6 +16,8 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
+import kotlinx.serialization.builtins.ListSerializer
+import net.die.phoneapi.model.DevtoolsSocketInfo
 
 /** Abstract-namespace sockets, which is where Chrome publishes its DevTools endpoint. */
 internal object AbstractSockets {
@@ -158,14 +160,14 @@ internal object AbstractSockets {
         val entries =
             parseDevtoolsSockets(table).map { socket ->
                 val owner = ownerOf(socket.inode)
-                DevtoolsEntry(
+                DevtoolsSocketInfo(
                     name = socket.name,
                     pid = owner?.pid,
                     uid = owner?.uid,
                     packageName = owner?.packageName,
                 )
             }
-        return devtoolsJson(entries)
+        return HelperJson.encodeToString(ListSerializer(DevtoolsSocketInfo.serializer()), entries)
     }
 
     private fun ownerOf(inode: Long): Owner? {
