@@ -13,12 +13,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.SerializationException
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.serializer
+import net.die.phoneapi.helper.HelperJson
 import net.die.phoneapi.helper.ITreeClient
 import net.die.phoneapi.model.ActionResult
 import net.die.phoneapi.model.ApiException
+import net.die.phoneapi.model.EventData
 import net.die.phoneapi.model.FindRequest
 import net.die.phoneapi.model.ImeState
 import net.die.phoneapi.model.NodeSelector
@@ -34,16 +34,12 @@ import net.die.phoneapi.model.TreeSetTextCall
 import net.die.phoneapi.model.TreeSnapshotCall
 import net.die.phoneapi.model.TreeTitleCall
 import net.die.phoneapi.model.TreeTouchCall
+import net.die.phoneapi.model.encodeEventData
 
 /** UI tree for the shell helper. Live nodes stay in this process. */
 @Suppress("InjectDispatcher") // The helper process has no app graph to inject a dispatcher from.
 internal class TreeHost(private val client: () -> ITreeClient?) {
-    private val json = Json {
-        ignoreUnknownKeys = true
-        encodeDefaults = true
-        explicitNulls = false
-        classDiscriminator = "type"
-    }
+    private val json = HelperJson
     private val screen = Rect(0, 0, 1, 1)
     private var imePackage: String? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -352,8 +348,9 @@ internal class TreeHost(private val client: () -> ITreeClient?) {
         private var ime = ImeState(visible = false)
         private var foreground: String? = null
 
-        override fun emit(type: String, body: JsonObject) {
-            notify { it.onBus(type, body.toString()) }
+        override fun emit(type: String, data: EventData) {
+            val body = json.encodeEventData(data).toString()
+            notify { it.onBus(type, body) }
         }
 
         override fun setIme(state: ImeState) {

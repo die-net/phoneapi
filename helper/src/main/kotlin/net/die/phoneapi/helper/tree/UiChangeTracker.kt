@@ -18,14 +18,13 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
+import net.die.phoneapi.model.EventData
 import net.die.phoneapi.model.EventTypes
 import net.die.phoneapi.model.ImeState
 import net.die.phoneapi.model.Rect as ModelRect
+import net.die.phoneapi.model.ToastData
+import net.die.phoneapi.model.UiChangedData
+import net.die.phoneapi.model.WindowChangedData
 
 data class WindowChange(
     val windowId: Int,
@@ -40,7 +39,7 @@ data class WindowChange(
  * queries run on [dispatcher].
  */
 interface UiSink {
-    fun emit(type: String, body: JsonObject)
+    fun emit(type: String, data: EventData)
 
     fun setIme(state: ImeState)
 
@@ -120,10 +119,7 @@ class UiChangeTracker(
     private fun toast(event: AccessibilityEvent, pkg: String?) {
         sink.emit(
             EventTypes.TOAST,
-            buildJsonObject {
-                put("text", event.text.joinToString(" "))
-                pkg?.let { put("package", it) }
-            },
+            ToastData(text = event.text.joinToString(" "), packageName = pkg),
         )
     }
 
@@ -131,13 +127,13 @@ class UiChangeTracker(
         val title = event.text.joinToString(" ").takeIf { it.isNotBlank() }
         sink.emit(
             EventTypes.WINDOW_CHANGED,
-            buildJsonObject {
-                put("windowId", event.windowId)
-                pkg?.let { put("package", it) }
-                title?.let { put("title", it) }
-                event.className?.let { put("className", it.toString()) }
-                put("changes", JsonArray(listOf(JsonPrimitive("state"))))
-            },
+            WindowChangedData(
+                windowId = event.windowId,
+                packageName = pkg,
+                title = title,
+                className = event.className?.toString(),
+                changes = listOf("state"),
+            ),
         )
     }
 
@@ -150,10 +146,7 @@ class UiChangeTracker(
             lastUiChangedMs = SystemClock.uptimeMillis()
             sink.emit(
                 EventTypes.UI_CHANGED,
-                buildJsonObject {
-                    put("seq", seqFlow.value)
-                    lastPackage?.let { put("package", it) }
-                },
+                UiChangedData(seq = seqFlow.value, packageName = lastPackage),
             )
         }
     }
@@ -228,12 +221,12 @@ class UiChangeTracker(
         windowChangeFlow.tryEmit(change)
         sink.emit(
             EventTypes.WINDOW_CHANGED,
-            buildJsonObject {
-                put("windowId", id)
-                change.packageName?.let { put("package", it) }
-                change.title?.let { put("title", it) }
-                put("changes", JsonArray(names.map(::JsonPrimitive)))
-            },
+            WindowChangedData(
+                windowId = id,
+                packageName = change.packageName,
+                title = change.title,
+                changes = names,
+            ),
         )
     }
 
