@@ -41,6 +41,8 @@ internal class WaitServiceImpl(
     private val io: CoroutineDispatcher,
     private val browser: BrowserService,
     private val openDevtools: suspend (String, Long) -> DevtoolsSocket,
+    /** Whether Chrome shows a dialog from a page at this host, for `browser.dialog`. */
+    private val dialogFrom: suspend (String) -> Boolean = { false },
 ) : WaitService {
     private data class Outcome(
         val matched: Boolean,
@@ -56,7 +58,7 @@ internal class WaitServiceImpl(
         // underneath a long wait.
         prepare(false)
         val browserWatch =
-            BrowserWatch(browser, io, openDevtools).takeIf {
+            BrowserWatch(browser, io, openDevtools, dialogFrom).takeIf {
                 (request.all + request.any).any(::isBrowserCondition)
             }
         val watchers =

@@ -15,6 +15,7 @@ import io.ktor.http.contentType
 import io.ktor.server.testing.testApplication
 import kotlinx.coroutines.delay
 import net.die.phoneapi.model.Scope
+import net.die.phoneapi.server.FAILING_SELECTOR
 import net.die.phoneapi.server.FakeApi
 import net.die.phoneapi.server.apiClient
 import net.die.phoneapi.server.bearer
@@ -118,6 +119,20 @@ class McpLeaseTest {
             http.delete("/mcp") { headers(first) }
             settle { api.tabStore.ids.isEmpty() }
             assertEquals(emptySet<String>(), api.tabStore.ids)
+        }
+    }
+
+    @Test
+    fun `failed url read names its tab`() = testApplication {
+        application { phoneApiModule(api.services) }
+        apiClient().use { http ->
+            val session = initialize(http)
+            val url = """"url":"https://example.com/","selector":"$FAILING_SELECTOR""""
+            val kept = call(http, session, "browser_read", "{$url}")
+            assertTrue(kept.contains("still open as target=chrome_devtools_remote~t"), kept)
+            val closed = call(http, session, "browser_read", """{$url,"close":true}""")
+            assertTrue(closed.contains("The page went away"), closed)
+            assertFalse(closed.contains("still open"), closed)
         }
     }
 

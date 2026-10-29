@@ -16,24 +16,38 @@ internal object ContentFrame {
     fun find(windows: List<AccessibilityWindowInfo>, packageName: String): Rect {
         val wanted = packageName.takeIf { it.isNotEmpty() }
         var best: AndroidRect? = null
+        var shown = false
         for (window in windows) {
             val root = ownedRoot(window, wanted) ?: continue
+            shown = true
             try {
                 best = larger(best, search(root))
             } finally {
                 NodeCompat.recycle(root)
             }
         }
-        val found =
-            best
-                ?: throw ApiException(
-                    409,
-                    "content_unavailable",
-                    "The page is not on screen. The browser has to be in the foreground; a " +
-                        "background tab has no box to tap.",
-                )
+        val found = best ?: throw unavailable(shown)
         return Rect(found.left, found.top, found.right, found.bottom)
     }
+
+    /**
+     * Why there is no page to tap. When the browser has a window on screen but none shows the page,
+     * something of its own covers it. A dialog such as Chrome's for a download is a window of its
+     * own, and while it is up, no window shows the page's view as visible.
+     */
+    private fun unavailable(shown: Boolean): ApiException =
+        ApiException(
+            409,
+            "content_unavailable",
+            if (shown) {
+                "The browser is in front but is not showing the page: a dialog, a menu, or the " +
+                    "tab switcher covers it. ui_snapshot shows what is there; tap one of its " +
+                    "buttons to dismiss it."
+            } else {
+                "The page is not on screen. The browser has to be in the foreground; a " +
+                    "background tab has no box to tap."
+            },
+        )
 
     private fun ownedRoot(
         window: AccessibilityWindowInfo,

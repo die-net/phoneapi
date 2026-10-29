@@ -25,13 +25,42 @@ internal suspend fun evaluateIn(
     return evaluateInFrame(cdp, frameId, expression, awaitPromise)
 }
 
-/** [evaluateIn] for a caller that already has the main frame's id. */
+/**
+ * [evaluateIn] for a caller that already has the main frame's id. A world belongs to one document,
+ * so when the page loads a new one between making the world and running in it, Chrome no longer has
+ * the world and [expression] has not run. It then runs once more, in a world on the new document.
+ */
 internal suspend fun evaluateInFrame(
     cdp: CdpSession,
     frameId: String,
     expression: String,
     awaitPromise: Boolean,
-): EvalResult = evaluateInWorld(cdp, isolatedWorld(cdp, frameId), expression, awaitPromise)
+): EvalResult {
+    try {
+        return evaluateInWorld(cdp, isolatedWorld(cdp, frameId), expression, awaitPromise)
+    } catch (e: ApiException) {
+        if (!worldGone(e)) throw e
+    }
+    try {
+        return evaluateInWorld(cdp, isolatedWorld(cdp, frameId), expression, awaitPromise)
+    } catch (e: ApiException) {
+        if (!worldGone(e)) throw e
+        throw ApiException(
+            502,
+            "cdp_error",
+            "The page loaded a new document while it was read, twice. Wait for it to settle, " +
+                "then try again.",
+            cause = e,
+        )
+    }
+}
+
+/**
+ * Whether Chrome refused to run in a world because its document has gone. Chrome checks this before
+ * running anything, so the expression did not run.
+ */
+private fun worldGone(e: ApiException): Boolean =
+    e.error == "cdp_error" && e.message.orEmpty().contains(NO_CONTEXT, ignoreCase = true)
 
 /** A new isolated world on the page's main frame, by its execution context id. */
 internal suspend fun isolatedWorld(cdp: CdpSession): Int {
@@ -115,3 +144,6 @@ private data class ExceptionObject(
 )
 
 private const val ISOLATED_WORLD = "phoneapi"
+
+/** Chrome's error when a Runtime call names an execution context that no longer exists. */
+private const val NO_CONTEXT = "Cannot find context with specified id"

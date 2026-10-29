@@ -373,6 +373,8 @@ private class DataBlobs(private val list: List<DataBlobText>) {
         val first = segments[0]
         val roots = if (first == "*") list else listOfNotNull(list.firstOrNull { it.name == first })
         if (roots.isEmpty()) return noBlob(first)
+        // A response that cannot be read is the page's doing, not a mistake in the path.
+        roots.singleOrNull()?.missing?.let { throw ApiException(BAD_GATEWAY, "page_error", it) }
         val walk = PathWalk(segments, visit)
         for (blob in roots) {
             val text = blob.text
@@ -534,14 +536,17 @@ private fun describe(scan: JsonScan, value: Int): String =
 private fun describeArray(scan: JsonScan, value: Int): String {
     var first = -1
     var n = 0
+    var mixed = false
     scan.items(value) { index, kid ->
         if (index == 0) first = kid
+        else if (!mixed) mixed = scan.kindName(kid) != scan.kindName(first)
         n++
         true
     }
     if (n == 0) return "array, empty"
-    val shape =
-        "array of ${plural(n, scan.kindName(first))}, ${dataSize(scan.compactLength(value))}"
+    // An array whose items differ, such as [91, [...]], is named by none of them.
+    val kind = if (mixed) "item" else scan.kindName(first)
+    val shape = "array of ${plural(n, kind)}, ${dataSize(scan.compactLength(value))}"
     if (scan.text[first] != '{') return shape
     return "$shape; the first has ${keysOf(scan, first, FIRST_KEYS)}"
 }

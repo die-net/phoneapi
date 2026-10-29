@@ -2,6 +2,8 @@ package net.die.phoneapi.wait
 
 import android.os.SystemClock
 import java.io.IOException
+import java.net.URI
+import java.net.URISyntaxException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -36,6 +38,8 @@ internal class BrowserWatch(
     private val browser: BrowserService,
     private val io: CoroutineDispatcher,
     private val openDevtools: suspend (String, Long) -> DevtoolsSocket,
+    /** Whether Chrome shows a dialog from a page at this host, such as `example.com:8080`. */
+    private val dialogFrom: suspend (String) -> Boolean = { false },
 ) {
     private val signals =
         MutableSharedFlow<Unit>(
@@ -172,9 +176,41 @@ internal class BrowserWatch(
             if (event.method == "DOM.documentUpdated") page.forgetDocument()
             signals.tryEmit(Unit)
         }
-        enable(session, domainsFor(conditions.filter { onPage(it, id) }))
-        seed(session, model)
+        val onThisPage = conditions.filter { onPage(it, id) }
+        val domains = domainsFor(onThisPage)
+        if (onThisPage.any { it is WaitCondition.BrowserDialog } && dialogShown(id)) {
+            // A page showing a dialog answers nothing, Page.enable included, until the dialog
+            // goes, and Chrome reports no dialog that opened before Page was enabled. So the
+            // dialog counts from the screen, and the page is set up once it answers.
+            model.dialogShown()
+            jobs +=
+                CoroutineScope(currentCoroutineContext()).launch {
+                    try {
+                        enable(session, domains)
+                        seed(session, model)
+                    } catch (_: ApiException) {
+                        // The page went away; the dialog already counts, and other conditions
+                        // on this page have no events to match.
+                    }
+                }
+        } else {
+            enable(session, domains)
+            seed(session, model)
+        }
         pages[id] = page
+    }
+
+    /** Whether Chrome shows a dialog from the page [id] is on, by the host its title names. */
+    private suspend fun dialogShown(id: String): Boolean {
+        val url = browser.targets().firstOrNull { it.id == id }?.url ?: return false
+        val uri =
+            try {
+                URI(url)
+            } catch (_: URISyntaxException) {
+                return false
+            }
+        val host = uri.host ?: return false
+        return dialogFrom(if (uri.port < 0) host else "$host:${uri.port}")
     }
 
     @Suppress("MissingUseCall") // The watch closes every socket it opened.

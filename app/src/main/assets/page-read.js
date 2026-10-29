@@ -295,7 +295,8 @@ const related = relations();
 
 return {
   title: document.title || null,
-  url: location.href,
+  // Chrome's own error page is at chrome-error://, but its navigation still names the URL that failed.
+  url: location.protocol === "chrome-error:" && nav ? nav.name : location.href,
   readyState: document.readyState,
   visibility: document.visibilityState,
   pending: pagePending(),

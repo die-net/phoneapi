@@ -85,7 +85,7 @@ Compact text looks like `[e12] button "Sign in"`. When anything is left out, the
 
 `POST /v1/wait` body `WaitRequest`: `all` and/or `any` lists of conditions, `timeoutMs` (default 10000), optional `settleMs`, optional fresh `snapshot` / `snapshotFormat` in the result, cut and masked by `snapshotOptions` (`windowId`, `maxDepth`, `maxNodes`, `maxChars`, `textOnly`, `redact`, as for the snapshot above). MCP `wait_for` takes those as `window`, `maxNodes` (default 400), `maxChars`, `textOnly`, and `redact` (default `true`), and `screenshot` adds a PNG to the result, so one call waits for an action's result and shows it.
 
-Condition `type` values include `node`, `window`, `ime`, `idle`, `screen`, `keyguard`, and `browser.url`, `browser.lifecycle`, `browser.networkIdle`, `browser.element`, `browser.request`, `browser.dialog`, `browser.newTarget`, `browser.log`, `browser.settled`. Browser conditions need the **browser** scope.
+Condition `type` values include `node`, `window`, `ime`, `idle`, `screen`, `keyguard`, and `browser.url`, `browser.lifecycle`, `browser.networkIdle`, `browser.element`, `browser.request`, `browser.dialog`, `browser.newTarget`, `browser.log`, `browser.settled`. Browser conditions need the **browser** scope. A page showing a dialog answers DevTools nothing until it is dismissed, and Chrome reports only dialogs that open during the wait, so `browser.dialog` counts one already open by finding it on screen: Chrome's dialog whose title names the page's host.
 
 ### Events
 
@@ -123,7 +123,7 @@ Authenticated errors are JSON:
 | 409 | `gesture_cancelled` | The system cancelled an injected touch |
 | 409 | `offscreen` | The node or element has no box on screen |
 | 409 | `obscured` | Something, such as the keyboard, covers the node. `force` taps the part that shows |
-| 409 | `content_unavailable` | A `touch` tap on a page that is not on screen |
+| 409 | `content_unavailable` | A `touch` tap on a page that is not on screen, or that a dialog, menu, or the tab switcher of the browser covers. Also a call to a page that timed out while Chrome shows a page's dialog, such as an alert, which holds the page until someone dismisses it |
 | 409 | `not_visible` | `cdp` touch input into a tab that is not on screen; Chrome holds it until the tab shows |
 | 409 | `intent_failed` | Android could not start the intent for another reason; the message has its output |
 | 409 | `stop_failed` / `clear_failed` | `am force-stop` or `pm clear` failed; the message has its output |
@@ -142,8 +142,8 @@ Authenticated errors are JSON:
 | 429 | `too_many_sessions` | `initialize` or `POST /v1/sessions` past 16 sessions for the token or 32 in all |
 | 500 | `internal` | Unexpected failure |
 | 500 | `pin_store_failed` | The PIN could not be encrypted or saved |
-| 502 | `cdp_error` | Chrome's DevTools socket closed or answered with an error |
-| 502 | `page_error` | The page-reading script failed or returned nothing |
+| 502 | `cdp_error` | Chrome's DevTools socket closed or answered with an error. Also a read whose page loaded a new document twice while it ran |
+| 502 | `page_error` | The page-reading script failed or returned nothing, or a recorded response cannot be read: it is not JSON, or Chrome no longer has its body |
 | 502 | `stream_error` | The helper stopped during video or audio capture |
 | 503 | `helper_unavailable` | Helper down or dropped; message may say starting / needs pairing / needs USB / stopped |
 | 503 | `helper_error` | A helper call, or a shell command it ran, failed; the message has its output |
@@ -259,8 +259,8 @@ Numbers keep the digits the page wrote. A read takes at most 2,000,000 character
 
 Many pages fetch their data after they load, or when a person taps something. `capture` records those responses so `scope` `data` can read them: `POST /v1/browser/targets/{id}/capture`, or MCP's `browser_capture`, starts it on a tab. To record a page's load, open the tab with `capture` true, or start recording before navigating. A `browser_read` or `browser_find` with `url` and `scope` `data` records for you.
 
-- Every response the page fetches with a JSON content type is listed after the embedded blobs, as `response-1`, `response-2`, and so on in the order they finished, with its URL as the source and its length in bytes. A status outside 200 to 299 is added to the source. Paths, `*`, `paths`, outlines, and `find` work on them as on any blob.
-- A body is fetched from Chrome only when a read wants it. A body behind a prefix such as `)]}'` that keeps it from loading as a script reads without the prefix. One that is not JSON is listed with the reason.
+- Every response the page fetches with a JSON content type, whatever its request method, is listed after the embedded blobs, as `response-1`, `response-2`, and so on in the order they finished, with its URL as the source and its length in bytes. A status outside 200 to 299 is added to the source. Paths, `*`, `paths`, outlines, and `find` work on them as on any blob.
+- A body is fetched from Chrome only when a read wants it. A body behind a prefix such as `)]}'` that keeps it from loading as a script reads without the prefix. A body of several JSON values one after another, as in NDJSON or a chunked reply that puts each chunk's length on a line before it, reads as an array of those values, lengths included. One that does not parse as JSON is listed with the reason, and a read of it fails with `page_error`.
 - Chrome holds the bodies in the page's renderer, at most 2,000,000 bytes for one response and 4,000,000 for all of them, dropping the oldest first. A body it no longer has is listed with that reason. When the page loads another document, the earlier responses go. The latest 50 are kept.
 - Recording lasts until `on` is false, the tab closes, or 10 minutes pass without a start or a data read. It also stops when a session claims a tab someone else was recording, and when a session gives a claimed tab back, so no one reads what another client recorded.
 - Recording enables DevTools' Network domain on the tab. A page cannot see that from script, but Chrome does a little more work for each request while it is on.
@@ -323,7 +323,7 @@ Run `phoneapi server` and point a Streamable HTTP client at `http://127.0.0.1:<p
 | `swipe` | control | From/to or direction inside selector |
 | `type_text` | control | `mode` auto / keyboard / keyevent / setText |
 | `press_key` | control | Key names |
-| `clipboard_read` / `clipboard_write` | control | The clipboard's text, or its image as image content (up to 1.5 MB) on a read. `copy` presses `KEYCODE_COPY` first; `paste` presses `KEYCODE_PASTE` after. Writes take text only (needs helper) |
+| `clipboard_read` / `clipboard_write` | control | The clipboard's text, or its image as image content (up to 1.5 MB) on a read. `copy` presses `KEYCODE_COPY` first, which copies what is selected on screen in the app in front; `paste` presses `KEYCODE_PASTE` after. Writes take text only (needs helper) |
 | `wait_for` | observe | Same conditions as `/v1/wait`. `snapshot` adds a capped, masked outline and `screenshot` a PNG. `target` names the tab for browser conditions that name none |
 | `keyboard_hide` / `keyboard_show` | control | Soft keyboard |
 | `app_launch` / `app_stop` / `app_clear` | control | Package control (`stop`/`clear` need helper) |
@@ -334,7 +334,7 @@ Run `phoneapi server` and point a Streamable HTTP client at `http://127.0.0.1:<p
 | `browser_snapshot` | browser | AX outline |
 | `browser_tap` / `browser_swipe` / `browser_gesture` | browser | Pointer input. `input` `auto` (default), `touch`, `cdp`, or `cdp-mouse` (tap only) |
 | `browser_key` / `browser_type` | browser | Key presses and typing. `cdp` stays on a background tab; device keys such as HOME need `touch` |
-| `browser_read` | browser | Page text as markdown, sliced by `offset` and `maxChars` (default 8000), or `outline` for headings with offsets. `scope` `article` (default, via Readability) or `page`, or a CSS `selector`, which reads every match. `version` returns only the header, `unchanged`, when the content has not changed. The header names the page's `paywall`, `feeds`, `next` page, `canonical` URL, and embedded `data`. `scope` `data` reads that JSON by `path` or `paths`, as under [Embedded data](#embedded-data). `url` opens a new tab and reads it in one call, and `close` closes the tab afterwards. With `scope` `data`, a tab it opens records its responses, and the `# opened` line says `recording`. A tab that is not on screen is not drawn, so content that loads when drawn may be missing: the header says `hidden` and lists `pending` signs, and `show` brings the tab forward first |
+| `browser_read` | browser | Page text as markdown, sliced by `offset` and `maxChars` (default 8000), or `outline` for headings with offsets. `scope` `article` (default, via Readability) or `page`, or a CSS `selector`, which reads every match. `version` returns only the header, `unchanged`, when the content has not changed. The header names the page's `paywall`, `feeds`, `next` page, `canonical` URL, and embedded `data`. `scope` `data` reads that JSON by `path` or `paths`, as under [Embedded data](#embedded-data). `url` opens a new tab and reads it in one call, and `close` closes the tab afterwards. When such a read fails and the tab stays open, the error names it. On Chrome's own error page, the header shows the URL that failed, not `chrome-error://`. With `scope` `data`, a tab it opens records its responses, and the `# opened` line says `recording`. A tab that is not on screen is not drawn, so content that loads when drawn may be missing: the header says `hidden` and lists `pending` signs, and `show` brings the tab forward first |
 | `browser_find` | browser | `kind` `text` (matches with context and nearest heading) or `links` (text, URL, same-origin, each URL once), at offsets `browser_read` takes. `queries` searches for up to 20 things at once. A result cut at `limit` says to raise it, up to 200, or at 200 to narrow the search. With `scope` `data`, it searches the embedded JSON, within `path` when given, and each match shows its path. `url` and `close` as for `browser_read` |
 | `browser_capture` | browser | Start (`on` true, the default) or stop recording a tab's JSON responses, which `browser_read` with `scope` `data` then lists as `response-1`, `response-2`, and so on. See [Recorded responses](#recorded-responses). `browser_open` takes `capture` to record from the start of the load |
 | `browser_eval` / `browser_console` | browser | JS and logs |

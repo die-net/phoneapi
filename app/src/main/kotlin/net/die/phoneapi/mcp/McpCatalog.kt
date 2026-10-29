@@ -198,7 +198,7 @@ private val TOOLS: List<McpTool> =
         McpTool(
             name = "clipboard_read",
             description =
-                "Read the phone's clipboard as text, with its MIME types, or as an image when it holds one. copy true presses KEYCODE_COPY first, so the focused app copies its selection, and changed says whether the clipboard changed. The clipboard is the phone user's and can hold a password (sensitive true): read it only for the task at hand. Uses the screen. Requires the shell helper.",
+                "Read the phone's clipboard as text, with its MIME types, or as an image when it holds one. copy true presses KEYCODE_COPY first, so the app in front copies what is selected on screen, and changed says whether the clipboard changed. A selection made by script in a background tab is not on screen, so it is not copied. The clipboard is the phone user's and can hold a password (sensitive true): read it only for the task at hand. Uses the screen. Requires the shell helper.",
             scope = Scope.CONTROL,
             available = Capabilities::clipboard,
             arguments = serializer<ClipboardReadRequest>(),
@@ -457,7 +457,7 @@ private val TOOLS: List<McpTool> =
         McpTool(
             name = "browser_capture",
             description =
-                "Record the JSON responses a tab's page fetches, such as the data a page loads after it appears or when you tap something. Turn it on before the action, then browser_read with scope data lists each response as response-1, response-2, and so on, which paths read like any other blob. Recording lasts until on false, the tab closes, or 10 minutes pass without a read. To record a page's load, browser_open with capture true, or call this before browser_navigate. browser_read with url and scope data records for you. Chrome keeps the last 4 MB of what the page loads, so on a busy page read soon after the action.",
+                "Record the JSON responses a tab's page fetches, such as the data a page loads after it appears or when you tap something. A response counts when its content type says JSON, whatever its request method. Turn it on before the action, then browser_read with scope data lists each response as response-1, response-2, and so on, which paths read like any other blob. A body of several JSON values one after another reads as an array of them. A body that does not parse as JSON is listed with the reason, but cannot be read. Recording lasts until on false, the tab closes, or 10 minutes pass without a data read or a call to this. To record a page's load, browser_open with capture true, or call this before browser_navigate. browser_read with url and scope data records for you. Chrome keeps the last 4 MB of what the page loads, so on a busy page read soon after the action.",
             scope = Scope.BROWSER,
             available = Capabilities::browserCdp,
             arguments = serializer<BrowserCaptureArgs>(),

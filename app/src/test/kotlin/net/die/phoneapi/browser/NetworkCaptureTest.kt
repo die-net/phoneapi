@@ -88,6 +88,15 @@ class NetworkCaptureTest {
     }
 
     @Test
+    fun `reads values in a row`() {
+        assertEquals("""[{"a":1},{"b":2}]""", jsonText(lines("""{"a":1}""", """{"b":2}""")))
+        // A chunked reply puts each chunk's length on a line before it.
+        val chunked = lines(")]}'", "", "17", """[["rpc","[1]"]]""", "9", """[["e",4]]""")
+        assertEquals("""[17,[["rpc","[1]"]],9,[["e",4]]]""", jsonText(chunked))
+        assertNull(jsonText(lines("""{"a":1}""", """{"b" 2}""")))
+    }
+
+    @Test
     fun `reads recorded bodies`() = runBlocking {
         val encoded = Base64.getEncoder().encodeToString("""{"b":2}""".toByteArray())
         val page =
@@ -118,7 +127,7 @@ class NetworkCaptureTest {
         val blobs = capture.blobs(TAB, null, DATA_BUDGET)
         assertEquals("""{"a":1}""", blobs[0].text)
         assertEquals("""{"b":2}""", blobs[1].text)
-        assertEquals("response-3 is not JSON", blobs[2].missing)
+        assertTrue(blobs[2].missing.orEmpty().startsWith("response-3 does not parse as JSON"))
         assertTrue(blobs[3].missing.orEmpty().startsWith("Chrome no longer has the body"))
         // Scripted replies can arrive before a command is written, so wait for the writes.
         withTimeout(WAIT_MS) {
@@ -240,6 +249,8 @@ class NetworkCaptureTest {
         cdp.open("/devtools/page/t")
         return PageLink(cdp, page)
     }
+
+    private fun lines(vararg rows: String) = rows.joinToString("\n", postfix = "\n")
 
     private fun reply(id: Int, result: String) =
         harness.serverTextFrame("""{"id":$id,"result":$result}""")

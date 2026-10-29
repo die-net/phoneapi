@@ -7,6 +7,7 @@ import io.ktor.websocket.Frame
 import io.ktor.websocket.readBytes
 import io.ktor.websocket.readText
 import kotlin.time.Duration.Companion.seconds
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.Json
@@ -69,6 +70,31 @@ class ViewerSocketTest {
         settle { api.services.lease.holds(agent) }
         assertTrue(api.services.lease.holds(agent))
         assertEquals(0, api.cleanups)
+    }
+
+    @Test
+    fun `a take while closing is quiet`() = testApplication {
+        application { phoneApiModule(api.services) }
+        val told = CompletableDeferred<Unit>()
+        // Another viewer takes the screen after the stream has ended but before the socket has.
+        api.afterPointer = {
+            api.services.lease.takeOver(Holder.Viewer(-1))
+            told.await()
+        }
+        apiClient().use { client ->
+            withTimeout(5.seconds) {
+                client.webSocket("/v1/input/pointer", { bearer(secret) }) {
+                    lease(this)
+                    send(Frame.Text("""{"op":"down","id":0,"x":1,"y":2,"tMs":0}"""))
+                    assertEquals("you", lease(this).holder())
+                    send(Frame.Text("not json"))
+                    assertEquals("person", lease(this).holder())
+                    told.complete(Unit)
+                }
+                val seen = api.pointerSessions.receive()
+                assertEquals(listOf(PointerOp.DOWN), seen.map { it.op })
+            }
+        }
     }
 
     @Test

@@ -4,6 +4,7 @@ import kotlinx.coroutines.runBlocking
 import net.die.phoneapi.model.ActionResult
 import net.die.phoneapi.model.ApiException
 import net.die.phoneapi.model.BrowserInput
+import net.die.phoneapi.model.BrowserReadRequest
 import net.die.phoneapi.model.BrowserSwipeRequest
 import net.die.phoneapi.model.BrowserTapRequest
 import net.die.phoneapi.model.EvalRequest
@@ -151,5 +152,31 @@ class BrowserInputModeTest {
                 }
             }
         assertEquals("cdp_timeout", error.error)
+    }
+
+    @Test
+    @Suppress("MissingUseCall") // The service closes each socket it opens.
+    fun `a dialog explains a timeout`() {
+        var opens = 0
+        val service =
+            harness.service(
+                byteArrayOf(),
+                sockets = BrowserServiceTest.CHROME,
+                open = {
+                    opens++
+                    BrowserServiceTest.ScriptedSocket(harness.switched(), timedOut = true)
+                },
+                pageDialog = { true },
+            )
+        val error =
+            assertThrows(ApiException::class.java) {
+                runBlocking {
+                    service.read("chrome_devtools_remote~abc", BrowserReadRequest())
+                }
+            }
+        assertEquals("content_unavailable", error.error)
+        assertTrue(error.message.orEmpty().contains("tap one of its buttons"))
+        // A read is retried on a timeout, but not while a dialog holds the page.
+        assertEquals(1, opens)
     }
 }

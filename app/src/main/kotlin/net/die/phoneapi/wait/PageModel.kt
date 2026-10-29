@@ -67,6 +67,9 @@ internal class PageModel(startedMs: Long) {
 
     fun dialogOpen(): Boolean = synchronized(lock) { dialog }
 
+    /** Counts a dialog seen on screen, which opened before Chrome would report it. */
+    fun dialogShown() = synchronized(lock) { dialog = true }
+
     fun networkIdle(maxInflight: Int, quietMs: Long, now: Long): Check =
         synchronized(lock) { quiet(inflight <= maxInflight, lastNetMs, quietMs, now) }
 
