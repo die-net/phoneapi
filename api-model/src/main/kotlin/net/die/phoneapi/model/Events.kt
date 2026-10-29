@@ -5,6 +5,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.serializer
 
 /** Streamed over `WS /v1/events` as one JSON object per text frame. */
 @Serializable
@@ -100,14 +101,18 @@ public data class ScreenTakenData(
     @SerialName("package") val packageName: String,
 ) : EventData
 
-/** Encodes [data] as its own class, which is what an [Event]'s `data` holds. */
+/**
+ * Encodes [data] as its own class, which is what an [Event]'s `data` holds. It uses
+ * `serializer<T>()` because detekt can't see the `serializer()` the plugin generates in this
+ * module.
+ */
 public fun Json.encodeEventData(data: EventData): JsonObject =
     when (data) {
-        is UiChangedData -> encodeToJsonElement(UiChangedData.serializer(), data)
-        is WindowChangedData -> encodeToJsonElement(WindowChangedData.serializer(), data)
-        is ImeData -> encodeToJsonElement(ImeData.serializer(), data)
-        is ToastData -> encodeToJsonElement(ToastData.serializer(), data)
-        is LogcatLine -> encodeToJsonElement(LogcatLine.serializer(), data)
-        is HelperStatusData -> encodeToJsonElement(HelperStatusData.serializer(), data)
-        is ScreenTakenData -> encodeToJsonElement(ScreenTakenData.serializer(), data)
+        is UiChangedData -> encodeToJsonElement(serializer<UiChangedData>(), data)
+        is WindowChangedData -> encodeToJsonElement(serializer<WindowChangedData>(), data)
+        is ImeData -> encodeToJsonElement(serializer<ImeData>(), data)
+        is ToastData -> encodeToJsonElement(serializer<ToastData>(), data)
+        is LogcatLine -> encodeToJsonElement(serializer<LogcatLine>(), data)
+        is HelperStatusData -> encodeToJsonElement(serializer<HelperStatusData>(), data)
+        is ScreenTakenData -> encodeToJsonElement(serializer<ScreenTakenData>(), data)
     }.jsonObject

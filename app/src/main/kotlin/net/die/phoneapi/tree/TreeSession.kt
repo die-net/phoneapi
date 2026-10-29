@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.serializer
@@ -182,12 +183,15 @@ class TreeSession(
     }
 
     private fun rpc(op: String, body: String): String {
+        val proxy = helper.require()
         val raw =
             try {
-                helper.require().tree(op, envelope(body))
+                proxy.tree(op, envelope(body))
             } catch (e: RemoteException) {
                 throw ApiException.helperDropped(e)
-            } catch (e: IllegalStateException) {
+            } catch (
+                // Binder rethrows whatever the helper threw, and any of it is the helper's fault.
+                @Suppress("TooGenericExceptionCaught") e: RuntimeException) {
                 throw ApiException(
                     503,
                     "helper_error",
@@ -195,15 +199,7 @@ class TreeSession(
                     cause = e,
                 )
             } ?: throw ApiException.helperDropped()
-        val result = ApiJson.decodeFromString(TreeResult.serializer(), raw)
-        if (result.status != 200) {
-            throw ApiException(
-                result.status,
-                result.error ?: "tree_failed",
-                result.message,
-            )
-        }
-        return result.body ?: "{}"
+        return treeReplyBody(raw)
     }
 
     private fun envelope(body: String): String {
@@ -217,9 +213,33 @@ class TreeSession(
     private inline fun <reified T> encode(value: T): String =
         ApiJson.encodeToString(serializer<T>(), value)
 
-    private inline fun <reified T> decode(body: String): T =
-        ApiJson.decodeFromString(serializer<T>(), body)
+    private inline fun <reified T> decode(body: String): T = decodeHelperJson(serializer<T>(), body)
 }
+
+/** The body of the helper's tree [reply], or the error it reports. */
+internal fun treeReplyBody(reply: String): String {
+    val result = decodeHelperJson(TreeResult.serializer(), reply)
+    if (result.status != 200) {
+        throw ApiException(result.status, result.error ?: "tree_failed", result.message)
+    }
+    return result.body ?: "{}"
+}
+
+/**
+ * Decodes JSON the helper sent. JSON that does not parse is the helper's fault, so it is a 503
+ * `helper_error`, not the caller's `bad_request`.
+ */
+internal fun <T> decodeHelperJson(deserializer: DeserializationStrategy<T>, json: String): T =
+    try {
+        ApiJson.decodeFromString(deserializer, json)
+    } catch (e: SerializationException) {
+        throw ApiException(
+            503,
+            "helper_error",
+            "The helper sent a reply that does not parse",
+            cause = e,
+        )
+    }
 
 /** Decodes an event the helper sent, or returns null for a type the helper does not send. */
 private fun helperEventData(type: String, json: String): EventData? =

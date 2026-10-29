@@ -120,11 +120,11 @@ private fun videoSpec(call: ApplicationCall): VideoSpec =
 
 /**
  * Close reason text is at most 123 bytes, so a long codec message has to be cut on a UTF-8
- * boundary. Logging is best-effort: `android.util.Log` throws in JVM unit tests.
+ * boundary.
  */
 private suspend fun failVideo(session: DefaultWebSocketServerSession, error: ApiException) {
     session.close(CloseReason(CloseReason.Codes.INTERNAL_ERROR, closeReasonText(error.message)))
-    runCatching { Log.w(TAG, "video stream failed", error) }
+    Log.w(TAG, "video stream failed", error)
 }
 
 private fun closeReasonText(message: String?): String {
