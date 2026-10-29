@@ -35,7 +35,7 @@ phoneapi server
 phoneapi helper
 ```
 
-`phoneapi` targets the release package (`net.die.phoneapi`) and stores pairing state in `~/.config/phoneapi/pairing.json` (or `$XDG_CONFIG_HOME/phoneapi`). Override with `PHONEAPI_PKG` or `PAPI_PAIRING` if needed. `pair` writes the pairing file and does not print the token. `server` forwards the on-device API to localhost; run it again if the tunnel drops.
+`phoneapi` targets the release package (`net.die.phoneapi`) and stores pairing state in `~/.config/phoneapi/pairing.json` (or `$XDG_CONFIG_HOME/phoneapi`). Override the package with `PHONEAPI_PKG`, the directory that holds the pairing and session files with `PHONEAPI_STATE`, or the pairing file alone with `PAPI_PAIRING`. `pair` writes the pairing file and does not print the token. `server` forwards the on-device API to localhost; run it again if the tunnel drops.
 
 Open PhoneAPI for screen reading and taps, wireless debugging, and the computers that have access. That switch starts the helper and shuts it down. On Android 11 and newer the same screen can turn Wireless Debugging on and pair it. You can remove a computer's access there at any time.
 
@@ -74,7 +74,7 @@ Launch it once from the computer:
 phoneapi helper
 ```
 
-The process detaches, so the command returns while the helper keeps running. That USB start does not survive a reboot; run it again after reboot, or start the listener and helper over Wireless Debugging. On Android 11+, after pairing Wireless Debugging once, the app restarts the helper itself after a crash or a package update while its process is running. Turning the helper switch off shuts that process down and leaves it stopped until the switch is turned on again. A successful launch leaves Wireless Debugging on, because that connection is also how the browser API reaches Chrome. The optional `WRITE_SECURE_SETTINGS` grant lets the app flip that switch; without it, turn Wireless Debugging on in Developer options when it drops (for example after reboot).
+`phoneapi helper <package>` starts it for another install, such as a debug build. The process detaches, so the command returns while the helper keeps running. That USB start does not survive a reboot; run it again after reboot, or start the listener and helper over Wireless Debugging. On Android 11+, after pairing Wireless Debugging once, the app restarts the helper itself after a crash or a package update while its process is running. Turning the helper switch off shuts that process down and leaves it stopped until the switch is turned on again. A successful launch leaves Wireless Debugging on, because that connection is also how the browser API reaches Chrome. The optional `WRITE_SECURE_SETTINGS` grant lets the app flip that switch; without it, turn Wireless Debugging on in Developer options when it drops (for example after reboot).
 
 On Android 10, browser calls use a USB tunnel instead. `phoneapi helper` sets that up.
 

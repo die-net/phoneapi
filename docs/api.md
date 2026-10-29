@@ -110,11 +110,23 @@ Authenticated errors are JSON:
 | Status | `error` | Typical cause |
 | --- | --- | --- |
 | 400 | `bad_request` | Bad JSON, enum, or query |
-| 403 | `forbidden` | Missing scope |
-| 404 | `not_found` | Unknown id/ref (authenticated) |
+| 403 | `forbidden` | Missing scope. Also an intent Android refused, or an activity that is not exported |
+| 404 | `not_found` | Unknown id, tab, session, or package (authenticated), or nothing handles an intent |
+| 404 | `stale_ref` | A UI node ref no longer points at a node; take a new snapshot |
 | 404 | *(empty body)* | Missing/invalid Bearer |
-| 409 | `needs_user` / `no_keyboard` / … | Unlock or typing cannot proceed automatically |
-| 428 | `session_required` | A REST call that needs a session came without `Mcp-Session-Id`; start one with `POST /v1/sessions` |
+| 409 | `needs_user` | Unlock needs a person: no stored PIN, no keypad found, or the PIN was rejected |
+| 409 | `no_keyboard` | `mode` `keyboard` and no on-screen keyboard keys were found |
+| 409 | `no_editor` | Setting text with no text field focused |
+| 409 | `wake_failed` | The screen did not turn on |
+| 409 | `lock_failed` | The helper could not lock the screen |
+| 409 | `key_failed` | The helper did not deliver the key |
+| 409 | `gesture_cancelled` | The system cancelled an injected touch |
+| 409 | `offscreen` | The node or element has no box on screen |
+| 409 | `obscured` | Something, such as the keyboard, covers the node. `force` taps the part that shows |
+| 409 | `content_unavailable` | A `touch` tap on a page that is not on screen |
+| 409 | `not_visible` | `cdp` touch input into a tab that is not on screen; Chrome holds it until the tab shows |
+| 409 | `intent_failed` | Android could not start the intent for another reason; the message has its output |
+| 409 | `stop_failed` / `clear_failed` | `am force-stop` or `pm clear` failed; the message has its output |
 | 409 | `screen_busy` | Someone else held the screen for the whole 60 s wait |
 | 409 | `screen_taken` | A person in the viewer took the screen from this session |
 | 409 | `tab_limit` | A session has 4 tabs it opened, or all sessions 8 |
@@ -124,10 +136,24 @@ Authenticated errors are JSON:
 | 409 | `session_conflict` | A screen call while the session that started the caller with `session_start`, or one the caller started, holds the screen |
 | 409 | `clipboard_unreadable` | The helper could not read the clipboard's image from the app that copied it |
 | 413 | `too_large` | A clipboard image over 20 MB, sent or on the clipboard |
-| 503 | `browser_frozen` | Android froze Chrome in the background, so nothing in it answers |
+| 422 | `unsupported_char` | Text the on-screen keyboard cannot type; use `mode` `setText` or `keyevent` |
+| 422 | `unsupported` | An action this Android release lacks, such as the IME enter action before Android 11 |
+| 428 | `session_required` | A REST call that needs a session came without `Mcp-Session-Id`; start one with `POST /v1/sessions` |
 | 429 | `too_many_sessions` | `initialize` or `POST /v1/sessions` past 16 sessions for the token or 32 in all |
-| 503 | `helper_unavailable` | Helper down or dropped; message may say starting / needs pairing / needs USB / stopped |
 | 500 | `internal` | Unexpected failure |
+| 500 | `pin_store_failed` | The PIN could not be encrypted or saved |
+| 502 | `cdp_error` | Chrome's DevTools socket closed or answered with an error |
+| 502 | `page_error` | The page-reading script failed or returned nothing |
+| 502 | `stream_error` | The helper stopped during video or audio capture |
+| 503 | `helper_unavailable` | Helper down or dropped; message may say starting / needs pairing / needs USB / stopped |
+| 503 | `helper_error` | A helper call, or a shell command it ran, failed; the message has its output |
+| 503 | `browser_unavailable` | No DevTools socket: Chrome is not running or not publishing one |
+| 503 | `browser_frozen` | Android froze Chrome in the background, so nothing in it answers |
+| 503 | `cdp_error` | DevTools cannot be reached: wireless debugging is not paired, or Android 10 has no USB tunnel |
+| 503 | `cdp_timeout` | DevTools did not answer in time |
+| 503 | `screenshot_failed` | The helper did not return a PNG, for example with the screen off |
+| 503 | `stream_error` | Display mirroring could not start |
+| 503 | `audio_error` | Audio capture could not start; it needs Android 11 or later and the helper |
 
 ## REST
 
@@ -281,7 +307,8 @@ Run `phoneapi server` and point a Streamable HTTP client at `http://127.0.0.1:<p
 | `device_wake` / `device_unlock` / `device_lock` | control | Power / keyguard |
 | `device_orientation` | control | Auto-rotate, or lock the screen to the current or a named rotation |
 | `browser_targets` / `browser_open` / `browser_navigate` / `browser_close` | browser | Tab list, navigation, and closing a tab |
-| `browser_snapshot` / `browser_tap` / `browser_swipe` / `browser_gesture` | browser | AX outline and pointer input. `input` `auto` (default), `touch`, `cdp`, or `cdp-mouse` (tap only) |
+| `browser_snapshot` | browser | AX outline |
+| `browser_tap` / `browser_swipe` / `browser_gesture` | browser | Pointer input. `input` `auto` (default), `touch`, `cdp`, or `cdp-mouse` (tap only) |
 | `browser_key` / `browser_type` | browser | Key presses and typing. `cdp` stays on a background tab; device keys such as HOME need `touch` |
 | `browser_read` | browser | Page text as markdown, sliced by `offset` and `maxChars` (default 8000), or `outline` for headings with offsets. `scope` `article` (default, via Readability) or `page`, or a CSS `selector`. `url` opens a new tab and reads it in one call, and `close` closes the tab afterwards. A tab that is not on screen is not drawn, so content that loads when drawn may be missing: the header says `hidden` and lists `pending` signs, and `show` brings the tab forward first |
 | `browser_find` | browser | `kind` `text` (matches with context and nearest heading) or `links` (text, URL, same-origin, each URL once), at offsets `browser_read` takes. `queries` searches for up to 20 things at once. `url` and `close` as for `browser_read` |
