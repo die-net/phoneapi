@@ -3,6 +3,7 @@ package net.die.phoneapi.mcp
 import net.die.phoneapi.model.BrowserFindResult
 import net.die.phoneapi.model.BrowserReadResult
 import net.die.phoneapi.model.BrowserSnapshot
+import net.die.phoneapi.model.DataBlob
 import net.die.phoneapi.model.FeedLink
 import net.die.phoneapi.model.PageHeading
 import net.die.phoneapi.model.PageLink
@@ -202,6 +203,52 @@ class McpReadingTest {
         assertEquals(
             "# article content, chars 0-8 of 120, version 0badf00d (changed); nextOffset=8",
             readText(read.copy(changed = true)).lines()[1],
+        )
+    }
+
+    @Test
+    fun `read names the data blobs`() {
+        val blobs = List(7) { DataBlob("blob$it", "script#blob$it", 900 + it * 5_000) }
+        assertEquals(
+            "# data: 7 embedded JSON blobs: blob0 900 chars, blob1 5.9k chars, blob2 10k chars, " +
+                "blob3 15k chars, blob4 20k chars, and 2 more; read with scope data",
+            readText(read.copy(data = blobs)).lines()[1],
+        )
+        assertEquals(
+            "# data: the response is JSON, 1.2M chars; read it with scope data, path response",
+            readText(read.copy(data = listOf(DataBlob("response", "the response", 1_234_567))))
+                .lines()[1],
+        )
+    }
+
+    @Test
+    fun `data read names what it read`() {
+        val data = read.copy(extracted = "data", values = 2, content = "a: 1\nb: 2\n")
+        assertEquals(
+            "# 2 values at a/*, chars 0-8 of 120, version 0badf00d; nextOffset=8",
+            readText(data, label = "2 values at a/*").lines()[1],
+        )
+    }
+
+    @Test
+    fun `data find shows match paths`() {
+        val found =
+            BrowserFindResult(
+                extracted = "data",
+                version = "1",
+                totalChars = 50,
+                total = 1,
+                matches = listOf(TextMatch(7, null, "\"", "gate", "\": 1", path = "b/x/gate")),
+            )
+        assertEquals(
+            listOf(
+                "#",
+                "# 1 matches in data; showing 1. Each match shows its path, and @ is its offset " +
+                    "into the JSON browser_read returns for that blob, or for find's path when " +
+                    "one was given",
+                """@7 at b/x/gate: …"«gate»": 1…""",
+            ),
+            matchesText(found).lines(),
         )
     }
 

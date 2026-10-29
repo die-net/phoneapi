@@ -48,7 +48,6 @@ import net.die.phoneapi.model.EvalRequest
 import net.die.phoneapi.model.EvalResult
 import net.die.phoneapi.model.KeyRequest
 import net.die.phoneapi.model.Point
-import net.die.phoneapi.model.ReadScope
 import net.die.phoneapi.model.Rect
 import net.die.phoneapi.model.TextRequest
 import net.die.phoneapi.model.TimedPoint
@@ -91,8 +90,10 @@ internal class BrowserServiceImpl(
     private val invalidateSnapshots: () -> Unit = {},
     private val showPackage: suspend (String) -> Unit = {},
     private val inFront: suspend (String) -> Boolean = { true },
-    /** Readability.js, page-pending.js, then page-read.js. */
-    private val pageScript: suspend () -> String = { "" },
+    /** Readability.js, page-pending.js, page-data.js, then page-read.js. */
+    pageScript: suspend () -> String = { "" },
+    /** page-data.js, for reads and finds with scope data. */
+    dataScript: suspend () -> String = { "" },
     /** page-pending.js, for snapshots. */
     private val pendingScript: suspend () -> String = { "" },
     private val devtoolsGap: (BrowserGap) -> String = { gap ->
@@ -114,7 +115,17 @@ internal class BrowserServiceImpl(
             },
         )
     }
-    @Volatile private var pageSource: String? = null
+    private val reader =
+        PageReader(pageScript, dataScript) { id, expression ->
+            val (socket, chromeId) = parseBrowserTargetId(id)
+            var reloaded = false
+            val result =
+                usePage(socket, chromeId, repeatable = true) { cdp ->
+                    reloaded = probe?.revive(cdp, socket, reading = true) == true || reloaded
+                    evaluateIn(cdp, expression, awaitPromise = false)
+                }
+            Evaluated(result, reloaded)
+        }
     @Volatile private var stateSource: String? = null
     private val pageInput: PageInput by lazy {
         PageInput(
@@ -380,14 +391,11 @@ internal class BrowserServiceImpl(
     override suspend fun read(id: String, request: BrowserReadRequest): BrowserReadResult {
         checkRead(request)
         if (request.show) show(id)
-        val extract = extractPage(id, request.scope, request.selector)
-        val socket = parseBrowserTargetId(id).first
-        return readPage(extract, request)
-            .copy(
-                shown = drawn(socket, extract.visibility),
-                reloaded = extract.reloaded,
-                timersStopped = timers?.stalled(id) == true,
-            )
+        val (result, visibility) = reader.read(id, request)
+        return result.copy(
+            shown = drawn(parseBrowserTargetId(id).first, visibility),
+            timersStopped = timers?.stalled(id) == true,
+        )
     }
 
     override suspend fun timersStalled(id: String): Boolean =
@@ -397,20 +405,7 @@ internal class BrowserServiceImpl(
 
     override suspend fun find(id: String, request: BrowserFindRequest): BrowserFindResult {
         checkFind(request)
-        return findWithFallback(request) { scope -> extractPage(id, scope, request.selector) }
-    }
-
-    private suspend fun extractPage(id: String, scope: ReadScope, selector: String?): PageExtract {
-        val script =
-            readScript(pageSource ?: pageScript().also { pageSource = it }, scope, selector)
-        val (socket, chromeId) = parseBrowserTargetId(id)
-        var reloaded = false
-        val result =
-            usePage(socket, chromeId, repeatable = true) { cdp ->
-                reloaded = probe?.revive(cdp, socket, reading = true) == true || reloaded
-                evaluateIn(cdp, script, awaitPromise = false)
-            }
-        return decodeExtract(result, selector).copy(reloaded = reloaded)
+        return reader.find(id, request)
     }
 
     override suspend fun console(id: String, request: ConsoleRequest): ConsoleResult {

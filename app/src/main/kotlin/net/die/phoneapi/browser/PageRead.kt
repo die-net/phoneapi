@@ -14,6 +14,7 @@ import net.die.phoneapi.model.BrowserFindRequest
 import net.die.phoneapi.model.BrowserFindResult
 import net.die.phoneapi.model.BrowserReadRequest
 import net.die.phoneapi.model.BrowserReadResult
+import net.die.phoneapi.model.DataBlob
 import net.die.phoneapi.model.EvalResult
 import net.die.phoneapi.model.FeedLink
 import net.die.phoneapi.model.FindKind
@@ -48,6 +49,7 @@ internal data class PageExtract(
     val feeds: List<FeedLink> = emptyList(),
     val next: String? = null,
     val canonical: String? = null,
+    val data: List<DataBlob> = emptyList(),
     val pageChars: Int = 0,
     val links: Int = 0,
     val tables: Int = 0,
@@ -243,6 +245,7 @@ internal fun checkRead(request: BrowserReadRequest) {
         throw ApiException.badRequest("maxChars must be 1 to $MAX_READ_CHARS")
     }
     checkSelector(request.selector)
+    checkDataRead(request)
 }
 
 internal fun checkFind(request: BrowserFindRequest) {
@@ -265,6 +268,7 @@ internal fun checkFind(request: BrowserFindRequest) {
         }
     }
     checkSelector(request.selector)
+    checkDataFind(request)
 }
 
 private fun checkSelector(selector: String?) {
@@ -321,6 +325,7 @@ internal fun readPage(extract: PageExtract, request: BrowserReadRequest): Browse
             feeds = extract.feeds,
             next = extract.next,
             canonical = extract.canonical,
+            data = extract.data,
             pending = extract.pending,
             extracted = extract.extracted,
             selected = extract.selected,
@@ -353,7 +358,7 @@ internal fun readPage(extract: PageExtract, request: BrowserReadRequest): Browse
  * Where a slice of up to [maxChars] from [start] should end: at the last line break in its second
  * half, else the last space there, else at [maxChars], never inside a surrogate pair.
  */
-internal fun cutPoint(text: String, start: Int, maxChars: Int): Int {
+internal fun cutPoint(text: CharSequence, start: Int, maxChars: Int): Int {
     val limit = start + maxChars
     if (limit >= text.length) return text.length
     val floor = start + maxChars / 2
@@ -427,32 +432,52 @@ private fun findText(
 }
 
 /** How many times [query] is in [page], and the first `limit` of them with context. */
-@Suppress("SwallowedException") // The error message says what is wrong with the pattern.
 private fun textMatches(
     page: RenderedPage,
     query: String,
     request: BrowserFindRequest,
+): Pair<Int, List<TextMatch>> =
+    matchesIn(
+        page.text,
+        page.headings,
+        queryPattern(query, request.regex),
+        request.contextChars,
+        request.limit,
+    )
+
+/** [query] as the pattern a find looks for: as written with [regex], else literally. */
+@Suppress("SwallowedException") // The error message says what is wrong with the pattern.
+internal fun queryPattern(query: String, regex: Boolean): Regex =
+    try {
+        Regex(if (regex) query else Regex.escape(query), RegexOption.IGNORE_CASE)
+    } catch (e: IllegalArgumentException) {
+        throw ApiException.badRequest(
+            "query is not a valid regular expression: ${e.message.orEmpty()}"
+        )
+    }
+
+/**
+ * How many times [pattern] matches [text], and the first [limit] matches with [contextChars] of
+ * context on each side and the nearest of [headings] before each.
+ */
+internal fun matchesIn(
+    text: CharSequence,
+    headings: List<PageHeading>,
+    pattern: Regex,
+    contextChars: Int,
+    limit: Int,
 ): Pair<Int, List<TextMatch>> {
-    val pattern =
-        try {
-            Regex(if (request.regex) query else Regex.escape(query), RegexOption.IGNORE_CASE)
-        } catch (e: IllegalArgumentException) {
-            throw ApiException.badRequest(
-                "query is not a valid regular expression: ${e.message.orEmpty()}"
-            )
-        }
-    val text = page.text
     val hits = pattern.findAll(text).filter { !it.range.isEmpty() }.take(MAX_COUNTED).toList()
     val matches =
-        hits.take(request.limit).map { hit ->
+        hits.take(limit).map { hit ->
             val start = hit.range.first
             val end = hit.range.last + 1
             TextMatch(
                 offset = start,
-                heading = page.headings.lastOrNull { it.offset <= start }?.text,
-                before = text.substring((start - request.contextChars).coerceAtLeast(0), start),
+                heading = headings.lastOrNull { it.offset <= start }?.text,
+                before = text.substring((start - contextChars).coerceAtLeast(0), start),
                 match = hit.value,
-                after = text.substring(end, (end + request.contextChars).coerceAtMost(text.length)),
+                after = text.substring(end, (end + contextChars).coerceAtMost(text.length)),
             )
         }
     return hits.size to matches

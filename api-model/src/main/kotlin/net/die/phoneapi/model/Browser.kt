@@ -220,6 +220,8 @@ public enum class ReadScope {
     @SerialName("article") ARTICLE,
     /** All visible text on the page. */
     @SerialName("page") PAGE,
+    /** The JSON the page embeds for its scripts, or the response itself when it is JSON. */
+    @SerialName("data") DATA,
 }
 
 @Serializable
@@ -229,7 +231,26 @@ public enum class ReadFormat {
 }
 
 public const val READ_SCOPE_DOC: String =
-    "article (default) is the main content, without navigation, footers, and ads, and falls back to page when no article is found. page is all visible text."
+    "article (default) is the main content, without navigation, footers, and ads, and falls back to page when no article is found. page is all visible text. data is the JSON the page embeds for its scripts, such as __NEXT_DATA__, JSON-LD, or window.__INITIAL_STATE__, or the response itself when it is JSON."
+
+public const val DATA_PATH_DOC: String =
+    "With scope data, what to read: a blob name from the outline, then a JSON Pointer into it, such as __NEXT_DATA__/props/pageProps/flight. Array items are numbered from 0, and a / or ~ in a key is written ~1 or ~0. A * segment matches every item or key at its level, so __NEXT_DATA__/props/pageProps/items/*/name reads every item's name, one per line. Omit path and paths for the outline of every blob."
+
+public const val DATA_PATHS_DOC: String =
+    "With scope data, up to 20 paths to read in one call, each written as in path, * allowed. Each value comes back on its own line as path: value, with objects and arrays as compact JSON."
+
+/** The most paths one data read takes. */
+public const val MAX_DATA_PATHS: Int = 20
+
+/** A piece of JSON a page holds, which scope data reads. */
+@Serializable
+public data class DataBlob(
+    @Doc("What a path starts with to read it, such as __NEXT_DATA__, ld+json-1, or response.")
+    val name: String,
+    @Doc("Where it was found, such as script#__NEXT_DATA__ or window.__INITIAL_STATE__.")
+    val source: String,
+    @Doc("Length of its JSON text.") val chars: Int,
+)
 
 public const val READ_SELECTOR_DOC: String =
     "CSS selector to read instead of scope, such as a table or an article body. Every match is read, in page order."
@@ -269,6 +290,8 @@ public data class BrowserReadRequest(
     @Doc(READ_MAX_CHARS_DOC) val maxChars: Int = 8_000,
     @Doc(SHOW_DOC) val show: Boolean = false,
     @Doc(READ_VERSION_DOC) val version: String? = null,
+    @Doc(DATA_PATH_DOC) val path: String? = null,
+    @Doc(DATA_PATHS_DOC) val paths: List<String> = emptyList(),
 )
 
 public const val READ_MAX_CHARS_DOC: String =
@@ -311,6 +334,8 @@ public data class BrowserReadResult(
     @Doc("The next page, when the page links to one with rel=next.") val next: String? = null,
     @Doc("The page's canonical URL, when it names one that differs from its own.")
     val canonical: String? = null,
+    @Doc("The JSON the page embeds, which scope data reads.")
+    val data: List<DataBlob> = emptyList(),
     @Doc(PENDING_DOC) val pending: List<String> = emptyList(),
     @Doc(SHOWN_DOC) val shown: Boolean? = null,
     @Doc(RELOADED_DOC) val reloaded: Boolean = false,
@@ -338,6 +363,8 @@ public data class BrowserReadResult(
     @Doc("Links on the whole page.") val links: Int = 0,
     @Doc("Tables on the whole page.") val tables: Int = 0,
     @Doc("Forms on the whole page.") val forms: Int = 0,
+    @Doc("With a path containing * or with paths, how many values were read.")
+    val values: Int? = null,
 )
 
 /** What [BrowserFindRequest] looks for. */
@@ -372,7 +399,11 @@ public data class BrowserFindRequest(
     val contextChars: Int = 150,
     @Doc("Most results, 1 to 200, for each query when there are several. Defaults to 10.")
     val limit: Int = 10,
+    @Doc(FIND_PATH_DOC) val path: String? = null,
 )
+
+public const val FIND_PATH_DOC: String =
+    "With scope data, search only this part of the JSON, named as in browser_read's path, * allowed. Omit it to search every blob."
 
 public const val FIND_QUERY_DOC: String =
     "For text, what to find: a plain substring that ignores case, so gate also matches navigate; use regex with \\bgate\\b for whole words. text needs query or queries. For links, text the link must contain."
@@ -397,6 +428,10 @@ public data class TextMatch(
     val before: String,
     val match: String,
     val after: String,
+    @Doc(
+        "With scope data, the path of the match's line. The offset is into that blob as browser_read renders it, or into find's path when one was given."
+    )
+    val path: String? = null,
 )
 
 @Serializable
