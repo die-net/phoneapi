@@ -1,8 +1,9 @@
 package net.die.phoneapi.stream
 
 import kotlin.math.max
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
+import net.die.phoneapi.core.ApiJson
+import net.die.phoneapi.model.AudioHeader
+import net.die.phoneapi.model.VideoHeader
 
 internal const val FRAME_CONFIG = 1
 internal const val FRAME_KEY = 2
@@ -27,14 +28,11 @@ internal const val MAX_BIT_RATE = 20_000_000
 internal const val DEFAULT_BIT_RATE = 4_000_000
 
 /** Text frame sent on the video socket before binary frames, and again when the size changes. */
-internal fun videoHeader(width: Int, height: Int, spec: VideoSpec): String = buildJsonObject {
-    put("codec", "avc")
-    put("width", width)
-    put("height", height)
-    put("fps", spec.fps)
-    put("bitRate", spec.bitRate)
-}
-    .toString()
+internal fun videoHeader(width: Int, height: Int, spec: VideoSpec): String =
+    ApiJson.encodeToString(
+        VideoHeader.serializer(),
+        VideoHeader("avc", width, height, spec.fps, spec.bitRate),
+    )
 
 private val AOPUS_MAGIC = "AOPUSHDR".encodeToByteArray()
 private const val AOPUS_HEADER = 16
@@ -57,12 +55,8 @@ internal fun audioCodecDescription(data: ByteArray): ByteArray {
 }
 
 /** Text frame sent once on the audio socket before binary frames. */
-internal fun audioHeader(codec: String, sampleRate: Int, channels: Int): String = buildJsonObject {
-    put("codec", codec)
-    put("sampleRate", sampleRate)
-    put("channels", channels)
-}
-    .toString()
+internal fun audioHeader(codec: String, sampleRate: Int, channels: Int): String =
+    ApiJson.encodeToString(AudioHeader.serializer(), AudioHeader(codec, sampleRate, channels))
 
 /**
  * One binary websocket frame: type byte, big-endian presentation timestamp in microseconds, then
