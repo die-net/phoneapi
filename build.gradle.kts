@@ -8,16 +8,17 @@ plugins {
     alias(libs.plugins.dependency.analysis)
 }
 
+// Targets are anchored to each project's sources. A "**/" glob with targetExclude("**/build/**")
+// makes Spotless list every file under every build directory to subtract them, which races
+// compile tasks writing there, and it also reaches nested checkouts such as git worktrees.
 spotless {
     val ktfmtVersion = libs.versions.ktfmt.get()
     kotlin {
-        target("**/*.kt")
-        targetExclude("**/build/**")
+        target("*/src/**/*.kt", "build-logic/*/src/**/*.kt")
         ktfmt(ktfmtVersion).kotlinlangStyle()
     }
     kotlinGradle {
-        target("**/*.gradle.kts")
-        targetExclude("**/build/**")
+        target("*.gradle.kts", "*/*.gradle.kts", "build-logic/*/*.gradle.kts")
         ktfmt(ktfmtVersion).kotlinlangStyle()
     }
 }
