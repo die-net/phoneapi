@@ -104,6 +104,15 @@ private fun operation(endpoint: ApiEndpoint, schemas: JsonSchemas): JsonObject =
             },
         )
     }
+    endpoint.requestContentType?.let { type ->
+        put(
+            "requestBody",
+            buildJsonObject {
+                put("required", true)
+                put("content", rawContent(type))
+            },
+        )
+    }
     put("responses", responses(endpoint, schemas))
 }
 
@@ -126,20 +135,22 @@ private fun responseContent(endpoint: ApiEndpoint, schemas: JsonSchemas): JsonOb
     val body = endpoint.response
     if (body != null) return jsonContent(schemas.schema(body.descriptor))
     val contentType = endpoint.responseContentType ?: return null
-    return buildJsonObject {
-        put(
-            contentType,
-            buildJsonObject {
-                put(
-                    "schema",
-                    buildJsonObject {
-                        put("type", "string")
-                        put("contentMediaType", contentType)
-                    },
-                )
-            },
-        )
-    }
+    return rawContent(contentType)
+}
+
+private fun rawContent(contentType: String): JsonObject = buildJsonObject {
+    put(
+        contentType,
+        buildJsonObject {
+            put(
+                "schema",
+                buildJsonObject {
+                    put("type", "string")
+                    put("contentMediaType", contentType)
+                },
+            )
+        },
+    )
 }
 
 private fun jsonContent(schema: JsonObject): JsonObject = buildJsonObject {

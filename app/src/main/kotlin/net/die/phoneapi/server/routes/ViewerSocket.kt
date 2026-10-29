@@ -2,6 +2,7 @@ package net.die.phoneapi.server.routes
 
 import io.ktor.server.websocket.DefaultWebSocketServerSession
 import io.ktor.websocket.Frame
+import io.ktor.websocket.readBytes
 import io.ktor.websocket.readText
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.cancellation.CancellationException
@@ -23,6 +24,8 @@ import net.die.phoneapi.core.ApiJson
 import net.die.phoneapi.lease.Holder
 import net.die.phoneapi.lease.LeaseState
 import net.die.phoneapi.model.ApiException
+import net.die.phoneapi.model.ClipboardReadRequest
+import net.die.phoneapi.model.ClipboardWriteRequest
 import net.die.phoneapi.model.KeyRequest
 import net.die.phoneapi.model.OrientationRequest
 import net.die.phoneapi.model.PointerFrame
@@ -79,18 +82,25 @@ private class ViewerSocket(
 
     private suspend fun read() {
         for (frame in session.incoming) {
-            if (frame !is Frame.Text) continue
-            val message =
-                try {
-                    ApiJson.parseToJsonElement(frame.readText()).jsonObject
-                } catch (_: SerializationException) {
-                    return
-                } catch (_: IllegalArgumentException) {
-                    return
-                }
-            if (!handle(message)) return
+            when (frame) {
+                is Frame.Binary -> pasteImage(frame.readBytes())
+                is Frame.Text -> if (!handle(parse(frame) ?: return)) return
+                is Frame.Close,
+                is Frame.Ping,
+                is Frame.Pong -> Unit
+            }
         }
     }
+
+    /** The frame's JSON object, or null for a bad frame, which ends the socket. */
+    private fun parse(frame: Frame.Text): JsonObject? =
+        try {
+            ApiJson.parseToJsonElement(frame.readText()).jsonObject
+        } catch (_: SerializationException) {
+            null
+        } catch (_: IllegalArgumentException) {
+            null
+        }
 
     /** Handles one message. False for a bad frame, which ends the socket. */
     private suspend fun handle(message: JsonObject): Boolean {
@@ -104,6 +114,13 @@ private class ViewerSocket(
             "text" -> act(message) { services.input.text(decode<TextRequest>(message)) }
             "orientation" ->
                 act(message) { services.power.orientation(decode<OrientationRequest>(message)) }
+            "paste" ->
+                act(message) {
+                    services.clipboard.write(
+                        decode<ClipboardWriteRequest>(message).copy(paste = true)
+                    )
+                }
+            "copy" -> act(message) { copy(message) }
             else -> {
                 val frame =
                     try {
@@ -149,6 +166,7 @@ private class ViewerSocket(
             send(
                 buildJsonObject {
                     put("op", "error")
+                    message["id"]?.let { put("id", it) }
                     put("message", e.message ?: e.error)
                 }
             )
@@ -156,6 +174,7 @@ private class ViewerSocket(
             send(
                 buildJsonObject {
                     put("op", "error")
+                    message["id"]?.let { put("id", it) }
                     put(
                         "message",
                         "Bad ${(message["op"] as? JsonPrimitive)?.contentOrNull.orEmpty()}: " +
@@ -164,6 +183,33 @@ private class ViewerSocket(
                 }
             )
         }
+    }
+
+    /** Copies the phone's selection, or reads its clipboard when nothing is selected. */
+    private suspend fun copy(message: JsonObject) {
+        val clip = services.clipboard.read(ClipboardReadRequest(copy = true))
+        val image =
+            if (clip.text == null && clip.mimeTypes.any { it.startsWith("image/") }) {
+                services.clipboard.image()
+            } else {
+                null
+            }
+        send(
+            buildJsonObject {
+                put("op", "clipboard")
+                message["id"]?.let { put("id", it) }
+                clip.text?.let { put("text", it) }
+                image?.let { put("image", it.mimeType) }
+                put("changed", clip.changed == true)
+            }
+        )
+        // The only binary frame this socket sends, so the page takes the next one as the image.
+        if (image != null) session.outgoing.send(Frame.Binary(true, image.bytes))
+    }
+
+    /** A binary frame is an image to paste. */
+    private suspend fun pasteImage(bytes: ByteArray) {
+        act(PASTE) { services.clipboard.writeImage(bytes, paste = true) }
     }
 
     private suspend fun onLease(state: LeaseState) {
@@ -213,6 +259,8 @@ private class ViewerSocket(
     private inline fun <reified T> decode(message: JsonObject): T =
         ApiJson.decodeFromJsonElement(serializer<T>(), JsonObject(message - "op"))
 }
+
+private val PASTE = buildJsonObject { put("op", "paste") }
 
 /** How long a viewer keeps the screen without input. */
 internal const val VIEWER_IDLE_MS = 30_000L

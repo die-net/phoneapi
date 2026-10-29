@@ -66,6 +66,7 @@ class DeviceInfoProvider(
             encoderLowLatency = sdk >= Build.VERSION_CODES.R,
             adbWireless = sdk >= Build.VERSION_CODES.R,
             settingsSecure = secureSettings,
+            clipboard = helper,
         )
     }
 

@@ -1,5 +1,6 @@
 package net.die.phoneapi.helper
 
+import android.content.ClipData
 import android.os.Binder
 import android.os.ParcelFileDescriptor
 import android.os.Process
@@ -13,6 +14,7 @@ import java.io.File
 import net.die.phoneapi.helper.compat.AudioTap
 import net.die.phoneapi.helper.compat.InputInjector
 import net.die.phoneapi.helper.compat.MirrorDisplay
+import net.die.phoneapi.helper.compat.ShellClipboard
 import net.die.phoneapi.helper.compat.TopTask
 import net.die.phoneapi.helper.tree.TreeHost
 
@@ -25,6 +27,7 @@ internal open class HelperImpl : IHelper.Stub() {
     @Volatile private var treeClient: ITreeClient? = null
     private val tree by lazy { TreeHost { treeClient } }
     private val topTask by lazy { TopTask() }
+    private val clipboard by lazy { ShellClipboard() }
 
     /**
      * Resolves [packageName]'s uid before any binder call is served. `cmd package` is used because
@@ -116,6 +119,22 @@ internal open class HelperImpl : IHelper.Stub() {
         privileged("tree") { tree.call(op, payload) }
 
     override fun topPackage(): String? = privileged("topTask") { topTask.packageName() }
+
+    override fun primaryClip(): ClipData? = privileged("clip") { clipboard.primaryClip() }
+
+    override fun setPrimaryClip(clip: ClipData) {
+        privileged("clip-set") { clipboard.setPrimaryClip(clip) }
+    }
+
+    override fun awaitClipChange(seen: Long, timeoutMs: Long): Long =
+        privileged("clip-wait") { clipboard.awaitChange(seen, timeoutMs) }
+
+    @Suppress("MissingUseCall") // The app reads this pipe; closing it here would break that.
+    override fun readContent(uri: String): ParcelFileDescriptor =
+        privileged("content") {
+            require(uri.startsWith("content://")) { "not a content URI" }
+            Commands.pipe(listOf("content", "read", "--uri", uri))
+        }
 
     @Suppress("ExitOutsideMain") // The app asked this process to stop.
     override fun shutdown() {

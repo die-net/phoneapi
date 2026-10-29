@@ -137,7 +137,7 @@ These stay sessionless:
 
 One exclusive lease per phone. The first call that needs the screen takes it. An MCP session keeps it until the session ends, it calls `screen_release`, or it makes no screen call for 30 seconds while another client waits. PhoneAPI decides which calls need it, in the tool catalog:
 
-- Device and app tools: `tap`, `swipe`, `type_text`, `press_key`, `ui_act`, `keyboard_*`, `app_*`, `open_intent`, `device_wake`, `device_unlock`, `device_lock`, `device_orientation`.
+- Device and app tools: `tap`, `swipe`, `type_text`, `press_key`, `clipboard_read`, `clipboard_write`, `ui_act`, `keyboard_*`, `app_*`, `open_intent`, `device_wake`, `device_unlock`, `device_lock`, `device_orientation`.
 - Observing the screen: `ui_snapshot`, `ui_find`, `screenshot`. These would show another holder's screen.
 - `wait_for` with any condition that is not `browser.*`, or with `snapshot` or `screenshot`.
 - Browser input with `input` `touch`, which brings the tab forward. Pointer input with `input` `cdp` too: Chrome only takes cdp touch on the tab it is showing, so it already needs Chrome in front.
@@ -402,6 +402,8 @@ Checked on the phone on 2026-10-22, with this branch's dev build beside v0.3.0, 
 Still to check on the phone:
 - Whether a tab opened while Chrome is in the background becomes Chrome's selected tab. On the Android 16 emulator it does: Chrome selects it as it comes forward, even over a `Page.bringToFront` sent just before, which is why `show` checks that its tab is still showing and tries again. Opening the tab did not bring Chrome forward.
 - Whether the shell user can clear the clipboard on Android 11, without clearing Kira's.
+- That clipboard text and images go both ways on Android 11, checked so far on the Android 10 and 16 emulators. Also that the helper can read an image another app copied, which the emulators' Chrome would not put on the clipboard.
+- That the viewer's copy and paste work from a real keyboard in Chrome, Safari, and Firefox, including the second Cmd+C that Safari and Firefox need when the page guessed text and the phone held an image.
 - How many hidden tabs Chrome keeps loaded on the Moto G Power before it unloads them, to check the cap of 8.
 - Whether a release build logs anything from the SDK, such as session ids.
 - That binding Chrome's Custom Tabs service works on a real Android 12 or later phone, and does not change anything visible on Kira's Android 11 phone.

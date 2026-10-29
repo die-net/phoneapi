@@ -115,6 +115,7 @@ public data class Capabilities(
     @SerialName("encoder.lowLatency") val encoderLowLatency: Boolean,
     @SerialName("adb.wireless") val adbWireless: Boolean,
     @SerialName("settings.secure") val settingsSecure: Boolean,
+    @SerialName("clipboard") val clipboard: Boolean,
 )
 
 /**

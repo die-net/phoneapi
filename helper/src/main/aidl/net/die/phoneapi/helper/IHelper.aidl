@@ -1,5 +1,6 @@
 package net.die.phoneapi.helper;
 
+import android.content.ClipData;
 import android.os.ParcelFileDescriptor;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
@@ -57,6 +58,20 @@ interface IHelper {
 
     // The package of the top task, or null when there is none. Cheaper than dumpsys.
     String topPackage() = 60;
+
+    // The primary clip, read as the shell user, which may read it with another app in front. Null
+    // when the clipboard is empty.
+    ClipData primaryClip() = 70;
+
+    void setPrimaryClip(in ClipData clip) = 71;
+
+    // Waits up to timeoutMs (at most 5 s) for the clipboard to change after the count seen, and
+    // returns the count of changes. Pass -1 to read the count without waiting.
+    long awaitClipChange(long seen, long timeoutMs) = 72;
+
+    // Returns the read end of a pipe with a content:// URI's bytes, read as the shell user by
+    // `content read`. Reading the clip with primaryClip grants the shell read access to its URIs.
+    ParcelFileDescriptor readContent(String uri) = 73;
 
     oneway void shutdown() = 99;
 }
