@@ -7,6 +7,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import kotlinx.serialization.serializer
 import net.die.phoneapi.core.ApiJson
 import net.die.phoneapi.model.ApiException
 import net.die.phoneapi.model.BrowserFindRequest
@@ -282,7 +283,8 @@ internal fun decodeExtract(result: EvalResult, selector: String?): PageExtract {
     val value =
         result.value as? JsonObject
             ?: throw ApiException(BAD_GATEWAY, "page_error", "Reading the page returned nothing")
-    val extract = ApiJson.decodeFromJsonElement(PageExtract.serializer(), value)
+    // serializer<T>(): detekt can't see the serializer() the plugin generates for this module.
+    val extract = ApiJson.decodeFromJsonElement(serializer<PageExtract>(), value)
     if (extract.missing) throw ApiException.notFound("No element matches the selector")
     return extract
 }

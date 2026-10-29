@@ -134,7 +134,7 @@ class McpSessions(
      */
     suspend fun end(id: String, why: String) {
         val session = sessions.remove(id) ?: return
-        info("MCP session ${hashOf(id)} ended: $why")
+        Log.i(TAG, "MCP session ${hashOf(id)} ended: $why")
         for (child in sessions.values.filter { it.parentId == id }) {
             end(child.id, "the session that started it ended")
         }
@@ -146,7 +146,7 @@ class McpSessions(
         } catch (
             @Suppress("TooGenericExceptionCaught") // onEnd must run whatever closing throws.
             e: Exception) {
-            runCatching { Log.w(TAG, "Closing MCP session ${hashOf(id)} failed", e) }
+            Log.w(TAG, "Closing MCP session ${hashOf(id)} failed", e)
         }
         onEnd(id)
     }
@@ -244,7 +244,7 @@ class McpSessions(
     internal fun add(session: McpSession) {
         sessions[session.id] = session
         val under = session.parentId?.let { " under ${hashOf(it)}" }.orEmpty()
-        info("MCP session ${hashOf(session.id)} started for token ${session.tokenName}$under")
+        Log.i(TAG, "MCP session ${hashOf(session.id)} started for token ${session.tokenName}$under")
     }
 
     /** What the session [parentId] can do with sessions, from its tools. */
@@ -298,11 +298,6 @@ class McpSessions(
     /** A transport closed itself, as on `DELETE`. */
     internal fun closed(id: String) {
         scope.launch { end(id, "the client closed it") }
-    }
-
-    // JVM unit tests have no android.util.Log, as in StreamRoutes.
-    private fun info(message: String) {
-        runCatching { Log.i(TAG, message) }
     }
 
     internal fun newId(): String {

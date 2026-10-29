@@ -30,7 +30,7 @@ class ChromeKeeper(private val context: Context) {
             try {
                 context.bindService(intent, next, Context.BIND_AUTO_CREATE)
             } catch (e: SecurityException) {
-                runCatching { Log.w(TAG, "Binding Chrome's Custom Tabs service was refused", e) }
+                Log.w(TAG, "Binding Chrome's Custom Tabs service was refused", e)
                 false
             }
         if (bound) {

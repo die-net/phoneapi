@@ -6,6 +6,7 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.serializer
 import net.die.phoneapi.core.ApiJson
 import net.die.phoneapi.model.ApiException
 
@@ -40,7 +41,8 @@ internal suspend fun pageState(cdp: CdpSession, frameId: String?, script: String
         }
     val value = result.value as? JsonObject ?: return PageState()
     return try {
-        ApiJson.decodeFromJsonElement(PageState.serializer(), value)
+        // serializer<T>(): detekt can't see the serializer() the plugin generates for this module.
+        ApiJson.decodeFromJsonElement(serializer<PageState>(), value)
     } catch (_: SerializationException) {
         PageState()
     }
