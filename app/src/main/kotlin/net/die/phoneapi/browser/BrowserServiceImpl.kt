@@ -7,6 +7,7 @@ import java.util.LinkedHashMap
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -15,8 +16,6 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -28,6 +27,7 @@ import net.die.phoneapi.input.SwipeSpec
 import net.die.phoneapi.input.fallbackTouchscreen
 import net.die.phoneapi.model.ActionResult
 import net.die.phoneapi.model.ApiException
+import net.die.phoneapi.model.BrowserCaptureResult
 import net.die.phoneapi.model.BrowserFindRequest
 import net.die.phoneapi.model.BrowserFindResult
 import net.die.phoneapi.model.BrowserGestureRequest
@@ -71,6 +71,11 @@ internal class BrowserServiceImpl(
     private val websocketKey: () -> String = ::websocketKey,
     /** Opens a DevTools socket with a short read timeout, for [TabProbe]. Null probes nothing. */
     openProbe: (suspend (String) -> DevtoolsSocket)? = null,
+    /**
+     * Opens a DevTools socket with no read timeout, for [NetworkCapture], which closes it. Null
+     * records nothing.
+     */
+    openCapture: (suspend (String) -> DevtoolsSocket)? = null,
     private val contentBounds: suspend (String?) -> Rect = { Rect(0, 0, 0, 0) },
     private val touchAt: suspend (Rect, Boolean) -> ActionResult = { _, _ ->
         ActionResult(ok = false)
@@ -105,6 +110,7 @@ internal class BrowserServiceImpl(
     scope: CoroutineScope? = null,
 ) : BrowserService {
     private val axTrees = newAxCache()
+    private val locator = ElementLocator(axTrees)
     private val probe = openProbe?.let { TabProbe(io, it, websocketKey) }
     private val timers = scope?.let {
         TimerWatch(
@@ -115,8 +121,14 @@ internal class BrowserServiceImpl(
             },
         )
     }
+    private val recorder =
+        if (scope != null && openCapture != null) {
+            NetworkCapture(scope, pageLinker(openCapture, io, websocketKey))
+        } else {
+            null
+        }
     private val reader =
-        PageReader(pageScript, dataScript) { id, expression ->
+        PageReader(pageScript, dataScript, recorder) { id, expression ->
             val (socket, chromeId) = parseBrowserTargetId(id)
             var reloaded = false
             val result =
@@ -135,8 +147,8 @@ internal class BrowserServiceImpl(
             pressKey = pressKey,
             typeText = typeText,
             contentOnScreen = { pkg -> contentOnScreen(pkg) },
-            quads = { cdp, id, wanted -> elementQuads(cdp, id, wanted) },
-            focusNode = { cdp, id, wanted -> focusParams(cdp, id, wanted) },
+            quads = locator::quads,
+            focusNode = locator::focus,
             target = { ref, selector -> optionalTarget(ref, selector) },
             refreshHz = refreshHz,
             touchscreen = touchscreen,
@@ -186,8 +198,11 @@ internal class BrowserServiceImpl(
             SocketList.Failed(e)
         }
 
-    override suspend fun openTab(url: String): BrowserTarget {
+    override suspend fun openTab(url: String, capture: Boolean): BrowserTarget {
         val pageUrl = webUrl(url)
+        // Recording has to start before the page loads, so the tab opens blank and loads after.
+        // The blank page stays in the tab's history, so the page sees history.length 2, not 1.
+        val recording = capture && pageUrl != BLANK
         val chrome =
             socketList().firstOrNull { it.name == CHROME_SOCKET }
                 ?: throw ApiException.unavailable(
@@ -199,13 +214,26 @@ internal class BrowserServiceImpl(
         val tookScreen = browserPackage(chrome, chrome.name)?.let { inFront(it) } == true
         val created =
             useCdp(chrome.name, "/devtools/browser") { cdp ->
-                cdp.call("Target.createTarget", buildJsonObject { put("url", pageUrl) })
+                val first = if (recording) BLANK else pageUrl
+                cdp.call("Target.createTarget", buildJsonObject { put("url", first) })
             }
         val chromeId =
             created.decodeCdp<CreatedTarget>()?.targetId
                 ?: throw ApiException(502, "cdp_error", "Chrome did not return a target id")
+        val id = browserTargetId(chrome.name, chromeId)
+        if (recording) {
+            var loading = false
+            try {
+                capture(id, on = true)
+                navigate(id, pageUrl)
+                loading = true
+            } finally {
+                // An unowned tab would outlive the session that asked for it.
+                if (!loading) withContext(NonCancellable) { closeQuietly(id) }
+            }
+        }
         return BrowserTarget(
-            id = browserTargetId(chrome.name, chromeId),
+            id = id,
             type = "page",
             url = pageUrl,
             socket = chrome.name,
@@ -230,7 +258,19 @@ internal class BrowserServiceImpl(
         return BrowserTarget(id = id, type = "page", url = pageUrl, socket = socket)
     }
 
+    override suspend fun capture(id: String, on: Boolean): BrowserCaptureResult =
+        recorder?.toggle(id, on) ?: super.capture(id, on)
+
+    private suspend fun closeQuietly(id: String) {
+        try {
+            closeTab(id)
+        } catch (_: ApiException) {
+            // Already gone, or Chrome is not answering.
+        }
+    }
+
     override suspend fun closeTab(id: String): ActionResult {
+        recorder?.stop(id)
         val (socket, chromeId) = parseBrowserTargetId(id)
         val closed =
             useCdp(socket, "/devtools/browser") { cdp ->
@@ -316,13 +356,6 @@ internal class BrowserServiceImpl(
             pageInput.text(cdp, id, pkg, request, focus)
         }
     }
-
-    private suspend fun focusParams(cdp: CdpSession, id: String, target: TapTarget): JsonObject =
-        when (target) {
-            is TapTarget.Ref ->
-                backendParams(cachedBackend(id, target.id) ?: fetchBackend(cdp, id, target.id))
-            is TapTarget.Css -> cssNode(cdp, target.selector)
-        }
 
     private suspend fun act(
         id: String,
@@ -560,96 +593,6 @@ internal class BrowserServiceImpl(
             }
         }
 
-    private suspend fun elementQuads(
-        cdp: CdpSession,
-        targetId: String,
-        target: TapTarget,
-    ): JsonArray =
-        when (target) {
-            is TapTarget.Ref -> refQuads(cdp, targetId, target.id)
-            is TapTarget.Css -> cssQuads(cdp, target)
-        }
-
-    /** Polls until [target] matches an element with a box, or its wait is up. */
-    private suspend fun cssQuads(cdp: CdpSession, target: TapTarget.Css): JsonArray {
-        val deadline = System.currentTimeMillis() + target.waitMs
-        while (true) {
-            try {
-                return boxed(cdp, cssNode(cdp, target.selector))
-            } catch (e: ApiException) {
-                val missing = e.error == "not_found" || e.error == "offscreen"
-                if (!missing || System.currentTimeMillis() + ELEMENT_POLL_MS > deadline) throw e
-            }
-            delay(ELEMENT_POLL_MS)
-        }
-    }
-
-    private suspend fun refQuads(cdp: CdpSession, targetId: String, ref: String): JsonArray {
-        val backend = cachedBackend(targetId, ref)
-        if (backend != null) {
-            try {
-                return boxed(cdp, backendParams(backend))
-            } catch (e: ApiException) {
-                if (e.error != "cdp_error") throw e
-                axTrees.remove(targetId)
-            }
-        }
-        return boxed(cdp, backendParams(fetchBackend(cdp, targetId, ref)))
-    }
-
-    private suspend fun boxed(cdp: CdpSession, params: JsonObject): JsonArray {
-        cdp.call("DOM.scrollIntoViewIfNeeded", params)
-        val quads = quadsOf(cdp.call("DOM.getContentQuads", params))
-        if (quads.isEmpty()) throw ApiException(409, "offscreen", "The node has no box on the page")
-        return quads
-    }
-
-    private fun cachedBackend(targetId: String, ref: String): Int? {
-        val tree = axTrees.get(targetId) ?: return null
-        return try {
-            elementBackendId(tree, ref)
-        } catch (_: ApiException) {
-            null
-        }
-    }
-
-    private suspend fun fetchBackend(cdp: CdpSession, targetId: String, ref: String): Int {
-        cdp.call("Accessibility.enable")
-        val tree = cdp.call("Accessibility.getFullAXTree")
-        axTrees.put(targetId, tree)
-        return elementBackendId(tree, ref)
-    }
-
-    private fun backendParams(backend: Int): JsonObject = buildJsonObject {
-        put("backendNodeId", backend)
-    }
-
-    private fun quadsOf(result: JsonObject): JsonArray {
-        val quads = result.decodeCdp<QuadResult>()?.quads ?: return JsonArray(emptyList())
-        return JsonArray(quads)
-    }
-
-    private suspend fun cssNode(cdp: CdpSession, selector: String): JsonObject {
-        val root =
-            cdp.call("DOM.getDocument", buildJsonObject { put("depth", 0) })
-                .decodeCdp<DocumentResult>()
-                ?.root
-                ?.nodeId ?: 0
-        if (root == 0) throw ApiException(502, "cdp_error", "Chrome did not return a document")
-        val nodeId =
-            cdp.call(
-                    "DOM.querySelector",
-                    buildJsonObject {
-                        put("nodeId", root)
-                        put("selector", selector)
-                    },
-                )
-                .decodeCdp<QueryResult>()
-                ?.nodeId ?: 0
-        if (nodeId == 0) throw ApiException.notFound("No element matches the selector")
-        return buildJsonObject { put("nodeId", nodeId) }
-    }
-
     private suspend fun contentOnScreen(pkg: String?): Rect {
         try {
             return contentBounds(pkg)
@@ -705,10 +648,10 @@ internal class BrowserServiceImpl(
         }
 
     private companion object {
+        const val BLANK = "about:blank"
         const val HTTP_SERVER_ERROR = 500
         /** Server errors that trying again cannot fix. */
         val FINAL_ERRORS = setOf("helper_unavailable", "browser_frozen")
-        const val ELEMENT_POLL_MS = 200L
         const val MAX_EXPRESSION = 20_000
         const val MAX_CONSOLE_MS = 5_000L
         const val MAX_SNAPSHOT_NODES = 5_000
@@ -776,20 +719,13 @@ private fun nodeRef(ref: String): String {
 
 @Serializable private data class NavigateResult(val errorText: String? = null)
 
-@Serializable private data class DocumentResult(val root: NodeId? = null)
-
-@Serializable private data class NodeId(val nodeId: Int = 0)
-
-@Serializable private data class QueryResult(val nodeId: Int = 0)
-
-@Serializable private data class QuadResult(val quads: List<JsonElement> = emptyList())
-
 internal const val AX_TREE_CACHE_CAP = 16
 
 /** Input that brings the tab forward and injects hardware events. */
 internal val TOUCH_INPUTS = setOf(BrowserInput.TOUCH, BrowserInput.AUTO)
 
-private class AxTreeCache(cap: Int) {
+/** The last accessibility tree of each target, at most [cap] of them, oldest dropped first. */
+internal class AxTreeCache(cap: Int) {
     private val limit = cap.coerceAtLeast(1)
     private val map = LinkedHashMap<String, JsonObject>(limit, LOAD, true)
 

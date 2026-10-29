@@ -3,6 +3,7 @@ package net.die.phoneapi.tabs
 import net.die.phoneapi.core.BrowserService
 import net.die.phoneapi.lease.Holder
 import net.die.phoneapi.model.ActionResult
+import net.die.phoneapi.model.BrowserCaptureResult
 import net.die.phoneapi.model.BrowserFindRequest
 import net.die.phoneapi.model.BrowserFindResult
 import net.die.phoneapi.model.BrowserGestureRequest
@@ -34,7 +35,8 @@ internal class SessionBrowser(
 ) : BrowserService {
     override suspend fun targets(): List<BrowserTarget> = tabs.visible(holder, base.targets())
 
-    override suspend fun openTab(url: String): BrowserTarget = tabs.opened(holder, url)
+    override suspend fun openTab(url: String, capture: Boolean): BrowserTarget =
+        tabs.opened(holder, url, capture)
 
     override suspend fun navigate(id: String, url: String): BrowserTarget =
         acting(id) { base.navigate(id, url) }
@@ -80,6 +82,9 @@ internal class SessionBrowser(
     override suspend fun console(id: String, request: ConsoleRequest): ConsoleResult =
         mine(id) { base.console(id, request) }
 
+    override suspend fun capture(id: String, on: Boolean): BrowserCaptureResult =
+        mine(id) { base.capture(id, on) }
+
     private suspend fun <T> mine(id: String, block: suspend () -> T): T {
         tabs.access(holder, id, related)
         return block()
@@ -107,7 +112,8 @@ internal class SharedBrowser(private val tabs: Tabs, private val base: BrowserSe
     BrowserService {
     override suspend fun targets(): List<BrowserTarget> = tabs.sharedTargets()
 
-    override suspend fun openTab(url: String): BrowserTarget = base.openTab(url)
+    override suspend fun openTab(url: String, capture: Boolean): BrowserTarget =
+        base.openTab(url, capture)
 
     override suspend fun navigate(id: String, url: String): BrowserTarget =
         free(id) { base.navigate(id, url) }
@@ -151,6 +157,9 @@ internal class SharedBrowser(private val tabs: Tabs, private val base: BrowserSe
 
     override suspend fun console(id: String, request: ConsoleRequest): ConsoleResult =
         free(id) { base.console(id, request) }
+
+    override suspend fun capture(id: String, on: Boolean): BrowserCaptureResult =
+        free(id) { base.capture(id, on) }
 
     private suspend fun <T> free(id: String, block: suspend () -> T): T {
         tabs.accessShared(id)

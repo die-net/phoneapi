@@ -28,7 +28,11 @@ public data class BrowserTarget(
     val owned: Boolean? = null,
 )
 
-@Serializable public data class OpenTabRequest(val url: String)
+@Serializable
+public data class OpenTabRequest(
+    val url: String,
+    @Doc(CAPTURE_OPEN_DOC) val capture: Boolean = false,
+)
 
 @Serializable public data class NavigateRequest(val url: String)
 
@@ -183,6 +187,25 @@ public data class EvalResult(
     val exception: String? = null,
 )
 
+public const val CAPTURE_OPEN_DOC: String =
+    "Record the JSON responses the page fetches from the start of its load, as browser_capture does, so scope data reads them."
+
+/**
+ * Turns the recording of a tab's JSON responses on or off. While it is on, scope data lists each
+ * JSON response the page fetches as a blob named response-N.
+ */
+@Serializable
+public data class BrowserCaptureRequest(
+    @Doc("true starts recording, or keeps it going. false stops it and forgets what it recorded.")
+    val on: Boolean = true
+)
+
+@Serializable
+public data class BrowserCaptureResult(
+    @Doc("Whether the tab's JSON responses are being recorded.") val capturing: Boolean,
+    @Doc("How many JSON responses are recorded, which scope data lists.") val responses: Int = 0,
+)
+
 /**
  * Collect console and browser log events for [timeoutMs]. Entries from before the call are not
  * replayed.
@@ -245,11 +268,15 @@ public const val MAX_DATA_PATHS: Int = 20
 /** A piece of JSON a page holds, which scope data reads. */
 @Serializable
 public data class DataBlob(
-    @Doc("What a path starts with to read it, such as __NEXT_DATA__, ld+json-1, or response.")
+    @Doc(
+        "What a path starts with to read it, such as __NEXT_DATA__, ld+json-1, response, or response-1 for a recorded response."
+    )
     val name: String,
-    @Doc("Where it was found, such as script#__NEXT_DATA__ or window.__INITIAL_STATE__.")
+    @Doc(
+        "Where it was found, such as script#__NEXT_DATA__ or window.__INITIAL_STATE__, or the URL of a recorded response."
+    )
     val source: String,
-    @Doc("Length of its JSON text.") val chars: Int,
+    @Doc("Length of its JSON text. For a recorded response, its length in bytes.") val chars: Int,
 )
 
 public const val READ_SELECTOR_DOC: String =

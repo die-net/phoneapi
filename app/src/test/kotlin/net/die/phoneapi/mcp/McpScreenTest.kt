@@ -109,6 +109,7 @@ class McpScreenTest {
                 "browser_find",
                 "browser_eval",
                 "browser_console",
+                "browser_capture",
             )
     }
 }

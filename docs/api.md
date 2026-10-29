@@ -227,7 +227,7 @@ A session, from MCP or REST, owns the tabs it opens, popups they open, and unown
 | Method | Path | Scope | Summary |
 | --- | --- | --- | --- |
 | `GET` | `/v1/browser/targets` | browser | Tabs and debuggable WebViews |
-| `POST` | `/v1/browser/tabs` | browser | Open tab (`OpenTabRequest`). `tookScreen` is true when Chrome was on screen and switched to it |
+| `POST` | `/v1/browser/tabs` | browser | Open tab (`OpenTabRequest`). `tookScreen` is true when Chrome was on screen and switched to it. `capture` records the page's JSON responses from the start of its load, as under [Recorded responses](#recorded-responses) |
 | `POST` | `/v1/browser/targets/{id}/navigate` | browser | `NavigateRequest` |
 | `POST` | `/v1/browser/targets/{id}/close` | browser | Close the tab without bringing it forward → `ActionResult` |
 | `GET` | `/v1/browser/targets/{id}/snapshot` | browser | Compact AX outline → `BrowserSnapshot`. `maxNodes` (default 400, up to 5000) and `maxChars` cap it; cuts are reported as for the UI snapshot. `show` brings the tab on screen first. `shown` and `pending` as for `read` |
@@ -239,6 +239,7 @@ A session, from MCP or REST, owns the tabs it opens, popups they open, and unown
 | `POST` | `/v1/browser/targets/{id}/key` | browser | Key name. `input` `touch` or `cdp` (`BrowserKeyRequest`) |
 | `POST` | `/v1/browser/targets/{id}/text` | browser | Type. `touch` uses text modes; `cdp` inserts (`BrowserTextRequest`) |
 | `POST` | `/v1/browser/targets/{id}/evaluate` | browser | Isolated-world JS (`EvalRequest`) → `EvalResult` |
+| `POST` | `/v1/browser/targets/{id}/capture` | browser | `BrowserCaptureRequest` → `BrowserCaptureResult`: start (`on` true, the default) or stop recording the tab's JSON responses for `scope` `data`; see [Recorded responses](#recorded-responses) |
 | `POST` | `/v1/browser/targets/{id}/console` | browser | Collect logs for a timeout (`ConsoleRequest`) |
 
 #### Embedded data
@@ -252,7 +253,17 @@ A page built by scripts often carries its data as JSON for the scripts to pick u
 - A `*` segment matches every array item or object key at its level, or every blob as the first segment. Each value comes back on its own line as the path that names only it, then the value as compact JSON, and `values` counts them. `paths` reads up to 20 paths in one call the same way, and a path that names nothing gets a `#` line saying why while the others still come back.
 - `find` with `scope` `data` searches the JSON as `read` renders it, and gives each match the `path` of its line. Its offset is into the blob's JSON, or into `path`'s when `find` was given one.
 
-Numbers keep the digits the page wrote. A read takes at most 2,000,000 characters of data from the page. A blob past that is listed but cannot be read, and an outline or a search of every blob reads blobs in page order until the next would pass it. A `selector` does not apply to data, nor does `kind` `links`. Data the page's scripts fetch after it loads is not read.
+Numbers keep the digits the page wrote. A read takes at most 2,000,000 characters of data from the page. A blob past that is listed but cannot be read, and an outline or a search of every blob reads blobs in page order until the next would pass it. A `selector` does not apply to data, nor does `kind` `links`. Data the page's scripts fetch after it loads is not embedded; [Recorded responses](#recorded-responses) covers it.
+
+#### Recorded responses
+
+Many pages fetch their data after they load, or when a person taps something. `capture` records those responses so `scope` `data` can read them: `POST /v1/browser/targets/{id}/capture`, or MCP's `browser_capture`, starts it on a tab. To record a page's load, open the tab with `capture` true, or start recording before navigating. A `browser_read` or `browser_find` with `url` and `scope` `data` records for you.
+
+- Every response the page fetches with a JSON content type is listed after the embedded blobs, as `response-1`, `response-2`, and so on in the order they finished, with its URL as the source and its length in bytes. A status outside 200 to 299 is added to the source. Paths, `*`, `paths`, outlines, and `find` work on them as on any blob.
+- A body is fetched from Chrome only when a read wants it. A body behind a prefix such as `)]}'` that keeps it from loading as a script reads without the prefix. One that is not JSON is listed with the reason.
+- Chrome holds the bodies in the page's renderer, at most 2,000,000 bytes for one response and 4,000,000 for all of them, dropping the oldest first. A body it no longer has is listed with that reason. When the page loads another document, the earlier responses go. The latest 50 are kept.
+- Recording lasts until `on` is false, the tab closes, or 10 minutes pass without a start or a data read. It also stops when a session claims a tab someone else was recording, and when a session gives a claimed tab back, so no one reads what another client recorded.
+- Recording enables DevTools' Network domain on the tab. A page cannot see that from script, but Chrome does a little more work for each request while it is on.
 
 ### Tokens and schema
 
@@ -323,8 +334,9 @@ Run `phoneapi server` and point a Streamable HTTP client at `http://127.0.0.1:<p
 | `browser_snapshot` | browser | AX outline |
 | `browser_tap` / `browser_swipe` / `browser_gesture` | browser | Pointer input. `input` `auto` (default), `touch`, `cdp`, or `cdp-mouse` (tap only) |
 | `browser_key` / `browser_type` | browser | Key presses and typing. `cdp` stays on a background tab; device keys such as HOME need `touch` |
-| `browser_read` | browser | Page text as markdown, sliced by `offset` and `maxChars` (default 8000), or `outline` for headings with offsets. `scope` `article` (default, via Readability) or `page`, or a CSS `selector`, which reads every match. `version` returns only the header, `unchanged`, when the content has not changed. The header names the page's `paywall`, `feeds`, `next` page, `canonical` URL, and embedded `data`. `scope` `data` reads that JSON by `path` or `paths`, as under [Embedded data](#embedded-data). `url` opens a new tab and reads it in one call, and `close` closes the tab afterwards. A tab that is not on screen is not drawn, so content that loads when drawn may be missing: the header says `hidden` and lists `pending` signs, and `show` brings the tab forward first |
+| `browser_read` | browser | Page text as markdown, sliced by `offset` and `maxChars` (default 8000), or `outline` for headings with offsets. `scope` `article` (default, via Readability) or `page`, or a CSS `selector`, which reads every match. `version` returns only the header, `unchanged`, when the content has not changed. The header names the page's `paywall`, `feeds`, `next` page, `canonical` URL, and embedded `data`. `scope` `data` reads that JSON by `path` or `paths`, as under [Embedded data](#embedded-data). `url` opens a new tab and reads it in one call, and `close` closes the tab afterwards. With `scope` `data`, a tab it opens records its responses, and the `# opened` line says `recording`. A tab that is not on screen is not drawn, so content that loads when drawn may be missing: the header says `hidden` and lists `pending` signs, and `show` brings the tab forward first |
 | `browser_find` | browser | `kind` `text` (matches with context and nearest heading) or `links` (text, URL, same-origin, each URL once), at offsets `browser_read` takes. `queries` searches for up to 20 things at once. A result cut at `limit` says to raise it, up to 200, or at 200 to narrow the search. With `scope` `data`, it searches the embedded JSON, within `path` when given, and each match shows its path. `url` and `close` as for `browser_read` |
+| `browser_capture` | browser | Start (`on` true, the default) or stop recording a tab's JSON responses, which `browser_read` with `scope` `data` then lists as `response-1`, `response-2`, and so on. See [Recorded responses](#recorded-responses). `browser_open` takes `capture` to record from the start of the load |
 | `browser_eval` / `browser_console` | browser | JS and logs |
 | `screenshot` | observe | PNG last resort (`scale` default 0.5) |
 | `logcat_tail` | observe | Recent lines via helper |

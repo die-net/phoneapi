@@ -27,6 +27,7 @@ import net.die.phoneapi.lease.ForegroundWatch
 import net.die.phoneapi.lease.ScreenLease
 import net.die.phoneapi.model.ActionResult
 import net.die.phoneapi.model.AppInfo
+import net.die.phoneapi.model.BrowserCaptureResult
 import net.die.phoneapi.model.BrowserFindRequest
 import net.die.phoneapi.model.BrowserFindResult
 import net.die.phoneapi.model.BrowserGestureRequest
@@ -367,7 +368,7 @@ private object FakeApps : AppsService {
 private object FakeBrowser : BrowserService {
     override suspend fun targets(): List<BrowserTarget> = emptyList()
 
-    override suspend fun openTab(url: String) =
+    override suspend fun openTab(url: String, capture: Boolean) =
         BrowserTarget(
             id = "chrome_devtools_remote~t",
             type = "page",
@@ -376,6 +377,9 @@ private object FakeBrowser : BrowserService {
 
     override suspend fun navigate(id: String, url: String) =
         BrowserTarget(id = id, type = "page", url = url, socket = "s")
+
+    override suspend fun capture(id: String, on: Boolean) =
+        BrowserCaptureResult(capturing = on, responses = if (on) 2 else 0)
 
     override suspend fun closeTab(id: String) = acted()
 

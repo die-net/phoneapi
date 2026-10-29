@@ -41,6 +41,7 @@ internal class CdpSession(
     // Set once the reader stops, so a later command fails instead of waiting for its timeout.
     private var closedBy: IOException? = null
     private val nextId = AtomicInteger(0)
+    private val stopped = CompletableDeferred<Unit>()
     private val eventsFlow =
         MutableSharedFlow<CdpEvent>(
             replay = EVENT_BUFFER,
@@ -53,6 +54,9 @@ internal class CdpSession(
      * sent before a command's reply is here once that command returns.
      */
     fun seen(method: String): Boolean = eventsFlow.replayCache.any { it.method == method }
+
+    /** Returns once the reader has stopped: the page closed, the socket failed, or [close]. */
+    suspend fun awaitClosed() = stopped.await()
 
     fun open(path: String) {
         socket.handshake(path)
@@ -166,6 +170,7 @@ internal class CdpSession(
                 values
             }
         waiting.forEach { it.completeExceptionally(error) }
+        stopped.complete(Unit)
     }
 
     private fun command(id: Int, method: String, params: JsonObject?): String = buildJsonObject {

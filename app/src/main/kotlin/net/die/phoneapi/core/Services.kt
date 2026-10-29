@@ -2,7 +2,9 @@ package net.die.phoneapi.core
 
 import kotlinx.coroutines.channels.ReceiveChannel
 import net.die.phoneapi.model.ActionResult
+import net.die.phoneapi.model.ApiException
 import net.die.phoneapi.model.AppInfo
+import net.die.phoneapi.model.BrowserCaptureResult
 import net.die.phoneapi.model.BrowserFindRequest
 import net.die.phoneapi.model.BrowserFindResult
 import net.die.phoneapi.model.BrowserGestureRequest
@@ -140,7 +142,11 @@ interface WaitService {
 interface BrowserService {
     suspend fun targets(): List<BrowserTarget>
 
-    suspend fun openTab(url: String): BrowserTarget
+    /**
+     * Opens a tab on [url]. With [capture], the tab records the JSON responses its page fetches
+     * from the start of its load, as [capture] does.
+     */
+    suspend fun openTab(url: String, capture: Boolean = false): BrowserTarget
 
     suspend fun navigate(id: String, url: String): BrowserTarget
 
@@ -191,4 +197,14 @@ interface BrowserService {
     suspend fun evaluate(id: String, request: EvalRequest): EvalResult
 
     suspend fun console(id: String, request: ConsoleRequest): ConsoleResult
+
+    /**
+     * Starts or stops recording the JSON responses [id]'s page fetches, which data reads of it then
+     * list. Stopping one that is not recording does nothing.
+     */
+    suspend fun capture(id: String, on: Boolean): BrowserCaptureResult =
+        throw ApiException.unavailable(
+            "browser_unavailable",
+            "Recording responses is not available",
+        )
 }

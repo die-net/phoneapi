@@ -296,7 +296,16 @@ internal class BrowserWatch(
 
     private suspend fun enable(session: CdpSession, domains: Set<String>) {
         if ("Page" in domains) session.call("Page.enable")
-        if ("Network" in domains) session.call("Network.enable")
+        // A wait never reads a body, so Chrome is asked to keep none.
+        if ("Network" in domains) {
+            session.call(
+                "Network.enable",
+                buildJsonObject {
+                    put("maxTotalBufferSize", 0)
+                    put("maxResourceBufferSize", 0)
+                },
+            )
+        }
         if ("LayerTree" in domains) session.call("LayerTree.enable")
         if ("Log" in domains) session.call("Log.enable")
         if ("DOM" in domains) session.call("DOM.enable")

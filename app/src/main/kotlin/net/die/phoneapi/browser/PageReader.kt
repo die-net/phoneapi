@@ -16,11 +16,13 @@ internal data class PageRead(val result: BrowserReadResult, val visibility: Stri
 /**
  * Reads and searches a tab's text or data with the reading scripts. [pageScript] is Readability.js,
  * page-pending.js, page-data.js, then page-read.js; [dataScript] is page-data.js. [evaluate] runs
- * an expression in an isolated world on the tab with the given id.
+ * an expression in an isolated world on the tab with the given id. Data reads add the responses
+ * [capture] recorded, after the page's own blobs.
  */
 internal class PageReader(
     private val pageScript: suspend () -> String,
     private val dataScript: suspend () -> String,
+    private val capture: NetworkCapture?,
     private val evaluate: suspend (id: String, expression: String) -> Evaluated,
 ) {
     @Volatile private var pageSource: String? = null
@@ -49,13 +51,18 @@ internal class PageReader(
     private suspend fun page(id: String, scope: ReadScope, selector: String?): PageExtract {
         val source = pageSource ?: pageScript().also { pageSource = it }
         val (result, reloaded) = evaluate(id, readScript(source, scope, selector))
-        return decodeExtract(result, selector).copy(reloaded = reloaded)
+        val extract = decodeExtract(result, selector)
+        val responses = capture?.listed(id).orEmpty()
+        return extract.copy(reloaded = reloaded, data = extract.data + responses)
     }
 
     /** The page's data blobs, with the text of those [want] names, or of all when it is null. */
     private suspend fun data(id: String, want: List<String>?): DataExtract {
         val source = dataSource ?: dataScript().also { dataSource = it }
         val (result, reloaded) = evaluate(id, dataExpression(source, want))
-        return decodeData(result).copy(reloaded = reloaded)
+        val extract = decodeData(result)
+        val used = extract.blobs.sumOf { it.text?.length ?: 0 }
+        val responses = capture?.blobs(id, want, DATA_BUDGET - used).orEmpty()
+        return extract.copy(reloaded = reloaded, blobs = extract.blobs + responses)
     }
 }
