@@ -1,5 +1,5 @@
 // Turns a page into blocks for browser_read and browser_find. Runs in an isolated world after
-// Readability.js and page-pending.js, as the body of a function given `options` ({scope,
+// Readability.js, page-pending.js, and page-data.js, as the body of a function given `options` ({scope,
 // selector}). Rendering, offsets, and searching happen in Kotlin, so this only walks the DOM.
 
 const MAX_CHARS = 2000000;
@@ -231,11 +231,19 @@ function blocked(status, text) {
     ' .g-recaptcha, .h-captcha, .cf-turnstile, #challenge-form, #challenge-running';
   if (document.querySelector(captcha)) return "captcha";
   const challenge =
-    /just a moment|attention required|access denied|are you a robot|verify you are (a )?human|unusual traffic|request (was )?blocked|security check/i;
+    /just a moment|attention required|access denied|are you (a robot|human)|verify you are (a )?human|unusual traffic|request (was )?blocked|security check|ddos protection|pardon our interruption/i;
   if (text.length < 3000 && challenge.test(document.title + " " + text)) return "challenge page";
   if (status === 401 || status === 403 || status === 429) return "http " + status;
+  // A block page is often an error status whose title says nothing, with the refusal in its text.
+  if (status >= 400 && text.length < 1500 && BLOCK_TEXT.test(text)) return "http " + status;
   return null;
 }
+
+// Wording a page uses to refuse automated requests, shared across sites rather than one site's
+// markup. It counts only on a short page with an error status, so an article about rate limits
+// is not a block.
+const BLOCK_TEXT =
+  /automated (queries|requests|access|traffic)|unusual traffic|verify you are (a )?human|are you (a robot|human)|access (to this page )?has been denied|pardon our interruption/i;
 
 const ldJson = [];
 for (const script of document.querySelectorAll('script[type="application/ld+json"]')) {
@@ -298,6 +306,7 @@ return {
   feeds: related.feeds,
   next: related.next,
   canonical: related.canonical,
+  data: pageData(null),
   pageChars: bodyText.trim().length,
   links: document.links.length,
   tables: document.querySelectorAll("table").length,

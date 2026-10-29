@@ -8,12 +8,18 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import net.die.phoneapi.browser.MAX_FIND_RESULTS
 import net.die.phoneapi.browser.checkFind
+import net.die.phoneapi.browser.dataSize
+import net.die.phoneapi.browser.hasWildcard
 import net.die.phoneapi.model.ApiException
 import net.die.phoneapi.model.BrowserFindRequest
 import net.die.phoneapi.model.BrowserFindResult
 import net.die.phoneapi.model.BrowserReadRequest
 import net.die.phoneapi.model.BrowserReadResult
+import net.die.phoneapi.model.DATA_PATHS_DOC
+import net.die.phoneapi.model.DATA_PATH_DOC
+import net.die.phoneapi.model.DataBlob
 import net.die.phoneapi.model.EvalRequest
+import net.die.phoneapi.model.FIND_PATH_DOC
 import net.die.phoneapi.model.FIND_QUERIES_DOC
 import net.die.phoneapi.model.FIND_QUERY_DOC
 import net.die.phoneapi.model.FeedLink
@@ -52,6 +58,8 @@ internal data class BrowserReadArgs(
     @Doc(READ_MAX_CHARS_DOC) val maxChars: Int = 8_000,
     @Doc(SHOW_DOC) val show: Boolean = false,
     @Doc(READ_VERSION_DOC) val version: String? = null,
+    @Doc(DATA_PATH_DOC) val path: String? = null,
+    @Doc(DATA_PATHS_DOC) val paths: List<String> = emptyList(),
     @Doc(CLOSE_DOC) val close: Boolean = false,
 )
 
@@ -77,6 +85,7 @@ internal data class BrowserFindArgs(
     val contextChars: Int = 150,
     @Doc("Most results, 1 to 200, for each query when there are several. Defaults to 10.")
     val limit: Int = 10,
+    @Doc(FIND_PATH_DOC) val path: String? = null,
     @Doc(CLOSE_DOC) val close: Boolean = false,
 )
 
@@ -102,16 +111,19 @@ internal suspend fun browserRead(
             maxChars = args.maxChars,
             show = args.show,
             version = args.version,
+            path = args.path,
+            paths = args.paths,
         )
     val opened = args.url?.let { url -> openAndSettle(services, scopes, url, args.close) }
     val target = opened?.target ?: args.target.orEmpty()
     val text =
         closingAfter(services, target, args.close) {
             val result = services.browser.read(target, read)
+            val label = if (args.scope == ReadScope.DATA) dataLabel(args, result) else null
             when {
-                result.changed == false -> unchangedText(result, args.show)
-                args.outline -> outlineText(result, args.maxChars, args.show)
-                else -> readText(result, args.show)
+                result.changed == false -> unchangedText(result, args.show, label)
+                label == null && args.outline -> outlineText(result, args.maxChars, args.show)
+                else -> readText(result, args.show, label)
             }
         }
     opened?.let { "${it.line}\n$text" } ?: text
@@ -234,6 +246,7 @@ internal suspend fun browserFind(
             format = args.format,
             contextChars = args.contextChars,
             limit = args.limit,
+            path = args.path,
         )
     checkFind(find)
     val opened = args.url?.let { url -> openAndSettle(services, scopes, url, args.close) }
@@ -271,10 +284,44 @@ private fun stateNotes(result: BrowserReadResult, show: Boolean): List<String> =
         add("# readyState=$readyState: the page is still loading")
     }
     if (result.clipped) add("# clipped: the page has more text than reading takes")
+    addAll(pageNotes(result))
+}
+
+/** Notes on what the page says about itself: a paywall, its feeds, its next page, and its data. */
+private fun pageNotes(result: BrowserReadResult): List<String> = buildList {
     if (result.paywall) add("# paywall: the page says its content is not free to read")
     if (result.feeds.isNotEmpty()) add("# feeds: " + feedList(result.feeds))
     result.next?.let { add("# next: " + oneLine(it)) }
     result.canonical?.let { add("# canonical: " + oneLine(it)) }
+    if (result.data.isNotEmpty()) add("# data: " + dataList(result.data))
+}
+
+/** Names a page's blobs and their sizes, and says how to read them. */
+private fun dataList(blobs: List<DataBlob>): String {
+    val only = blobs.singleOrNull()
+    if (only?.name == "response") {
+        return "the response is JSON, ${dataSize(only.chars)}; read it with scope data, path response"
+    }
+    val parts =
+        blobs.take(MAX_LISTED_BLOBS).joinToString(", ") {
+            oneLine(it.name) + " " + dataSize(it.chars)
+        }
+    val more = blobs.size - MAX_LISTED_BLOBS
+    val count = plural(blobs.size, "embedded JSON blob", "embedded JSON blobs")
+    return "$count: $parts" + (if (more > 0) ", and $more more" else "") + "; read with scope data"
+}
+
+/** What a data read returned, as its header names it. */
+private fun dataLabel(args: BrowserReadArgs, result: BrowserReadResult): String {
+    val path = args.path
+    val values = plural(result.values ?: 0, "value", "values")
+    return when {
+        args.paths.isNotEmpty() -> "$values at ${args.paths.size} paths"
+        path == null -> "data outline"
+        hasWildcard(path) -> "$values at $path"
+        args.outline -> "outline of data at $path"
+        else -> "data at $path"
+    }
 }
 
 /** Names a page's feeds: each one's type and URL, with its title when the page gave one. */
@@ -293,9 +340,13 @@ private fun what(extracted: String, selected: Int?): String =
     else "$extracted content"
 
 /** A read whose content still has the version the client passed, so none is returned. */
-internal fun unchangedText(result: BrowserReadResult, show: Boolean = false): String {
+internal fun unchangedText(
+    result: BrowserReadResult,
+    show: Boolean = false,
+    label: String? = null,
+): String {
     val line =
-        "# ${what(result.extracted, result.selected)} unchanged, version ${result.version}, " +
+        "# ${label ?: what(result.extracted, result.selected)} unchanged, version ${result.version}, " +
             "${result.totalChars} chars; content not returned"
     return (listOf(readPageLine(result)) + stateNotes(result, show) + line).joinToString("\n")
 }
@@ -348,10 +399,15 @@ private fun readPageLine(result: BrowserReadResult): String {
     return pageLine(result.title, result.url, extra)
 }
 
-internal fun readText(result: BrowserReadResult, show: Boolean = false): String {
+/** A read's header and content. [label] names what was read in place of its scope, as for data. */
+internal fun readText(
+    result: BrowserReadResult,
+    show: Boolean = false,
+    label: String? = null,
+): String {
     val end = result.offset + result.returnedChars
     val range = buildString {
-        append("# ").append(what(result.extracted, result.selected)).append(", chars ")
+        append("# ").append(label ?: what(result.extracted, result.selected)).append(", chars ")
         append(result.offset).append('-').append(end).append(" of ").append(result.totalChars)
         append(", version ").append(result.version)
         if (result.changed == true) append(" (changed)")
@@ -391,12 +447,18 @@ internal fun outlineText(result: BrowserReadResult, maxChars: Int, show: Boolean
 internal fun matchesText(result: BrowserFindResult): String {
     val head = listOf(pageLine(result.title, result.url)) + reloadedNote(result)
     val queries = result.queries
+    val data = result.extracted == "data"
     if (queries != null) {
         val summary =
-            "# ${plural(queries.size, "query", "queries")} in " +
-                "${what(result.extracted, result.selected)} " +
-                "(${result.totalChars} chars, version ${result.version}), " +
-                "${result.total} matches in all; @ is each one's offset"
+            if (data) {
+                "# ${plural(queries.size, "query", "queries")} in data, ${result.total} matches " +
+                    "in all. $DATA_OFFSETS"
+            } else {
+                "# ${plural(queries.size, "query", "queries")} in " +
+                    "${what(result.extracted, result.selected)} " +
+                    "(${result.totalChars} chars, version ${result.version}), " +
+                    "${result.total} matches in all; @ is each one's offset"
+            }
         val lines = queries.flatMap { query ->
             val count = plural(query.total, "match", "matches")
             val title =
@@ -413,15 +475,22 @@ internal fun matchesText(result: BrowserFindResult): String {
     }
     val matches = result.matches.orEmpty()
     val summary =
-        "# ${result.total} matches in ${what(result.extracted, result.selected)} " +
-            "(${result.totalChars} chars, version ${result.version}); showing ${matches.size}" +
-            "${more(matches.size, result.total)}; @ is each one's offset"
+        if (data) {
+            "# ${result.total} matches in data; showing ${matches.size}" +
+                "${more(matches.size, result.total)}. $DATA_OFFSETS"
+        } else {
+            "# ${result.total} matches in ${what(result.extracted, result.selected)} " +
+                "(${result.totalChars} chars, version ${result.version}); showing ${matches.size}" +
+                "${more(matches.size, result.total)}; @ is each one's offset"
+        }
     return (head + summary + matches.map(::matchLine)).joinToString("\n")
 }
 
 private fun matchLine(match: TextMatch): String = buildString {
     append('@').append(match.offset).append(' ')
-    match.heading?.let { append("under ").append(quoted(it)).append(": ") }
+    val path = match.path
+    if (path != null) append("at ").append(path).append(": ")
+    else match.heading?.let { append("under ").append(quoted(it)).append(": ") }
     append('…').append(oneLine(match.before)).append('«').append(oneLine(match.match))
     append('»').append(oneLine(match.after)).append('…')
 }
@@ -460,6 +529,12 @@ private fun quoted(text: String): String =
 
 private val WHITESPACE = Regex("\\s+")
 private const val MAX_LISTED_FEEDS = 5
+private const val MAX_LISTED_BLOBS = 5
+
+/** What a data find's offsets and paths mean. */
+private const val DATA_OFFSETS =
+    "Each match shows its path, and @ is its offset into the JSON browser_read returns for that " +
+        "blob, or for find's path when one was given"
 private const val OPEN_LOAD_MS = 15_000L
 private const val AFTER_LOAD_SETTLE_MS = 5_000L
 private const val MS_PER_S = 1_000

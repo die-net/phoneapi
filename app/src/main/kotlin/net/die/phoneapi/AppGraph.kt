@@ -391,8 +391,11 @@ class AppGraph(
                     "\n" +
                     asset("page-pending.js").decodeToString() +
                     "\n" +
+                    asset("page-data.js").decodeToString() +
+                    "\n" +
                     asset("page-read.js").decodeToString()
             },
+            dataScript = { asset("page-data.js").decodeToString() },
             pendingScript = { asset("page-pending.js").decodeToString() },
             devtoolsGap = DevtoolsPreconditions(context)::explain,
             refreshHz = { deviceInfo.display().refreshRate },
