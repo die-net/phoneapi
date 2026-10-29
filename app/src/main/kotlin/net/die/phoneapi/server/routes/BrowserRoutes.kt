@@ -16,6 +16,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import net.die.phoneapi.browser.DEVTOOLS_CLOSED
 import net.die.phoneapi.model.ApiException
+import net.die.phoneapi.model.BrowserCaptureRequest
 import net.die.phoneapi.model.BrowserFindRequest
 import net.die.phoneapi.model.BrowserGestureRequest
 import net.die.phoneapi.model.BrowserInput
@@ -47,10 +48,10 @@ fun Route.browserRoutes(services: ServerServices) {
             call.respond(withScreen(call, services, false) { call.browser(services, it).targets() })
         }
         post("/v1/browser/tabs") {
-            val url = call.receive<OpenTabRequest>().url
+            val request = call.receive<OpenTabRequest>()
             call.respond(
                 withScreen(call, services, needed = false, launching = true) {
-                    call.browser(services, it).openTab(url)
+                    call.browser(services, it).openTab(request.url, request.capture)
                 }
             )
         }
@@ -77,7 +78,10 @@ fun Route.browserRoutes(services: ServerServices) {
     }
 }
 
-/** Snapshots, reading, finding, script, and console logs. Only `show` takes the screen. */
+/**
+ * Snapshots, reading, finding, script, recording responses, and console logs. Only `show` takes the
+ * screen.
+ */
 private fun Route.browserReadRoutes(services: ServerServices) {
     get("/v1/browser/targets/{id}/snapshot") {
         val q = call.request.queryParameters
@@ -114,6 +118,14 @@ private fun Route.browserReadRoutes(services: ServerServices) {
         call.respond(
             withScreen(call, services, needed = false, launching = true) {
                 call.browser(services, it).evaluate(call.targetId(), request)
+            }
+        )
+    }
+    post("/v1/browser/targets/{id}/capture") {
+        val request = call.receive<BrowserCaptureRequest>()
+        call.respond(
+            withScreen(call, services, false) {
+                call.browser(services, it).capture(call.targetId(), request.on)
             }
         )
     }

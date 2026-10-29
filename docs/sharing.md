@@ -210,6 +210,7 @@ A tab id that no longer works says why: the tab closed, as a session's tabs do w
 - The raw CDP socket can use any tab except one a live holder owns.
 - Each session can have 4 tabs open, and all sessions 8, not counting the placeholder, unowned tabs, or tabs a session claimed. Opening past either fails with `tab_limit` and a message to close one. Under memory pressure Chrome unloads hidden tabs, as in [Tabs that stop answering](#tabs-that-stop-answering). The caps keep that rare, and a few tabs at a time is what a turn needs. On the 2 GB emulator unloading started at 17 tabs, so 8 leaves room for the tab on screen, unowned tabs, and other apps on a 4 GB phone.
 - The tabs a session opened close when it ends. Tabs it claimed go back to being unowned.
+- A tab's [recorded responses](api.md#recorded-responses) stay with its owner. Recording stops when a session claims a tab and when it gives one back, so a tab never changes hands with someone else's responses in it.
 
 Whoever holds the screen can open Chrome's tab switcher and see other holders' tab titles. Given that the accounts are shared anyway, that is accepted.
 

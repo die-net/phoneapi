@@ -36,8 +36,9 @@ internal data class DataExtract(
 )
 
 /**
- * A blob from `page-data.js`, with its JSON [text] when the read wanted it and it fit the budget.
- * [omitted] says it was wanted but did not fit.
+ * A blob from `page-data.js` or a recorded response, with its JSON [text] when the read wanted it
+ * and it fit the budget. [omitted] says it was wanted but did not fit. [missing] says why a wanted
+ * response has no text, such as Chrome no longer holding its body.
  */
 @Serializable
 internal data class DataBlobText(
@@ -46,6 +47,7 @@ internal data class DataBlobText(
     val chars: Int,
     val text: String? = null,
     val omitted: Boolean = false,
+    val missing: String? = null,
 )
 
 /**
@@ -57,7 +59,8 @@ internal const val DATA_BUDGET = 2_000_000
 /** What a data outline says for a page with no embedded JSON. */
 internal const val NO_DATA =
     "No embedded data found: the page has no JSON in script tags, script assignments, or " +
-        "JSON.parse calls. Data it shows may load after the page does, from URLs its scripts fetch."
+        "JSON.parse calls. Data it shows may load after the page does, from URLs its scripts " +
+        "fetch. browser_capture records those responses so scope data can read them."
 
 internal fun checkDataRead(request: BrowserReadRequest) {
     val data = request.scope == ReadScope.DATA
@@ -136,9 +139,6 @@ internal fun decodeData(result: EvalResult): DataExtract {
 internal fun readData(extract: DataExtract, request: BrowserReadRequest): BrowserReadResult {
     val blobs = DataBlobs(extract.blobs)
     val path = request.path
-    if (extract.blobs.isEmpty() && (path != null || request.paths.isNotEmpty())) {
-        throw ApiException.badRequest("the page embeds no data")
-    }
     val sink = WindowSink(request.offset, request.maxChars + 1)
     val values =
         when {
@@ -201,7 +201,6 @@ internal fun findData(extract: DataExtract, request: BrowserFindRequest): Browse
     val blobs = DataBlobs(extract.blobs)
     val path = request.path
     if (path != null) {
-        if (extract.blobs.isEmpty()) throw ApiException.badRequest("the page embeds no data")
         blobs.resolve(path, search::search)?.let { throw ApiException.badRequest(it) }
     } else {
         blobs.forEachRoot(search::search)
@@ -289,9 +288,13 @@ private class DataBlobs(private val list: List<DataBlobText>) {
 
     private fun scan(name: String, text: String): JsonScan = scans.getOrPut(name) { JsonScan(text) }
 
-    /** Calls [visit] with the root of each blob, for a search of every blob. */
+    /**
+     * Calls [visit] with the root of each blob, for a search of every blob. A response with no text
+     * to read, such as one that is not JSON, is skipped; the outline says why.
+     */
     fun forEachRoot(visit: (String, JsonScan, Int) -> Unit) {
         for (blob in list) {
+            if (blob.missing != null) continue
             val text = blob.text ?: throw ApiException.badRequest(notRead(blob))
             val scan = scan(blob.name, text)
             visit(blob.name, scan, scan.space(0))
@@ -384,17 +387,22 @@ private class DataBlobs(private val list: List<DataBlobText>) {
     }
 
     private fun noBlob(name: String): String {
-        if (list.isEmpty()) return "the page embeds no data"
-        return "no blob named ${quote(name)}; the blobs are " + listed(list.map { it.name })
+        val why =
+            if (list.isEmpty()) "the page embeds no data"
+            else "no blob named ${quote(name)}; the blobs are " + listed(list.map { it.name })
+        if (!name.startsWith(RESPONSE_PREFIX)) return why
+        return "$why. Responses are listed only while browser_capture records them, and go " +
+            "when it stops or the page loads another"
     }
 
     private fun notRead(blob: DataBlobText): String =
-        if (blob.chars > DATA_BUDGET) {
-            "${blob.name} is ${blob.chars} characters, more than the $DATA_BUDGET a read takes"
-        } else {
-            "${blob.name} was not read, since one read takes at most $DATA_BUDGET characters of " +
-                "data; pass ${blob.name} as path to read it"
-        }
+        blob.missing
+            ?: if (blob.chars > DATA_BUDGET) {
+                "${blob.name} is ${blob.chars} characters, more than the $DATA_BUDGET a read takes"
+            } else {
+                "${blob.name} was not read, since one read takes at most $DATA_BUDGET characters of " +
+                    "data; pass ${blob.name} as path to read it"
+            }
 }
 
 /**

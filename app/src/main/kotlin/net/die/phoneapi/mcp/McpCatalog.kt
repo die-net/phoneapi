@@ -340,7 +340,7 @@ private val TOOLS: List<McpTool> =
                 "Open a tab and return its target, for every other browser tool. The tab is yours: other sessions cannot see it, and it closes when your session ends. Prefer it over open_intent for web pages. With Chrome hidden, the tab opens in the background and the screen is untouched. With Chrome on screen, Chrome switches to the new tab, and the result has tookScreen true. url must be http(s) or about:blank. A page that hands off to an installed app loads as a website in the tab. Follow with wait_for on browser.url and browser.settled. To only read or search a page, browser_read or browser_find with url opens it for you.",
             scope = Scope.BROWSER,
             available = Capabilities::browserCdp,
-            arguments = serializer<UrlArgs>(),
+            arguments = serializer<BrowserOpenArgs>(),
             annotations = changes,
             call = { graph, _, request -> browserOpen(graph, request) },
         ),
@@ -377,7 +377,7 @@ private val TOOLS: List<McpTool> =
         McpTool(
             name = "browser_read",
             description =
-                "Read a page's text as markdown, a slice at a time. Works in the background. scope article (default) is the main content without navigation, footers, and ads. page is all visible text. selector reads every element it matches, in page order, such as a table. The header gives the total length, a version, and nextOffset for the next slice, and flags a page that looks blocked or still loading. It also names the page's feeds, its canonical URL, and its next page when it links to them. Pass version from an earlier read to get only the header when the content has not changed. Pages built by scripts often embed their data as JSON, which the header's data line names. Read it with scope data: without a path you get an outline whose lines each start with a path to pass back; path reads one value; a * in a path reads that field from every item, such as __NEXT_DATA__/props/pageProps/items/*/name; and paths reads several values in one call. Prefer these to paging through a large blob. outline returns only headings with their offsets, cheaply. Pass url instead of target to open a new tab and read it in one call, and close true to close the tab afterwards, so a one-look read is a single call. A tab that is not on screen is not drawn, so content that loads when drawn may be missing; the header says so, and show brings the tab forward first.",
+                "Read a page's text as markdown, a slice at a time. Works in the background. scope article (default) is the main content without navigation, footers, and ads. page is all visible text. selector reads every element it matches, in page order, such as a table. The header gives the total length, a version, and nextOffset for the next slice, and flags a page that looks blocked or still loading. It also names the page's feeds, its canonical URL, and its next page when it links to them. Pass version from an earlier read to get only the header when the content has not changed. Pages built by scripts often embed their data as JSON, which the header's data line names. Read it with scope data: without a path you get an outline whose lines each start with a path to pass back; path reads one value; a * in a path reads that field from every item, such as __NEXT_DATA__/props/pageProps/items/*/name; and paths reads several values in one call. Prefer these to paging through a large blob. Data a page fetches after it loads is not embedded; browser_capture records those responses, and a scope data read with url records them for you. outline returns only headings with their offsets, cheaply. Pass url instead of target to open a new tab and read it in one call, and close true to close the tab afterwards, so a one-look read is a single call. A tab that is not on screen is not drawn, so content that loads when drawn may be missing; the header says so, and show brings the tab forward first.",
             scope = Scope.BROWSER,
             available = Capabilities::browserCdp,
             arguments = serializer<BrowserReadArgs>(),
@@ -453,6 +453,16 @@ private val TOOLS: List<McpTool> =
             arguments = serializer<EvalArgs>(),
             annotations = changes,
             call = { graph, _, request -> browserEval(graph, request) },
+        ),
+        McpTool(
+            name = "browser_capture",
+            description =
+                "Record the JSON responses a tab's page fetches, such as the data a page loads after it appears or when you tap something. Turn it on before the action, then browser_read with scope data lists each response as response-1, response-2, and so on, which paths read like any other blob. Recording lasts until on false, the tab closes, or 10 minutes pass without a read. To record a page's load, browser_open with capture true, or call this before browser_navigate. browser_read with url and scope data records for you. Chrome keeps the last 4 MB of what the page loads, so on a busy page read soon after the action.",
+            scope = Scope.BROWSER,
+            available = Capabilities::browserCdp,
+            arguments = serializer<BrowserCaptureArgs>(),
+            annotations = changes,
+            call = { graph, _, request -> browserCapture(graph, request) },
         ),
         McpTool(
             name = "browser_console",

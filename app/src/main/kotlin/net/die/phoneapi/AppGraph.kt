@@ -372,6 +372,7 @@ class AppGraph(
             listSockets = { helper.require().listDevtoolsSockets() },
             open = { name -> openDevtools(name, DEVTOOLS_READ_MS) },
             openProbe = { name -> openDevtools(name, TabProbe.PROBE_MS) },
+            openCapture = { name -> openDevtools(name, 0) },
             contentBounds = { pkg -> tree.contentBounds(pkg.orEmpty()) },
             touchAt = { rect, humanize ->
                 val outcome = touch.tap(rect, humanize = humanize)

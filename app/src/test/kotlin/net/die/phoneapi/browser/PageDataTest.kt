@@ -273,6 +273,55 @@ class PageDataTest {
     }
 
     @Test
+    fun `reads recorded responses`() {
+        val page =
+            DataExtract(
+                blobs =
+                    listOf(
+                        DataBlobText("response-1", "https://a.test/api", 13, """{"items":[1]}"""),
+                        DataBlobText(
+                            "response-2",
+                            "https://a.test/old",
+                            40,
+                            missing = "Chrome no longer has the body of response-2",
+                        ),
+                    )
+            )
+        val outline = readData(page, BrowserReadRequest(scope = ReadScope.DATA)).content!!
+        assertTrue(
+            outline.startsWith("response-1: object, 1 key, 13 chars, from https://a.test/api")
+        )
+        assertTrue(
+            "response-2: 40 chars, from https://a.test/old; Chrome no longer has the body" in
+                outline,
+            outline,
+        )
+        // A search of every blob skips the response it cannot read.
+        val found = findData(page, BrowserFindRequest(query = "items", scope = ReadScope.DATA))
+        assertEquals(listOf("response-1/items"), found.matches.orEmpty().map { it.path })
+        val read = BrowserReadRequest(scope = ReadScope.DATA, path = "response-1/items/0")
+        assertEquals("1", readData(page, read).content)
+        fun why(path: String) =
+            assertThrows(ApiException::class.java) {
+                    readData(page, BrowserReadRequest(scope = ReadScope.DATA, path = path))
+                }
+                .message
+        assertEquals("Chrome no longer has the body of response-2", why("response-2/x"))
+        assertTrue(
+            why("response-9")
+                .orEmpty()
+                .endsWith(
+                    "while browser_capture records them, " +
+                        "and go when it stops or the page loads another"
+                )
+        )
+        assertEquals(
+            "no blob named \"other\"; the blobs are response-1, response-2",
+            why("other"),
+        )
+    }
+
+    @Test
     fun `reads a blob at the budget`() {
         val item = """{"id":1234,"name":"item","tags":["a","b"]},"""
         val count = (DATA_BUDGET - 20) / item.length

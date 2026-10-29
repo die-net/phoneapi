@@ -11,6 +11,7 @@ import net.die.phoneapi.lease.Holder
 import net.die.phoneapi.lease.ScreenLease
 import net.die.phoneapi.model.ActionResult
 import net.die.phoneapi.model.ApiException
+import net.die.phoneapi.model.BrowserCaptureResult
 import net.die.phoneapi.model.BrowserFindRequest
 import net.die.phoneapi.model.BrowserFindResult
 import net.die.phoneapi.model.BrowserGestureRequest
@@ -104,6 +105,26 @@ class TabsTest {
         assertEquals(emptyList<BrowserTarget>(), tabs.browserFor(b).targets())
         assertEquals("not_found", error { tabs.browserFor(b).read(tab.id, BrowserReadRequest()) })
         assertEquals(setOf(tab.id), store.ids)
+    }
+
+    @Test
+    fun `recording stays with its owner`() = runBlocking {
+        val tabs = tabs()
+        val mine = tabs.browserFor(a).openTab("https://example.com/", capture = true)
+        tabs.browserFor(a).capture(mine.id, on = true)
+        assertEquals("not_found", error { tabs.browserFor(b).capture(mine.id, on = false) })
+        // An unowned tab another client recorded stops recording when a session claims it, and
+        // again when that session gives it back, so no one reads what someone else recorded.
+        val old = browser.add("old")
+        tabs.shared.capture(old, on = true)
+        tabs.browserFor(a).read(old, BrowserReadRequest())
+        tabs.browserFor(a).read(old, BrowserReadRequest())
+        tabs.end(a)
+        assertEquals(
+            listOf("new" to true, mine.id to true, old to true, old to false, old to false),
+            browser.captures,
+        )
+        assertEquals(listOf(mine.id), browser.closed)
     }
 
     @Test
@@ -333,7 +354,16 @@ class TabsTest {
 
         override suspend fun targets(): List<BrowserTarget> = open.toList()
 
-        override suspend fun openTab(url: String): BrowserTarget {
+        /** Each capture call, as the tab and whether it turned recording on. */
+        val captures = mutableListOf<Pair<String, Boolean>>()
+
+        override suspend fun capture(id: String, on: Boolean): BrowserCaptureResult {
+            captures += id to on
+            return BrowserCaptureResult(capturing = on)
+        }
+
+        override suspend fun openTab(url: String, capture: Boolean): BrowserTarget {
+            if (capture) captures += "new" to true
             val id = add("t${next++}")
             open[open.lastIndex] = open.last().copy(url = url)
             if (chromeInFront()) shown = id

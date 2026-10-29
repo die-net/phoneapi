@@ -111,7 +111,8 @@ class Tabs(
             ids
         }
         for ((id, owner) in mine) {
-            if (owner.opened) closeQuietly(id)
+            // A tab given back must not show the next user what this session recorded.
+            if (owner.opened) closeQuietly(id) else stopCapture(id)
         }
     }
 
@@ -135,7 +136,11 @@ class Tabs(
         mutex.withLock { saveOpened() }
     }
 
-    internal suspend fun opened(holder: Holder.Session, url: String): BrowserTarget {
+    internal suspend fun opened(
+        holder: Holder.Session,
+        url: String,
+        capture: Boolean = false,
+    ): BrowserTarget {
         mutex.withLock {
             val opened = owners.values.filter { it.opened }
             if (opened.count { it.holder == holder } >= perSession || opened.size >= total) {
@@ -147,7 +152,7 @@ class Tabs(
                 )
             }
         }
-        val tab = base.openTab(url)
+        val tab = base.openTab(url, capture)
         mutex.withLock {
             owners[tab.id] = Owner(holder, opened = true)
             saveOpened()
@@ -332,7 +337,7 @@ class Tabs(
     ) {
         val (socket, _) = parseBrowserTargetId(id)
         if (id == placeholder) throw missing(id)
-        mutex.withLock {
+        val claimed = mutex.withLock {
             val owner = owners[id]
             when {
                 owner?.holder == holder -> return
@@ -340,9 +345,15 @@ class Tabs(
                 owner != null -> throw missing(id)
                 socket == CHROME_SOCKET -> {
                     owners[id] = Owner(holder, opened = false)
-                    return
+                    true
                 }
+                else -> false
             }
+        }
+        if (claimed) {
+            // What was recorded before this session claimed the tab is not this session's.
+            stopCapture(id)
+            return
         }
         val pkg = base.targets().firstOrNull { it.id == id }?.packageName
         if (!lease.holds(holder) || pkg == null || !inFront(pkg)) throw missing(id)
@@ -397,6 +408,14 @@ class Tabs(
 
     private fun saveOpened() {
         store.save(owners.filterValues { it.opened }.keys + listOfNotNull(placeholder))
+    }
+
+    private suspend fun stopCapture(id: String) {
+        try {
+            base.capture(id, on = false)
+        } catch (_: ApiException) {
+            // Recording is not available, so nothing was recorded.
+        }
     }
 
     private suspend fun closeQuietly(id: String) {

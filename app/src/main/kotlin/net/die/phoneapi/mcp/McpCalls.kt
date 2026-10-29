@@ -29,6 +29,7 @@ import net.die.phoneapi.model.BrowserSnapshotOptions
 import net.die.phoneapi.model.BrowserSwipeRequest
 import net.die.phoneapi.model.BrowserTapRequest
 import net.die.phoneapi.model.BrowserTextRequest
+import net.die.phoneapi.model.CAPTURE_OPEN_DOC
 import net.die.phoneapi.model.ClipboardReadRequest
 import net.die.phoneapi.model.ClipboardWriteRequest
 import net.die.phoneapi.model.ConsoleRequest
@@ -313,7 +314,16 @@ internal suspend fun browserOpen(
     services: ServerServices,
     request: CallToolRequest,
 ): CallToolResult = runTool {
-    jsonText(services.browser.openTab(request.args<UrlArgs>().url))
+    val args = request.args<BrowserOpenArgs>()
+    jsonText(services.browser.openTab(args.url, args.capture))
+}
+
+internal suspend fun browserCapture(
+    services: ServerServices,
+    request: CallToolRequest,
+): CallToolResult = runTool {
+    val args = request.args<BrowserCaptureArgs>()
+    jsonText(services.browser.capture(args.target, args.on))
 }
 
 internal suspend fun browserNavigate(
@@ -619,7 +629,20 @@ internal data class PackageArgs(
     val wait: Boolean = true,
 )
 
-@Serializable internal data class UrlArgs(val url: String)
+@Serializable
+internal data class BrowserOpenArgs(
+    val url: String,
+    @Doc(CAPTURE_OPEN_DOC) val capture: Boolean = false,
+)
+
+@Serializable
+internal data class BrowserCaptureArgs(
+    val target: String,
+    @Doc(
+        "true (default) starts recording, or keeps it going. false stops it and forgets what it recorded."
+    )
+    val on: Boolean = true,
+)
 
 @Serializable internal data class TargetArgs(val target: String)
 

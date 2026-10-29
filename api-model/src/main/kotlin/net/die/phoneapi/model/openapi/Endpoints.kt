@@ -6,6 +6,8 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.serializer
 import net.die.phoneapi.model.ActionResult
 import net.die.phoneapi.model.AppInfo
+import net.die.phoneapi.model.BrowserCaptureRequest
+import net.die.phoneapi.model.BrowserCaptureResult
 import net.die.phoneapi.model.BrowserFindRequest
 import net.die.phoneapi.model.BrowserFindResult
 import net.die.phoneapi.model.BrowserGestureRequest
@@ -409,6 +411,14 @@ public val phoneApiEndpoints: List<ApiEndpoint> =
             "Evaluate JavaScript in an isolated world.",
             serializer<EvalRequest>(),
             serializer<EvalResult>(),
+        ),
+        endpoint(
+            ApiMethod.POST,
+            "/v1/browser/targets/{id}/capture",
+            Scope.BROWSER,
+            "Start or stop recording a tab's JSON responses for scope data.",
+            serializer<BrowserCaptureRequest>(),
+            serializer<BrowserCaptureResult>(),
         ),
         endpoint(
             ApiMethod.POST,

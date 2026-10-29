@@ -114,7 +114,11 @@ internal suspend fun browserRead(
             path = args.path,
             paths = args.paths,
         )
-    val opened = args.url?.let { url -> openAndSettle(services, scopes, url, args.close) }
+    // A data read of a page it opens records the page's responses too, as browser_capture does.
+    val opened =
+        args.url?.let { url ->
+            openAndSettle(services, scopes, url, args.close, args.scope == ReadScope.DATA)
+        }
     val target = opened?.target ?: args.target.orEmpty()
     val text =
         closingAfter(services, target, args.close) {
@@ -175,8 +179,9 @@ private suspend fun openAndSettle(
     scopes: Set<Scope>,
     url: String,
     closing: Boolean = false,
+    capture: Boolean = false,
 ): Opened {
-    val tab = services.browser.openTab(url)
+    val tab = services.browser.openTab(url, capture)
     val deadline = System.currentTimeMillis() + OPEN_LOAD_MS
     var loaded = loaded(services, tab.id)
     while (!loaded && System.currentTimeMillis() < deadline) {
@@ -195,6 +200,7 @@ private suspend fun openAndSettle(
             append(" (loaded; still busy after ").append(AFTER_LOAD_SETTLE_MS / MS_PER_S)
             append(" s, so content it adds later may be missing)")
         }
+        if (capture && !closing) append(" recording")
         if (!closing) append("; close it with browser_close when done")
     }
     return Opened(tab.id, line)
@@ -249,7 +255,11 @@ internal suspend fun browserFind(
             path = args.path,
         )
     checkFind(find)
-    val opened = args.url?.let { url -> openAndSettle(services, scopes, url, args.close) }
+    // A data read of a page it opens records the page's responses too, as browser_capture does.
+    val opened =
+        args.url?.let { url ->
+            openAndSettle(services, scopes, url, args.close, args.scope == ReadScope.DATA)
+        }
     val target = opened?.target ?: args.target.orEmpty()
     val text =
         closingAfter(services, target, args.close) {
