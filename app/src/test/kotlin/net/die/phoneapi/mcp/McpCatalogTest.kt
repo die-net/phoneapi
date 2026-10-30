@@ -130,6 +130,25 @@ class McpCatalogTest {
         assertTrue(reduced.description.contains("node ids are not stable"))
     }
 
+    /** Clients such as Legwork drop the `initialize` instructions, so the tools say it too. */
+    @Test
+    fun `tools say sharing is normal`() {
+        val tools = visibleMcpTools(Scope.entries.toSet(), allOn()).associateBy { it.name }
+        assertTrue(tools.getValue("device_info").description.contains("at the same time"))
+        assertTrue(tools.getValue("browser_open").description.contains("start in the background"))
+        assertTrue(
+            tools.getValue("screen_release").description.contains("goes back to the background")
+        )
+    }
+
+    @Test
+    fun `screen tools say so once`() {
+        MCP_TOOLS.forEach { tool ->
+            val times = tool.description.split("Uses the screen.").size - 1
+            assertEquals(if (tool.name in SCREEN_TOOLS) 1 else 0, times, tool.name)
+        }
+    }
+
     @Test
     fun `bad enum fails to decode`() {
         val failure =
