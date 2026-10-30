@@ -44,7 +44,11 @@ class TabsTest {
     private val browser = RecordingBrowser { front == CHROME }
     private val store = MemoryStore()
     private val lease =
-        ScreenLease(CoroutineScope(Dispatchers.Unconfined), cleanup = { emptyList() })
+        ScreenLease(
+            CoroutineScope(Dispatchers.Unconfined),
+            cleanup = { emptyList() },
+            lockedNow = { true },
+        )
     private val a = Holder.Session("a")
     private val b = Holder.Session("b")
 

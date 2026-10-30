@@ -217,6 +217,7 @@ class AppGraph(
                     clipboard,
                     showPlaceholder = { tabs.showPlaceholder() },
                 )::run,
+            lockedNow = { state.refresh().keyguard.locked },
         )
     private val tabs: Tabs =
         Tabs(

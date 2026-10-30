@@ -25,14 +25,21 @@ class ScreenLeaseTest {
 
     private var cleanups = 0
     private var failures = emptyList<String>()
+    /** Whether each cleanup was told to lock, in order. */
+    private val locks = mutableListOf<Boolean>()
+    /** The keyguard the fake phone shows. A cleanup that locks puts it up. */
+    private var locked = true
 
     private fun TestScope.lease(scope: CoroutineScope = backgroundScope) =
         ScreenLease(
             scope = scope,
-            cleanup = {
+            cleanup = { lock ->
                 cleanups++
+                locks += lock
+                if (lock) locked = true
                 failures
             },
+            lockedNow = { locked },
             now = { testScheduler.currentTime },
         )
 
@@ -252,6 +259,63 @@ class ScreenLeaseTest {
     }
 
     @Test
+    fun `a waiter gets it unlocked`() = runTest {
+        val lease = lease()
+        lease.withScreen(a) { locked = false }
+        val waiting = async { lease.withScreen(b) {} }
+        runCurrent()
+        lease.release(a)
+        val notes = waiting.await().notes
+        assertEquals(listOf(false), locks)
+        assertTrue(notes.single().contains("not locked"), notes.toString())
+        // b found it unlocked, but a's unlock is still owed a lock once no one waits.
+        lease.release(b)
+        runCurrent()
+        assertEquals(listOf(false, true), locks)
+        assertTrue(locked)
+    }
+
+    @Test
+    fun `an owner's unlock is kept`() = runTest {
+        locked = false
+        val lease = lease()
+        lease.withScreen(a) {}
+        lease.release(a)
+        runCurrent()
+        assertEquals(listOf(false), locks)
+        assertFalse(locked)
+    }
+
+    @Test
+    fun `a gone waiter still locks`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val lease =
+            ScreenLease(
+                scope = backgroundScope,
+                cleanup = { lock ->
+                    locks += lock
+                    if (!lock) gate.await()
+                    if (lock) locked = true
+                    emptyList()
+                },
+                lockedNow = { locked },
+                now = { testScheduler.currentTime },
+            )
+        lease.withScreen(a) { locked = false }
+        val waiting = async { lease.withScreen(b) {} }
+        runCurrent()
+        lease.release(a)
+        runCurrent()
+        waiting.cancel()
+        runCurrent()
+        gate.complete(Unit)
+        runCurrent()
+        assertEquals(listOf(false, true), locks)
+        assertTrue(locked)
+        assertNull(lease.state.value.holder)
+    }
+
+    @Test
     fun `waiters wait for cleanup`() = runTest {
         val gate = CompletableDeferred<Unit>()
         val lease =
@@ -261,6 +325,7 @@ class ScreenLeaseTest {
                     gate.await()
                     emptyList()
                 },
+                lockedNow = { true },
                 now = { testScheduler.currentTime },
             )
         lease.withScreen(a) {}

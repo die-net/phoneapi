@@ -153,6 +153,7 @@ internal class FakeApi(leaseWaitMs: Long = ScreenLease.WAIT_MS) {
                 cleanups++
                 emptyList()
             },
+            lockedNow = { true },
             waitMs = leaseWaitMs,
         )
 

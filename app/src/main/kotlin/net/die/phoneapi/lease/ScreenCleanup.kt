@@ -10,9 +10,9 @@ import net.die.phoneapi.model.KeyRequest
 
 /**
  * Leaves the screen in a known state between holders: keyboard hidden, Chrome on its blank
- * placeholder tab, home, locked, and no clip PhoneAPI wrote or copied left on the clipboard.
- * Locking every time, rather than only when someone waits, keeps "locked between holders" simple to
- * check, and the stored PIN makes the next unlock cheap. Returns the steps that failed.
+ * placeholder tab, home, and no clip PhoneAPI wrote or copied left on the clipboard. It locks the
+ * phone when the lease says to, which is when no one waits and sessions found it locked. Returns
+ * the steps that failed.
  */
 class ScreenCleanup(
     private val input: InputService,
@@ -20,14 +20,14 @@ class ScreenCleanup(
     private val clipboard: ClipboardService,
     private val showPlaceholder: suspend () -> Unit = {},
 ) {
-    suspend fun run(): List<String> = buildList {
+    suspend fun run(lock: Boolean): List<String> = buildList {
         step("hide the keyboard") { input.hideIme() }
         step("show the blank tab") {
             showPlaceholder()
             ActionResult(ok = true)
         }
         step("go home") { input.key(KeyRequest(key = "HOME")) }
-        step("lock") { power.lock() }
+        if (lock) step("lock") { power.lock() }
         step("clear the clipboard") { clipboard.clearOwn() }
     }
 
