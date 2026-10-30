@@ -129,6 +129,13 @@ internal open class HelperImpl : IHelper.Stub() {
     override fun awaitClipChange(seen: Long, timeoutMs: Long): Long =
         privileged("clip-wait") { clipboard.awaitChange(seen, timeoutMs) }
 
+    override fun clearPrimaryClip() {
+        privileged("clip-clear") { clipboard.clearPrimaryClip() }
+    }
+
+    override fun primaryClipTimestamp(): Long =
+        privileged("clip-time") { clipboard.primaryClipTimestamp() }
+
     @Suppress("MissingUseCall") // The app reads this pipe; closing it here would break that.
     override fun readContent(uri: String): ParcelFileDescriptor =
         privileged("content") {

@@ -73,5 +73,12 @@ interface IHelper {
     // `content read`. Reading the clip with primaryClip grants the shell read access to its URIs.
     ParcelFileDescriptor readContent(String uri) = 73;
 
+    // Empties the clipboard, as the shell user.
+    void clearPrimaryClip() = 74;
+
+    // When the clip on the clipboard was put there, from its description, or -1 when the
+    // clipboard is empty. Reading the description does not read the clip itself.
+    long primaryClipTimestamp() = 75;
+
     oneway void shutdown() = 99;
 }

@@ -1,6 +1,7 @@
 package net.die.phoneapi.helper.compat
 
 import android.content.ClipData
+import android.content.ClipDescription
 import android.content.IOnPrimaryClipChangedListener
 import android.os.IBinder
 import android.os.Process
@@ -12,15 +13,18 @@ import kotlin.concurrent.withLock
 
 /**
  * The clipboard service's Binder, called as the shell user, which may read the clip while another
- * app is in front. getPrimaryClip, setPrimaryClip, and addPrimaryClipChangedListener gained an
- * attribution tag on Android 12 and a device id on Android 14, so each call fills its String
- * arguments with the package then no tag, and its int arguments with the user then the default
- * device.
+ * app is in front. getPrimaryClip, getPrimaryClipDescription, setPrimaryClip, clearPrimaryClip, and
+ * addPrimaryClipChangedListener gained an attribution tag on Android 12 and a device id on Android
+ * 14, so each call fills its String arguments with the package then no tag, and its int arguments
+ * with the user then the default device.
  */
 internal class ShellClipboard {
     private val service: Any
     private val get: Method
     private val set: Method
+    // Looked up on first use, so a release that lacks it can still read and write the clip.
+    private val clear: Method by lazy { method("clearPrimaryClip") }
+    private val describe: Method by lazy { method("getPrimaryClipDescription") }
     private val lock = ReentrantLock()
     private val changed = lock.newCondition()
     private var changes = 0L
@@ -59,6 +63,13 @@ internal class ShellClipboard {
     fun setPrimaryClip(clip: ClipData) {
         call(set, clip)
     }
+
+    fun clearPrimaryClip() {
+        call(clear)
+    }
+
+    /** When the clip was put on the clipboard, or -1 when it is empty. */
+    fun primaryClipTimestamp(): Long = (call(describe) as? ClipDescription)?.timestamp ?: -1
 
     /**
      * Waits up to [timeoutMs] for the change count to pass [seen], and returns it. The count starts

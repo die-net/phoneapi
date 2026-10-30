@@ -30,6 +30,9 @@ import net.die.phoneapi.model.KeyRequest
  * KEYCODE_COPY and KEYCODE_PASTE, which text fields and Chrome handle. An image is put on the
  * clipboard by this app rather than the helper, since the clip's URI is this app's [ClipProvider]
  * and only its owner may share it.
+ *
+ * [own] remembers the last clip it wrote or copied, so [clearOwn] can tell that clip from one
+ * someone copied since.
  */
 class ClipboardServiceImpl(
     private val context: Context,
@@ -37,12 +40,17 @@ class ClipboardServiceImpl(
     private val input: InputService,
     private val io: CoroutineContext,
 ) : ClipboardService {
+    private val own = OwnClip()
+
     override suspend fun read(request: ClipboardReadRequest): ClipboardContent {
         if (!request.copy) return content(call { primaryClip() })
         val seen = call { awaitClipChange(-1, 0) }
         input.key(KeyRequest("KEYCODE_COPY", autoWake = request.autoWake))
         val now = call { awaitClipChange(seen, COPY_WAIT_MS) }
-        if (now > seen) settle(now)
+        if (now > seen) {
+            settle(now)
+            mark()
+        }
         return content(call { primaryClip() }).copy(changed = now > seen)
     }
 
@@ -52,6 +60,7 @@ class ClipboardServiceImpl(
         }
         // No label, as when a person copies from a text field, so the clip looks like theirs.
         call { setPrimaryClip(ClipData.newPlainText(null, request.text)) }
+        mark()
         return pasted(request.paste, request.autoWake)
     }
 
@@ -94,7 +103,24 @@ class ClipboardServiceImpl(
             val clip = ClipData.newUri(context.contentResolver, null, uri)
             context.getSystemService(ClipboardManager::class.java).setPrimaryClip(clip)
         }
+        // The image goes on through this app, but only the helper reads the clip's timestamp.
+        if (helper.isRunning) mark() else own.forget()
         return pasted(paste, autoWake = true)
+    }
+
+    override suspend fun clearOwn(): ActionResult {
+        // Without a clip of PhoneAPI's there is nothing to ask the helper, which may be down.
+        if (!own.held) return ActionResult(ok = true, message = "The clip is not PhoneAPI's")
+        if (!own.take(call { primaryClipTimestamp() })) {
+            return ActionResult(ok = true, message = "Someone copied something since")
+        }
+        call { clearPrimaryClip() }
+        return ActionResult(ok = true, backend = BACKEND)
+    }
+
+    /** Remembers the clip PhoneAPI just put on the clipboard, by its timestamp. */
+    private suspend fun mark() {
+        own.put(call { primaryClipTimestamp() })
     }
 
     private suspend fun pasted(paste: Boolean, autoWake: Boolean): ActionResult {

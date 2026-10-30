@@ -170,7 +170,7 @@ When a holder releases the screen or expires, PhoneAPI runs cleanup before grant
 1. Hide the keyboard.
 2. Show the [placeholder tab](#background-tabs-stay-in-the-background), then HOME, so Chrome is in the background and shows a blank page the next time it comes forward.
 3. Lock. Locking always, rather than only when someone waits, keeps "locked between holders" simple to check, and the stored PIN makes the next unlock cheap.
-4. Clear the clipboard, if the helper can. Whether the shell user can clear it on Android 11 is not checked yet.
+4. Clear the clipboard, if its clip is one PhoneAPI wrote or copied (`clipboard_write`, `clipboard_read` with `copy`, or the viewer's paste and copy) and nothing has replaced it since. PhoneAPI notes the timestamp Android gives each clip it puts there, and clears the clipboard only if the clip still has that timestamp, so a clip the phone's owner or an app copied later is left alone. Android 16 reports one write as two clipboard changes, a second apart, so a change count does not identify a clip. Before 2026-10-29 this step was listed here but not built.
 
 The next holder's first result that needs the screen starts with a note saying that cleanup ran, or which step failed, so a home screen and a locked phone are no surprise and it checks the state before it acts. Until 2026-10-22 only failures were reported, and a session that found the phone cleaned up had no way to tell why.
 
@@ -402,7 +402,7 @@ Checked on the phone on 2026-10-22, with this branch's dev build beside v0.3.0, 
 
 Still to check on the phone:
 - Whether a tab opened while Chrome is in the background becomes Chrome's selected tab. On the Android 16 emulator it does: Chrome selects it as it comes forward, even over a `Page.bringToFront` sent just before, which is why `show` checks that its tab is still showing and tries again. Opening the tab did not bring Chrome forward.
-- Whether the shell user can clear the clipboard on Android 11, without clearing what the phone's owner copied.
+- That the shell user can clear the clipboard through `IClipboard.clearPrimaryClip` and read `getPrimaryClipDescription` on Android 11. On the Android 16 emulator on 2026-10-29, with the helper as the shell user, cleanup cleared PhoneAPI's own clip, and left a clip copied after it. As root the emulator refuses the helper any clipboard access.
 - That clipboard text and images go both ways on Android 11, checked so far on the Android 10 and 16 emulators. Also that the helper can read an image another app copied, which the emulators' Chrome would not put on the clipboard.
 - That the viewer's copy and paste work from a real keyboard in Chrome, Safari, and Firefox, including the second Cmd+C that Safari and Firefox need when the page guessed text and the phone held an image.
 - How many hidden tabs Chrome keeps loaded on the Moto G Power before it unloads them, to check the cap of 8.
