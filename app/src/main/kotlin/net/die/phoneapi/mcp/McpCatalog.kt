@@ -88,7 +88,7 @@ private val TOOLS: List<McpTool> =
         McpTool(
             name = "device_info",
             description =
-                "Model, Android version, display, helper status, capabilities, and current state: screen, keyguard, keyboard, and foregroundPackage. Cheap. foregroundPackage only updates while the helper is watching the screen, as during wait_for or right after ui_snapshot, so it can be missing or stale. To know what is in front, take a ui_snapshot or wait_for a window condition. The phone is shared: screenHolder says who has the screen now (you; parent, the session that started yours; subagent, one you started with session_start; agent; person; or script; absent when it is free), and screenHeldMs for how long. Tools whose descriptions say Uses the screen wait for it.",
+                "Model, Android version, display, helper status, capabilities, and current state: screen, keyguard, keyboard, and foregroundPackage. Cheap. foregroundPackage only updates while the helper is watching the screen, as during wait_for or right after ui_snapshot, so it can be missing or stale. To know what is in front, take a ui_snapshot or wait_for a window condition. Other agents, scripts, and people use the phone at the same time, which is normal. screenHolder says who has the screen now (you; parent, the session that started yours; subagent, one you started with session_start; agent; person; or script; absent when it is free), and screenHeldMs for how long. Tools whose descriptions say Uses the screen wait for it.",
             scope = Scope.OBSERVE,
             available = always,
             arguments = serializer<EmptyArgs>(),
@@ -118,7 +118,7 @@ private val TOOLS: List<McpTool> =
         McpTool(
             name = "screen_release",
             description =
-                "Let the screen go when you are done with it for now, so other clients can use the phone. PhoneAPI goes home and locks it. Your tabs stay yours and background browser work keeps going. The next call that needs the screen takes it again, waiting if someone else has it. Holding the screen idle while another client waits also lets it go, after 30 s.",
+                "Let the screen go when you are done with it for now, so other clients can use the phone. While you hold it, browser input uses touch and brings your tab forward; after this it goes back to the background. PhoneAPI goes home and locks it. Your tabs stay yours and background browser work keeps going. The next call that needs the screen takes it again, waiting if someone else has it. Holding the screen idle while another client waits also lets it go, after 30 s.",
             scope = Scope.OBSERVE,
             available = always,
             arguments = serializer<EmptyArgs>(),
@@ -158,7 +158,7 @@ private val TOOLS: List<McpTool> =
         McpTool(
             name = "tap",
             description =
-                "Tap a node selector or a point in screen pixels. A selector by text, id, or desc needs no snapshot first, so prefer it when you know the label; a ref needs one. Humanized by default. Wakes the screen itself. Follow with wait_for on what should appear, with snapshot true to see it. Uses the screen.",
+                "Tap a node selector or a point in screen pixels. A selector by text, id, or desc needs no snapshot first, so prefer it when you know the label; a ref needs one. Humanized by default. Wakes the screen itself. Follow with wait_for on what should appear, with snapshot true to see it.",
             scope = Scope.CONTROL,
             available = Capabilities::inputInject,
             arguments = serializer<TapRequest>(),
@@ -168,7 +168,7 @@ private val TOOLS: List<McpTool> =
         McpTool(
             name = "swipe",
             description =
-                """Swipe from one point to another, or in a direction (up, down, left, right) across the screen or inside a selector. from and to are objects such as {"x":540,"y":1800}. Uses the screen.""",
+                """Swipe from one point to another, or in a direction (up, down, left, right) across the screen or inside a selector. from and to are objects such as {"x":540,"y":1800}.""",
             scope = Scope.CONTROL,
             available = Capabilities::inputInject,
             arguments = serializer<SwipeRequest>(),
@@ -188,7 +188,7 @@ private val TOOLS: List<McpTool> =
         McpTool(
             name = "press_key",
             description =
-                "Press BACK, HOME, ENTER, DEL, or any KEYCODE_* name. HOME returns to the launcher. Uses the screen.",
+                "Press BACK, HOME, ENTER, DEL, or any KEYCODE_* name. HOME returns to the launcher.",
             scope = Scope.CONTROL,
             available = Capabilities::textKeyevent,
             arguments = serializer<KeyRequest>(),
@@ -198,7 +198,7 @@ private val TOOLS: List<McpTool> =
         McpTool(
             name = "clipboard_read",
             description =
-                "Read the phone's clipboard as text, with its MIME types, or as an image when it holds one. copy true presses KEYCODE_COPY first, so the app in front copies what is selected on screen, and changed says whether the clipboard changed. A selection made by script in a background tab is not on screen, so it is not copied. The clipboard is the phone user's and can hold a password (sensitive true): read it only for the task at hand. Uses the screen. Requires the shell helper.",
+                "Read the phone's clipboard as text, with its MIME types, or as an image when it holds one. copy true presses KEYCODE_COPY first, so the app in front copies what is selected on screen, and changed says whether the clipboard changed. A selection made by script in a background tab is not on screen, so it is not copied. The clipboard is the phone user's and can hold a password (sensitive true): read it only for the task at hand. Requires the shell helper.",
             scope = Scope.CONTROL,
             available = Capabilities::clipboard,
             arguments = serializer<ClipboardReadRequest>(),
@@ -208,7 +208,7 @@ private val TOOLS: List<McpTool> =
         McpTool(
             name = "clipboard_write",
             description =
-                "Put plain text on the phone's clipboard, replacing what the phone user copied. paste true then presses KEYCODE_PASTE into the focused field, which is faster than type_text for long text, though the app sees a paste rather than typing. Uses the screen. Requires the shell helper.",
+                "Put plain text on the phone's clipboard, replacing what the phone user copied. paste true then presses KEYCODE_PASTE into the focused field, which is faster than type_text for long text, though the app sees a paste rather than typing. Requires the shell helper.",
             scope = Scope.CONTROL,
             available = Capabilities::clipboard,
             arguments = serializer<ClipboardWriteRequest>(),
@@ -218,7 +218,7 @@ private val TOOLS: List<McpTool> =
         McpTool(
             name = "wait_for",
             description =
-                "Wait until all or any conditions match, then optionally show the result: snapshot true adds a ui_snapshot outline, and screenshot true adds a screenshot for maps and other screens with an empty tree. So an action takes two calls, the action and one wait_for, rather than a snapshot before and after. Pass at least one condition. Use it after an action instead of sleeping. A condition's type is node, window, ime, idle, screen, keyguard, or browser.*. After open_intent or app_launch, wait for {type window, package} with {type node, selector {textContains}}. After browser_open, wait for browser.url and browser.settled on its tab: pass the tab as target, once at the top level or on each browser condition. To check a browser_tap, wait for browser.element with a CSS selector for the new state, such as an attribute selector, rather than running browser_eval. idle is a fallback when no text is known. Browser conditions need the browser scope, and target when more than one page is open.",
+                "Wait until all or any conditions match, then optionally show the result: snapshot true adds a ui_snapshot outline, and screenshot true adds a screenshot for maps and other screens with an empty tree. So an action takes two calls, the action and one wait_for, rather than a snapshot before and after. Pass at least one condition. Use it after an action instead of sleeping. Conditions on the UI, snapshot true, and screenshot true use the screen; browser.* conditions alone do not. A condition's type is node, window, ime, idle, screen, keyguard, or browser.*. After open_intent or app_launch, wait for {type window, package} with {type node, selector {textContains}}. After browser_open, wait for browser.url and browser.settled on its tab: pass the tab as target, once at the top level or on each browser condition. To check a browser_tap, wait for browser.element with a CSS selector for the new state, such as an attribute selector, rather than running browser_eval. idle is a fallback when no text is known. Browser conditions need the browser scope, and target when more than one page is open.",
             scope = Scope.OBSERVE,
             available = always,
             arguments = serializer<WaitArgs>(),
@@ -247,7 +247,7 @@ private val TOOLS: List<McpTool> =
         McpTool(
             name = "app_launch",
             description =
-                "Launch an app by package name and bring it to the front. fresh clears its task first. wait (default true) waits for it to reach the foreground, not for its content. Uses the screen.",
+                "Launch an app by package name and bring it to the front. fresh clears its task first. wait (default true) waits for it to reach the foreground, not for its content.",
             scope = Scope.CONTROL,
             available = always,
             arguments = serializer<PackageArgs>(),
@@ -277,7 +277,7 @@ private val TOOLS: List<McpTool> =
         McpTool(
             name = "open_intent",
             description =
-                "Start an intent, such as action android.intent.action.VIEW with an https URL as data, to open a place in Maps or a deep link in an app. For a web page in Chrome, use browser_open instead: it returns the target id that browser tools need. package and component are optional. Waits for the app to reach the foreground, not for its content, so follow with wait_for, with snapshot or screenshot true to see the content. Without a package, a URI that several apps handle shows a chooser and returns ok false: name a package. Wakes the screen itself. Uses the screen. Requires the shell helper.",
+                "Start an intent, such as action android.intent.action.VIEW with an https URL as data, to open a place in Maps or a deep link in an app. For a web page in Chrome, use browser_open instead: it returns the target id that browser tools need. package and component are optional. Waits for the app to reach the foreground, not for its content, so follow with wait_for, with snapshot or screenshot true to see the content. Without a package, a URI that several apps handle shows a chooser and returns ok false: name a package. Wakes the screen itself. Requires the shell helper.",
             scope = Scope.CONTROL,
             available = Capabilities::appsManage,
             arguments = serializer<IntentRequest>(),
@@ -337,7 +337,7 @@ private val TOOLS: List<McpTool> =
         McpTool(
             name = "browser_open",
             description =
-                "Open a tab and return its target, for every other browser tool. The tab is yours: other sessions cannot see it, and it closes when your session ends. Prefer it over open_intent for web pages. With Chrome hidden, the tab opens in the background and the screen is untouched. With Chrome on screen, Chrome switches to the new tab, and the result has tookScreen true. url must be http(s) or about:blank. A page that hands off to an installed app loads as a website in the tab. Follow with wait_for on browser.url and browser.settled. To only read or search a page, browser_read or browser_find with url opens it for you.",
+                "Open a tab and return its target, for every other browser tool. The tab is yours: other sessions cannot see it, and it closes when your session ends. Other sessions work in their own tabs at the same time, so start in the background unless you know the page needs the screen. Prefer it over open_intent for web pages. With Chrome hidden, the tab opens in the background and the screen is untouched. With Chrome on screen, Chrome switches to the new tab, and the result has tookScreen true. url must be http(s) or about:blank. A page that hands off to an installed app loads as a website in the tab. Follow with wait_for on browser.url and browser.settled. To only read or search a page, browser_read or browser_find with url opens it for you.",
             scope = Scope.BROWSER,
             available = Capabilities::browserCdp,
             arguments = serializer<BrowserOpenArgs>(),
@@ -495,9 +495,15 @@ private val TOOLS: List<McpTool> =
         ),
     )
 
-/** Every tool but the session tools also takes `session`. */
+/**
+ * Every tool but the session tools also takes `session`, and every tool in [SCREEN_TOOLS] says it
+ * uses the screen, which device_info tells clients to look for.
+ */
 internal val MCP_TOOLS: List<McpTool> = TOOLS.map {
-    if (it.name in SESSION_TOOLS) it else it.withSessionArgument()
+    val tool =
+        if (it.name in SCREEN_TOOLS) it.copy(description = "${it.description} Uses the screen.")
+        else it
+    if (tool.name in SESSION_TOOLS) tool else tool.withSessionArgument()
 }
 
 /** The argument that names which session a call is for. */
