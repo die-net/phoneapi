@@ -11,6 +11,8 @@ import net.die.phoneapi.core.ApiJson
 import net.die.phoneapi.model.ApiError
 import net.die.phoneapi.model.Scope
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNotNull
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Test
 
 class WaitRouteTest {
@@ -57,7 +59,34 @@ class WaitRouteTest {
         }
     }
 
+    @Test
+    fun `person wait skips screen`() = testApplication {
+        val api = FakeApi()
+        val observe = api.tokens.issue("observe", setOf(Scope.OBSERVE))
+        application { phoneApiModule(api.services) }
+        apiClient().use { client ->
+            val person =
+                client.post("/v1/wait") {
+                    bearer(observe)
+                    session(startSession(client, observe))
+                    contentType(ContentType.Application.Json)
+                    setBody(PERSON_WAIT)
+                }
+            assertEquals(HttpStatusCode.OK, person.status)
+            assertNull(api.lease.state.value.holder)
+
+            client.post("/v1/wait") {
+                bearer(observe)
+                session(startSession(client, observe))
+                contentType(ContentType.Application.Json)
+                setBody(NODE_WAIT)
+            }
+            assertNotNull(api.lease.state.value.holder)
+        }
+    }
+
     private companion object {
+        const val PERSON_WAIT = """{"all":[{"type":"screen","person":false}],"timeoutMs":0}"""
         const val NODE_WAIT = """{"all":[{"type":"node","selector":{"text":"Ok"}}],"timeoutMs":0}"""
         // A session's browser wait names its tab unless the session can see exactly one.
         const val BROWSER_WAIT =

@@ -8,6 +8,7 @@ import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
@@ -17,6 +18,8 @@ import net.die.phoneapi.core.BrowserService
 import net.die.phoneapi.core.DeviceStateTracker
 import net.die.phoneapi.core.EventBus
 import net.die.phoneapi.core.WaitService
+import net.die.phoneapi.lease.Holder
+import net.die.phoneapi.lease.LeaseState
 import net.die.phoneapi.model.ApiException
 import net.die.phoneapi.model.Scope
 import net.die.phoneapi.model.SnapshotOptions
@@ -41,6 +44,8 @@ internal class WaitServiceImpl(
     private val io: CoroutineDispatcher,
     private val browser: BrowserService,
     private val openDevtools: suspend (String, Long) -> DevtoolsSocket,
+    /** Who holds the screen, for `screen` with `person`. */
+    private val lease: StateFlow<LeaseState>,
     /** Whether Chrome shows a dialog from a page at this host, for `browser.dialog`. */
     private val dialogFrom: suspend (String) -> Boolean = { false },
 ) : WaitService {
@@ -67,6 +72,7 @@ internal class WaitServiceImpl(
                 state = state,
                 io = io,
                 lastChangeMs = { tree.lastChangeMs },
+                personHolds = { lease.value.holder is Holder.Viewer },
                 browser = browserWatch,
             )
         val all = request.all.map(watchers::watcher)
@@ -154,6 +160,7 @@ internal class WaitServiceImpl(
                 tree.seq.drop(1),
                 tree.windowsVersion.drop(1),
                 state.state.drop(1),
+                lease.drop(1),
                 bus.events,
             )
         val page = browser?.changes ?: return device

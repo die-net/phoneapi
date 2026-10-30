@@ -79,7 +79,7 @@ Built. Before REST sessions, a REST call was a one-call holder: it took the scre
 - `POST /v1/sessions` creates a session and returns `{"id": "...", "idleMs": 1200000}`. It is bound to the calling token, counts toward the same caps as MCP sessions (16 per token, 32 in all), and fails with 429 `too_many_sessions` past them. Any token can create one; the admin scope is only for listing and ending other sessions.
 - Every REST call that needs a session carries its id in `Mcp-Session-Id`, the header MCP uses, so one id works on both. An id another token created, or one that has ended, gets 404 `not_found`, as on `/mcp`.
 - `DELETE /v1/sessions/current`, with the header, ends the caller's session the way an MCP `DELETE` does: cleanup if it held the screen, its opened tabs close, its claimed tabs go back to being unowned. Idle expiry after 20 minutes without a request, revoking the token, and the admin `DELETE /v1/sessions/{hash}` end it too.
-- `POST /v1/screen/release`, with the header, is the REST counterpart of `screen_release`: cleanup, then the next waiter gets the screen, and the session keeps its tabs.
+- `POST /v1/screen/release`, with the header, is the REST counterpart of `screen_release`: cleanup, then the next waiter gets the screen, and the session keeps its tabs. It takes the same optional `cleanup`, as in [Handing the screen to a person](#handing-the-screen-to-a-person).
 
 ### What a REST session gets
 
@@ -139,7 +139,7 @@ One exclusive lease per phone. The first call that needs the screen takes it. An
 
 - Device and app tools: `tap`, `swipe`, `type_text`, `press_key`, `clipboard_read`, `clipboard_write`, `ui_act`, `keyboard_*`, `app_*`, `open_intent`, `device_wake`, `device_unlock`, `device_lock`, `device_orientation`.
 - Observing the screen: `ui_snapshot`, `ui_find`, `screenshot`. These would show another holder's screen.
-- `wait_for` with any condition that is not `browser.*`, or with `snapshot` or `screenshot`.
+- `wait_for` with any condition that is not `browser.*`, or with `snapshot` or `screenshot`. A `screen` condition with only `person` is the exception: it reads the lease, not the screen.
 - Browser input with `input` `touch`, which brings the tab forward. Pointer input with `input` `cdp` too: Chrome only takes cdp touch on the tab it is showing, so it already needs Chrome in front.
 - Anything else that brings Chrome or a tab to the front.
 
@@ -163,9 +163,21 @@ The cost is that an idle holder can come back to a home screen and a locked phon
 
 A session can also let the screen go itself with `screen_release`, which does the same as the grace period at once: cleanup, then the next waiter. Idle expiry, ending the session from the admin routes, and **Take over** in the viewer still cover a stuck client.
 
+### Handing the screen to a person
+
+A person helps an agent in one of two ways. An agent whose session stays open, such as Claude Code, keeps it while the person uses **Take over**, and gets the screen back without cleanup. Legwork's session ends with its turn, and ending a session cleans the screen and closes its tabs, so by the time the person opens the viewer the captcha they were asked to solve is gone.
+
+So `screen_release` takes `cleanup`, default true. With `cleanup` false, the screen goes as it is, with no cleanup, and the session's tab that Chrome is showing counts as claimed rather than opened, so when the session ends it goes back to being unowned instead of closing. Its other tabs close as usual, and if Chrome is not in front showing one of its tabs, all of them do; the result says which. The person finds the page on screen, and the next turn finds the tab in `browser_targets` and claims it by using it. The next holder's first result says the last holder let the screen go without cleanup. An agent that did its browser work in the background brings the tab on screen first, for example with `browser_snapshot` and `show`, and unlocks the phone, since `show` wakes it but leaves the keyguard up.
+
+An agent that waits for the person uses `wait_for` with `{type: screen, person: true}` to see them take the screen, then `person: false` to see them let go. Neither takes the screen, so the wait is not cancelled by the person's take and does not hold anyone off. These read the state now, so `person: true` does not match a person who already finished, such as before a Legwork agent's next turn. To know the person is done, the agent waits for the page after the captcha with a `browser.*` condition, and the descriptions say so. A `wait_for` lasts at most 300 s, so a longer wait takes several calls. Checked on the Android 16 emulator on 2026-10-30: a session's wait for `person` true matched within 0.2 s of a viewer's take, and the wait for `person` false matched when the viewer's socket closed. Neither took the screen. A session that held the screen kept holding it through both waits and got it back when the viewer let go.
+
+A client already waiting for the screen gets it as soon as the agent lets it go with `cleanup` false, before the person takes it. It gets the note that the screen was left as it was, but nothing holds the screen for the person.
+
+Checked on the Android 16 emulator on 2026-10-29: a REST session brought a page on screen, released with `cleanup` false, and ended. Chrome stayed in front and unlocked, and the tab stayed open and unowned. A viewer took the screen, which woke it when it was off, and typed into the page. When its socket closed, nothing was cleaned up. The next session found the tab in `browser_targets`, read what the viewer typed, and got the note that a person had used the screen.
+
 ### Cleanup
 
-When a holder releases the screen or expires, PhoneAPI runs cleanup before granting the next waiter:
+When a session releases the screen or expires, PhoneAPI runs cleanup before granting the next waiter. A viewer letting go, and `screen_release` with `cleanup` false, run none, as in [Viewer](#viewer):
 
 1. Hide the keyboard.
 2. Show the [placeholder tab](#background-tabs-stay-in-the-background), then HOME, so Chrome is in the background and shows a blank page the next time it comes forward.
@@ -188,10 +200,12 @@ Input does. Today the viewer sends touches on `WS /v1/input/pointer` and keys, t
 
 - The viewer's keys, text, and orientation move onto its socket, next to pointer frames. The socket is the holder, and needs no extra header to tell viewer posts from a script's.
 - The viewer's first input takes the screen at once if no one holds it. That input is delivered.
-- If someone else holds it, the input is dropped, not queued, and the socket tells the page. The page shows that the phone is in use, by an agent or by another viewer, and for how long, with a **Take over** button.
-- **Take over** takes the screen at once. The holder's call in progress is canceled. Until the screen comes back, the holder's screen calls fail at once with `screen_taken`, rather than waiting 60 seconds, so the model stops and says so instead of retrying. No cleanup runs, so the person sees what the agent left, such as a half-filled form or a captcha.
+- If someone else holds it, the input is dropped, not queued, and the socket tells the page. The page shows that the phone is in use, by an agent, a script, or another viewer, and for how long, with a **Take over** button.
+- **Done** lets the screen go at once, as 30 s without input or closing the page does. The page shows it whenever the viewer holds the screen.
+- **Take over** takes the screen at once, and turns it on if it was off, leaving the keyguard up. The holder's call in progress is canceled. Until the screen comes back, the holder's screen calls fail at once with `screen_taken`, rather than waiting 60 seconds, so the model stops and says so instead of retrying. No cleanup runs, so the person sees what the agent left, such as a half-filled form or a captcha.
 - The viewer gives the screen up after 30 seconds without input, or when its socket closes. The page shows that it has.
-- If it took the screen over and that holder is still alive, the screen goes straight back to it, without cleanup, since the person may have fixed something for it. Its first result that needs the screen says a person used the screen and for how long. Otherwise cleanup runs and the queue goes on.
+- If it took the screen over and that holder is still alive, the screen goes straight back to it, without cleanup, since the person may have fixed something for it. Its first result that needs the screen says a person used the screen and for how long.
+- Otherwise the screen goes to the next waiter as the person left it, also without cleanup, and that waiter's first result says so. A person helping an agent whose session ended, as after `cleanup` false, leaves their result for the agent's next turn. A person using the phone for themselves, such as to change a setting, leaves it unlocked, and Android's own timeout locks it once no viewer page is showing it. Until 2026-10-29 cleanup ran here, which hid what the person had done.
 - The socket sends lease changes to the page, so it can show who has the screen without polling.
 
 Agents never take the screen over. They queue behind a viewer like anyone else.
@@ -402,7 +416,7 @@ Checked on the phone on 2026-10-22, with this branch's dev build beside v0.3.0, 
 
 Still to check on the phone:
 - Whether a tab opened while Chrome is in the background becomes Chrome's selected tab. On the Android 16 emulator it does: Chrome selects it as it comes forward, even over a `Page.bringToFront` sent just before, which is why `show` checks that its tab is still showing and tries again. Opening the tab did not bring Chrome forward.
-- That the shell user can clear the clipboard through `IClipboard.clearPrimaryClip` and read `getPrimaryClipDescription` on Android 11. On the Android 16 emulator on 2026-10-29, with the helper as the shell user, cleanup cleared PhoneAPI's own clip, and left a clip copied after it. As root the emulator refuses the helper any clipboard access.
+- That the shell user can clear the clipboard through `IClipboard.clearPrimaryClip` and read `getPrimaryClipDescription` on Android 11. On the Android 16 emulator on 2026-10-29, with the helper as the shell user, cleanup cleared PhoneAPI's own clip, left a clip copied after it, and left the clip after `cleanup` false. As root the emulator refuses the helper any clipboard access.
 - That clipboard text and images go both ways on Android 11, checked so far on the Android 10 and 16 emulators. Also that the helper can read an image another app copied, which the emulators' Chrome would not put on the clipboard.
 - That the viewer's copy and paste work from a real keyboard in Chrome, Safari, and Firefox, including the second Cmd+C that Safari and Firefox need when the page guessed text and the phone held an image.
 - How many hidden tabs Chrome keeps loaded on the Moto G Power before it unloads them, to check the cap of 8.

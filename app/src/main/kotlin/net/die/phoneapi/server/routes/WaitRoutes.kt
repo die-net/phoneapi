@@ -11,8 +11,8 @@ import net.die.phoneapi.server.scoped
 import net.die.phoneapi.server.token
 import net.die.phoneapi.server.waits
 import net.die.phoneapi.server.withScreen
-import net.die.phoneapi.wait.isBrowserCondition
 import net.die.phoneapi.wait.requireWaitAccess
+import net.die.phoneapi.wait.usesScreen
 
 /**
  * `POST /v1/wait` blocks until the conditions hold, and can return a fresh snapshot with the result
@@ -25,8 +25,7 @@ fun Route.waitRoutes(services: ServerServices) {
             val request = call.receive<WaitRequest>()
             val scopes = call.token.scopes
             requireWaitAccess(request, scopes)
-            val screen =
-                request.snapshot || (request.all + request.any).any { !isBrowserCondition(it) }
+            val screen = request.snapshot || (request.all + request.any).any(::usesScreen)
             call.respond(
                 withScreen(call, services, screen) {
                     call.waits(services, it).wait(request, scopes)

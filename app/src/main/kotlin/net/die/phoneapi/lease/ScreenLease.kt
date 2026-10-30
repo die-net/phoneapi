@@ -51,6 +51,10 @@ data class Screened<T>(val value: T, val notes: List<String>)
  * Taking over cancels the agent's screen call in progress and makes its next ones fail with
  * `screen_taken` until the viewer lets go, when the screen goes back to it without cleanup.
  *
+ * A person's screen is a hand-off, so a viewer letting go runs no cleanup either, and the next
+ * holder finds the screen as the person left it, with a note. A session can let the screen go the
+ * same way with [releaseAsIs].
+ *
  * A session that has made no screen call for [graceMs] while someone waits loses the screen to
  * them, with cleanup, and is told on its next screen call, which waits like any other. So a client
  * that keeps its session open between tasks cannot keep others off the screen.
@@ -72,7 +76,8 @@ class ScreenLease(
     private val taken = HashSet<Job>()
     private val started = AtomicLong()
     private var cleaning = false
-    private var pendingCleanup: String? = null
+    /** A note for whoever gets the screen next, about the state the last holder left it in. */
+    private var forNext: String? = null
     /** When the holder last started or finished a screen call, or got the screen. */
     private var lastCallMs = 0L
     private var idleWatch: Job? = null
@@ -168,16 +173,27 @@ class ScreenLease(
 
     /**
      * Lets the screen go. A viewer that took it over hands it back to that session without cleanup.
-     * Otherwise [cleanup] runs, when asked, before the next waiter gets it. A holder that is only
-     * waiting leaves the queue.
+     * Another viewer leaves the screen as it is for the next holder. Otherwise [cleanup] runs, when
+     * asked, before the next waiter gets it. A holder that is only waiting leaves the queue.
      */
     suspend fun release(holder: Holder, cleanup: Boolean = true) {
         val clean = mutex.withLock { letGo(holder, cleanup) }
         if (clean) scope.launch { finishCleanup(runCleanup()) }
     }
 
-    /** [release] with [mutex] held. True when cleanup should run. */
-    private fun letGo(holder: Holder, cleanup: Boolean): Boolean {
+    /**
+     * Lets [holder]'s screen go as it is, such as for a person in the viewer to pick up a captcha
+     * the agent cannot solve. No cleanup runs, and the next holder is told so.
+     */
+    suspend fun releaseAsIs(holder: Holder.Session) {
+        mutex.withLock { letGo(holder, cleanup = false, left = LEFT_AS_IS) }
+    }
+
+    /**
+     * [release] with [mutex] held. [left] is the note the next holder gets when the screen goes as
+     * it is. True when cleanup should run.
+     */
+    private fun letGo(holder: Holder, cleanup: Boolean, left: String? = null): Boolean {
         queue.removeAll { it.holder == holder }
         val current = _state.value
         if (current.takenFrom == holder) _state.value = current.copy(takenFrom = null)
@@ -187,9 +203,12 @@ class ScreenLease(
             return false
         }
         _state.value = LeaseState()
-        if (!cleanup) grantNext()
-        cleaning = cleanup
-        return cleanup
+        val note = if (holder is Holder.Viewer) LEFT_BY_PERSON else left
+        val clean = cleanup && note == null
+        if (note != null) forNext = note
+        if (!clean) grantNext()
+        cleaning = clean
+        return clean
     }
 
     /** While someone waits, gives the screen up for an idle session holder after [graceMs]. */
@@ -265,7 +284,7 @@ class ScreenLease(
                     "Cleanup after the last holder did not finish: ${failed.joinToString("; ")}. " +
                         "Check the screen before acting."
                 }
-            pendingCleanup = message
+            forNext = message
             grantNext()
         }
     }
@@ -356,9 +375,9 @@ class ScreenLease(
         _state.value = LeaseState(holder, now())
         lastCallMs = now()
         if (queue.isNotEmpty()) watchIdle()
-        pendingCleanup?.let {
+        forNext?.let {
             note(holder, it)
-            pendingCleanup = null
+            forNext = null
         }
     }
 
@@ -405,6 +424,12 @@ class ScreenLease(
     companion object {
         const val WAIT_MS = 60_000L
         const val GRACE_MS = 30_000L
+        private const val LEFT_BY_PERSON =
+            "A person used the screen from the viewer and left it as it is, with no cleanup, so it " +
+                "may be unlocked and on any app. Check the screen before acting."
+        private const val LEFT_AS_IS =
+            "The last holder let the screen go as it was, with no cleanup. Check the screen " +
+                "before acting."
         /** A screen call that waited at least this long says so in a note. */
         private const val WAITED_NOTE_MS = 2_000L
         private const val BETWEEN_POLL_MS = 50L

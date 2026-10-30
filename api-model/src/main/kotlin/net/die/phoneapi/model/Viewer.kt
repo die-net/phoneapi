@@ -26,7 +26,10 @@ public enum class ViewerHolder {
     @SerialName("agent") AGENT,
 }
 
-/** The screen's holder changed. [takenFrom] is set when a viewer took the screen from an agent. */
+/**
+ * The screen's holder changed. [takenFrom] is set when a viewer took the screen from a session, and
+ * says whether that was an agent or a script.
+ */
 @Serializable
 @SerialName("lease")
 public data class ViewerLease(
@@ -44,6 +47,12 @@ public data class ViewerClipboard(
     val image: String? = null,
     val changed: Boolean,
 ) : ViewerMessage
+
+/**
+ * `{"op":"take"}` from the page: take the screen at once, from whoever has it. [autoWake] turns the
+ * screen on, leaving the keyguard up, as the first input would.
+ */
+@Serializable public data class ViewerTake(val autoWake: Boolean = true)
 
 /** A request from the page failed. [id] echoes the request's own `id`. */
 @Serializable

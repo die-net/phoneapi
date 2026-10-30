@@ -235,6 +235,7 @@ class AppGraph(
             io = ioDispatcher,
             browser = browser,
             openDevtools = ::openDevtools,
+            lease = screenLease.state,
             dialogFrom = { host -> chromeDialogShown(host) },
         )
     internal val video =

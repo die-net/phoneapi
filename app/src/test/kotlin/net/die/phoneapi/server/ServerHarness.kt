@@ -142,6 +142,9 @@ internal class FakeApi(leaseWaitMs: Long = ScreenLease.WAIT_MS) {
     @Volatile var afterPointer: suspend () -> Unit = {}
     @Volatile var cleanups = 0
 
+    /** The autoWake of the last prepareForAction, which only the viewer's take calls here. */
+    @Volatile var prepared: Boolean? = null
+
     val tabStore = MemoryTabStore()
     val lease: ScreenLease =
         ScreenLease(
@@ -206,6 +209,11 @@ internal class FakeApi(leaseWaitMs: Long = ScreenLease.WAIT_MS) {
                     override suspend fun orientation(request: OrientationRequest): ActionResult {
                         this@FakeApi.orientation = request
                         return acted()
+                    }
+
+                    override suspend fun prepareForAction(autoWake: Boolean): Boolean {
+                        prepared = autoWake
+                        return autoWake
                     }
                 },
             clipboard =

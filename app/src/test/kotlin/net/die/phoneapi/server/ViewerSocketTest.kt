@@ -98,6 +98,46 @@ class ViewerSocketTest {
     }
 
     @Test
+    fun `done hands it back`() = testApplication {
+        application { phoneApiModule(api.services) }
+        apiClient().use { client ->
+            val script = Holder.Session(startSession(client, secret))
+            api.services.lease.withScreen(script) {}
+            withTimeout(5.seconds) {
+                client.webSocket("/v1/input/pointer", { bearer(secret) }) {
+                    assertEquals("script", lease(this).holder())
+                    send(Frame.Text("""{"op":"take"}"""))
+                    assertEquals("script", lease(this)["takenFrom"]?.jsonPrimitive?.content)
+                    send(Frame.Text("""{"op":"release"}"""))
+                    assertEquals("script", lease(this).holder())
+                }
+            }
+            assertTrue(api.services.lease.holds(script))
+        }
+        assertEquals(0, api.cleanups)
+    }
+
+    @Test
+    fun `take wakes the screen`() = testApplication {
+        application { phoneApiModule(api.services) }
+        api.services.lease.withScreen(agent) {}
+        apiClient().use { client ->
+            withTimeout(5.seconds) {
+                client.webSocket("/v1/input/pointer", { bearer(secret) }) {
+                    lease(this)
+                    send(Frame.Text("""{"op":"take"}"""))
+                    settle { api.prepared != null }
+                    assertEquals(true, api.prepared)
+                    api.prepared = null
+                    send(Frame.Text("""{"op":"take","autoWake":false}"""))
+                    settle { api.prepared != null }
+                    assertEquals(false, api.prepared)
+                }
+            }
+        }
+    }
+
+    @Test
     fun `orientation goes on the socket`() = testApplication {
         application { phoneApiModule(api.services) }
         apiClient().use { client ->

@@ -29,3 +29,12 @@ public data class SessionStarted(
     val id: String,
     @Doc("The session ends after this long without a request.") val idleMs: Long,
 )
+
+/** The body of `POST /v1/screen/release`, and the arguments of `screen_release`. */
+@Serializable
+public data class ScreenReleaseRequest(
+    @Doc(
+        "Clean up the screen for the next client: hide the keyboard, go home, and lock. false leaves the screen as it is instead, such as a captcha you cannot solve for a person to finish in the viewer, and keeps your tab that Chrome is showing after your session ends, as an unowned tab a later session can claim by using it."
+    )
+    val cleanup: Boolean = true
+)

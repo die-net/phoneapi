@@ -226,7 +226,29 @@ class ScreenLeaseTest {
         lease.release(person)
         runCurrent()
         assertNull(lease.state.value.holder)
-        assertEquals(1, cleanups)
+        assertEquals(0, cleanups)
+    }
+
+    @Test
+    fun `a person's screen is kept`() = runTest {
+        val lease = lease()
+        assertTrue(lease.viewerInput(person))
+        lease.forget(person)
+        val next = lease.withScreen(a) {}
+        assertEquals(0, cleanups)
+        assertTrue(next.notes.single().contains("A person used the screen"), next.notes.single())
+    }
+
+    @Test
+    fun `release as is`() = runTest {
+        val lease = lease()
+        lease.withScreen(a) {}
+        val waiting = async { lease.withScreen(b) {} }
+        runCurrent()
+        lease.releaseAsIs(a)
+        val next = waiting.await()
+        assertEquals(0, cleanups)
+        assertTrue(next.notes.single().contains("as it was"), next.notes.single())
     }
 
     @Test

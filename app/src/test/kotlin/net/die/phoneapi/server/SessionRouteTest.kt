@@ -61,6 +61,25 @@ class SessionRouteTest {
     }
 
     @Test
+    fun `release can leave it as is`() = testApplication {
+        application { phoneApiModule(api.services) }
+        apiClient().use { http ->
+            val first = startSession(http, token)
+            assertEquals(HttpStatusCode.OK, tap(http, first).status)
+            val released =
+                http.post("/v1/screen/release") {
+                    bearer(token)
+                    session(first)
+                    contentType(ContentType.Application.Json)
+                    setBody("""{"cleanup":false}""")
+                }
+            assertTrue(released.bodyAsText().contains("with no cleanup"))
+            assertEquals(HttpStatusCode.OK, tap(http, startSession(http, token)).status)
+            assertEquals(0, api.cleanups)
+        }
+    }
+
+    @Test
     fun `ended sessions are gone`() = testApplication {
         application { phoneApiModule(api.services) }
         apiClient().use { http ->
