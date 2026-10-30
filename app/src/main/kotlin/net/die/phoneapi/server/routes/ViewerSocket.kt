@@ -35,6 +35,7 @@ import net.die.phoneapi.model.ViewerError
 import net.die.phoneapi.model.ViewerHolder
 import net.die.phoneapi.model.ViewerLease
 import net.die.phoneapi.model.ViewerMessage
+import net.die.phoneapi.model.ViewerTake
 import net.die.phoneapi.server.ServerServices
 import net.die.phoneapi.server.SessionsKey
 
@@ -43,8 +44,9 @@ private val viewers = AtomicLong()
 /**
  * `WS /v1/input/pointer`, the viewer's input socket, which holds the screen for the person using
  * it. The first input takes a free screen; while someone else has it, input is dropped and the page
- * is told, and `{"op":"take"}` takes it over. The socket lets the screen go after [VIEWER_IDLE_MS]
- * without input, and when it closes. The server sends `{"op":"lease",...}` when the holder changes.
+ * is told, and `{"op":"take"}` takes it over. The socket lets the screen go on `{"op":"release"}`,
+ * after [VIEWER_IDLE_MS] without input, and when it closes. The server sends `{"op":"lease",...}`
+ * when the holder changes.
  */
 internal suspend fun serveViewer(services: ServerServices, session: DefaultWebSocketServerSession) {
     val viewer = Holder.Viewer(viewers.incrementAndGet())
@@ -114,6 +116,9 @@ private class ViewerSocket(
             "take" -> {
                 touched()
                 lease.takeOver(viewer)
+                act(op, id) {
+                    services.power.prepareForAction(decode<ViewerTake>(message).autoWake)
+                }
             }
             "key" -> act(op, id) { services.input.key(decode<KeyRequest>(message)) }
             "text" -> act(op, id) { services.input.text(decode<TextRequest>(message)) }
@@ -126,6 +131,10 @@ private class ViewerSocket(
                     )
                 }
             "copy" -> act(op, id) { copy(id) }
+            "release" -> {
+                touched()
+                lease.release(viewer)
+            }
             else -> {
                 val frame =
                     try {
@@ -194,7 +203,7 @@ private class ViewerSocket(
                 holder = kind(state.holder),
                 heldMs =
                     if (state.holder == null) 0 else System.currentTimeMillis() - state.sinceMs,
-                takenFrom = ViewerHolder.AGENT.takeIf { state.takenFrom != null },
+                takenFrom = state.takenFrom?.let(::kind),
             )
         )
     }

@@ -28,6 +28,8 @@ internal class ConditionWatchers(
     private val state: DeviceStateTracker,
     private val io: CoroutineDispatcher,
     private val lastChangeMs: () -> Long,
+    /** Whether a person holds the screen in the viewer, for `screen` with `person`. */
+    private val personHolds: () -> Boolean,
     private val browser: BrowserWatch? = null,
 ) {
     fun watcher(condition: WaitCondition): ConditionWatcher =
@@ -36,7 +38,7 @@ internal class ConditionWatchers(
             is WaitCondition.Window -> window(condition)
             is WaitCondition.Ime -> deviceState { it.ime.visible == condition.visible }
             is WaitCondition.Idle -> idle(condition.quietMs)
-            is WaitCondition.Screen -> polledState { (it.screen == ScreenState.ON) == condition.on }
+            is WaitCondition.Screen -> screen(condition)
             is WaitCondition.Keyguard -> polledState { it.keyguard.locked == condition.locked }
             is WaitCondition.BrowserUrl,
             is WaitCondition.BrowserLifecycle,
@@ -84,6 +86,19 @@ internal class ConditionWatchers(
     /** Window titles come straight off the window list, with no tree traversal. */
     private suspend fun hasWindowTitled(text: String): Boolean =
         withContext(io) { tree.windowTitle(text) }
+
+    /** `on` polls, as [polledState] does. The lease reports who holds the screen as it changes. */
+    private fun screen(condition: WaitCondition.Screen): ConditionWatcher {
+        val on = condition.on
+        val person = condition.person
+        if (on == null && person == null) {
+            throw ApiException.badRequest("A screen condition needs on or person")
+        }
+        return ConditionWatcher {
+            val personOk = person == null || personHolds() == person
+            Check(personOk && (on == null || (state.refresh().screen == ScreenState.ON) == on))
+        }
+    }
 
     /** Satisfied once the UI has been quiet for [quietMs]; nothing to react to, so it's timed. */
     private fun idle(quietMs: Long): ConditionWatcher {

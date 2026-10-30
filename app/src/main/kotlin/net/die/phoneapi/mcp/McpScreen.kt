@@ -9,13 +9,14 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonObject
 import net.die.phoneapi.core.ApiJson
 import net.die.phoneapi.lease.Holder
 import net.die.phoneapi.lease.ScreenLease
 import net.die.phoneapi.model.ApiException
 import net.die.phoneapi.model.BrowserInput
 import net.die.phoneapi.model.BrowserInputKind
+import net.die.phoneapi.model.WaitCondition
+import net.die.phoneapi.wait.usesScreen
 
 /** Tools that always take the screen: they act on it or show what is on it. */
 internal val SCREEN_TOOLS =
@@ -64,9 +65,7 @@ internal fun takesScreen(tool: String, args: JsonObject?): Boolean =
     when (tool) {
         in SCREEN_TOOLS -> true
         "wait_for" ->
-            conditionTypes(args).any { !it.startsWith("browser.") } ||
-                flag(args, "snapshot") ||
-                flag(args, "screenshot")
+            conditionsUseScreen(args) || flag(args, "snapshot") || flag(args, "screenshot")
         "browser_tap",
         "browser_swipe",
         "browser_gesture" -> input(args) !in setOf("cdp-mouse")
@@ -131,10 +130,16 @@ internal fun resolveInput(
 private fun input(args: JsonObject?): String =
     (args?.get("input") as? JsonPrimitive)?.contentOrNull?.lowercase() ?: "auto"
 
-private fun conditionTypes(args: JsonObject?): List<String> =
-    listOf("all", "any").flatMap { key ->
-        (args?.get(key) as? JsonArray).orEmpty().mapNotNull { condition ->
-            (condition.jsonObject["type"] as? JsonPrimitive)?.contentOrNull
+/**
+ * Whether any condition in wait_for's [args] uses the screen. One that does not parse counts as
+ * using it, as an unknown type would; the call itself then reports the error.
+ */
+private fun conditionsUseScreen(args: JsonObject?): Boolean =
+    listOf("all", "any").any { key ->
+        (args?.get(key) as? JsonArray).orEmpty().any { condition ->
+            runCatching { ApiJson.decodeFromJsonElement(WaitCondition.serializer(), condition) }
+                .map(::usesScreen)
+                .getOrDefault(true)
         }
     }
 

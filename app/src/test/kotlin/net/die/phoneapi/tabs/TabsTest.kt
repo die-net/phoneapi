@@ -34,6 +34,7 @@ import net.die.phoneapi.model.WaitCondition
 import net.die.phoneapi.model.WaitRequest
 import net.die.phoneapi.model.WaitResult
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
@@ -138,6 +139,31 @@ class TabsTest {
         assertEquals(emptyList<String>(), browser.closed)
         tabs.browserFor(b).read(old, BrowserReadRequest())
         assertEquals(1, tabs.count(b))
+    }
+
+    @Test
+    fun `the shown tab outlives it`() = runBlocking {
+        val tabs = tabs()
+        val shown = tabs.browserFor(a).openTab("https://example.com/")
+        val other = tabs.browserFor(a).openTab("https://example.org/")
+        front = CHROME
+        browser.shown = shown.id
+        assertEquals(shown.id, tabs.keepShowing(a))
+        assertEquals(setOf(other.id), store.ids)
+        tabs.end(a)
+        assertEquals(listOf(other.id), browser.closed)
+        tabs.browserFor(b).read(shown.id, BrowserReadRequest())
+        assertEquals(1, tabs.count(b))
+    }
+
+    @Test
+    fun `a hidden tab is not kept`() = runBlocking {
+        val tabs = tabs()
+        val tab = tabs.browserFor(a).openTab("https://example.com/")
+        browser.shown = tab.id
+        assertNull(tabs.keepShowing(a))
+        tabs.end(a)
+        assertEquals(listOf(tab.id), browser.closed)
     }
 
     @Test

@@ -46,6 +46,7 @@ import net.die.phoneapi.model.OrientationRequest
 import net.die.phoneapi.model.Point
 import net.die.phoneapi.model.SHOW_DOC
 import net.die.phoneapi.model.Scope
+import net.die.phoneapi.model.ScreenReleaseRequest
 import net.die.phoneapi.model.SnapshotFormat
 import net.die.phoneapi.model.SnapshotOptions
 import net.die.phoneapi.model.SwipeDirection
@@ -60,6 +61,7 @@ import net.die.phoneapi.model.WaitCondition
 import net.die.phoneapi.model.WaitRequest
 import net.die.phoneapi.model.schema.Doc
 import net.die.phoneapi.server.ServerServices
+import net.die.phoneapi.server.routes.releaseScreen
 import net.die.phoneapi.tabs.withTarget
 import net.die.phoneapi.wait.requireWaitAccess
 
@@ -234,18 +236,13 @@ internal suspend fun sessionEnd(
     "Ended the session: its tabs are closed, and the screen is cleaned up if it held it."
 }
 
-/** Lets the session's screen go, with cleanup, keeping the session and its tabs. */
-internal suspend fun screenRelease(services: ServerServices): CallToolResult = runTool {
+/** Lets the session's screen go, keeping the session and its tabs. */
+internal suspend fun screenRelease(
+    services: ServerServices,
+    request: CallToolRequest,
+): CallToolResult = runTool {
     val holder = services.holder ?: return@runTool "This call has no MCP session."
-    val held = services.lease.holds(holder)
-    services.lease.release(holder)
-    if (held) {
-        "Released the screen. PhoneAPI hides the keyboard, goes home, and locks the phone " +
-            "before the next client gets it. Your tabs stay yours, and your next call that needs " +
-            "the screen takes it again, waiting if someone else has it."
-    } else {
-        "This session did not hold the screen."
-    }
+    releaseScreen(services, holder, request.args<ScreenReleaseRequest>())
 }
 
 internal suspend fun keyboardHide(services: ServerServices): CallToolResult = runTool {

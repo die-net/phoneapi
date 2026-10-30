@@ -111,10 +111,18 @@ public sealed interface WaitCondition {
         @Doc("How long the UI must stay quiet, in milliseconds.") val quietMs: Long = 500
     ) : WaitCondition
 
-    @Doc("The screen is on or off.")
+    @Doc(
+        "The screen is on or off, or a person holds it in the viewer. Pass on, person, or both. With person alone it does not use the screen."
+    )
     @Serializable
     @SerialName("screen")
-    public data class Screen(@Doc("True when the screen is on.") val on: Boolean) : WaitCondition
+    public data class Screen(
+        @Doc("True when the screen is on.") val on: Boolean? = null,
+        @Doc(
+            "True while a person holds the screen in the viewer, false while nobody does. It is the state now, so true does not match once they have finished."
+        )
+        val person: Boolean? = null,
+    ) : WaitCondition
 
     @Doc("The keyguard is locked or dismissed.")
     @Serializable

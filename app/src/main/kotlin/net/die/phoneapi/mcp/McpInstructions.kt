@@ -28,7 +28,8 @@ internal fun mcpInstructions(scopes: Set<Scope>): String = buildList {
     }
     add(
         "- Tools that use the screen wait up to 60 s for it, then fail with screen_busy. Call " +
-            "screen_release when you are done with it."
+            "screen_release when you are done with it, or to hand it to a person, such as for " +
+            "a captcha."
     )
     add(
         "- Give each subagent or parallel task that uses the phone its own session with " +

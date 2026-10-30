@@ -269,6 +269,13 @@ internal fun isBrowserCondition(condition: WaitCondition): Boolean =
         is WaitCondition.Keyguard -> false
     }
 
+/**
+ * Whether waiting on [condition] takes the screen: anything but `browser.*`, except `screen` with
+ * only `person`, which reads the lease rather than the screen.
+ */
+internal fun usesScreen(condition: WaitCondition): Boolean =
+    !isBrowserCondition(condition) && !(condition is WaitCondition.Screen && condition.on == null)
+
 internal fun browserTarget(condition: WaitCondition): String? =
     when (condition) {
         is WaitCondition.BrowserUrl -> condition.target

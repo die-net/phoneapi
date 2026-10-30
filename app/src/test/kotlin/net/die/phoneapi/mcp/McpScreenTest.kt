@@ -69,6 +69,15 @@ class McpScreenTest {
     }
 
     @Test
+    fun `person waits skip screen`() {
+        assertFalse(takesScreen("wait_for", args("""{"all":[{"type":"screen","person":true}]}""")))
+        assertTrue(takesScreen("wait_for", args("""{"all":[{"type":"screen","on":true}]}""")))
+        val both = """{"any":[{"type":"screen","on":true,"person":false}]}"""
+        assertTrue(takesScreen("wait_for", args(both)))
+        assertTrue(takesScreen("wait_for", args("""{"all":[{"type":"nonsense"}]}""")))
+    }
+
+    @Test
     fun `auto input follows the holder`() {
         assertEquals("cdp-mouse", resolved("browser_tap", "{}", holds = false))
         assertEquals("touch", resolved("browser_tap", """{"input":"auto"}""", holds = true))

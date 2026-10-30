@@ -6,10 +6,12 @@ import io.ktor.server.routing.Route
 import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
+import net.die.phoneapi.lease.Holder
 import net.die.phoneapi.mcp.McpSessions
 import net.die.phoneapi.model.ActionResult
 import net.die.phoneapi.model.ApiException
 import net.die.phoneapi.model.Scope
+import net.die.phoneapi.model.ScreenReleaseRequest
 import net.die.phoneapi.model.SessionStarted
 import net.die.phoneapi.server.ServerServices
 import net.die.phoneapi.server.anyToken
@@ -33,16 +35,8 @@ fun Route.sessionRoutes(services: ServerServices, sessions: McpSessions) {
             call.respond(HttpStatusCode.NoContent)
         }
         post("/v1/screen/release") {
-            val holder = call.session()
-            val held = services.lease.holds(holder)
-            services.lease.release(holder)
-            val message =
-                if (held) {
-                    "Released the screen. PhoneAPI hides the keyboard, goes home, and locks the " +
-                        "phone before the next client gets it."
-                } else {
-                    "This session did not hold the screen."
-                }
+            val request = bodyOrDefault(call, ScreenReleaseRequest())
+            val message = releaseScreen(services, call.session(), request)
             call.respond(ActionResult(ok = true, message = message))
         }
     }
@@ -53,5 +47,42 @@ fun Route.sessionRoutes(services: ServerServices, sessions: McpSessions) {
             if (!sessions.endByHash(hash)) throw ApiException.notFound("session $hash")
             call.respond(HttpStatusCode.NoContent)
         }
+    }
+}
+
+/**
+ * Lets [holder]'s screen go, for `POST /v1/screen/release` and `screen_release`. Without cleanup,
+ * the screen stays as it is, such as for a person in the viewer, and the session's tab on screen
+ * outlives it.
+ */
+internal suspend fun releaseScreen(
+    services: ServerServices,
+    holder: Holder.Session,
+    request: ScreenReleaseRequest,
+): String {
+    val held = services.lease.holds(holder)
+    if (request.cleanup) {
+        services.lease.release(holder)
+        return if (held) {
+            "Released the screen. PhoneAPI hides the keyboard, goes home, and locks the phone " +
+                "before the next client gets it. Your tabs stay yours, and your next call that " +
+                "needs the screen takes it again, waiting if someone else has it."
+        } else {
+            "This session did not hold the screen."
+        }
+    }
+    val kept =
+        if (services.tabs.keepShowing(holder) != null) {
+            "Your tab on screen stays open after your session ends, as an unowned tab a later " +
+                "session can claim by using it. Your other tabs close as usual."
+        } else {
+            "Chrome is not showing one of your tabs, so your tabs close when your session ends " +
+                "as usual. To keep one, bring it on screen first."
+        }
+    services.lease.releaseAsIs(holder)
+    return if (held) {
+        "Released the screen as it is, with no cleanup. $kept"
+    } else {
+        "This session did not hold the screen, so a person sees whatever is on it now. $kept"
     }
 }

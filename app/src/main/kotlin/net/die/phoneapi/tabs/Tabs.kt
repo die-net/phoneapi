@@ -95,6 +95,31 @@ class Tabs(
     /** How many tabs [holder] owns, opened or claimed. */
     fun count(holder: Holder.Session): Int = owners.values.count { it.holder == holder }
 
+    /**
+     * Keeps the tab of [holder]'s that Chrome is showing past its end, as for a person to finish:
+     * it counts as claimed rather than opened, so when the session ends it goes back to being
+     * unowned instead of closing, and a later session can claim it. Its other tabs close as usual.
+     * Returns the kept tab's id, or null when Chrome is not in front showing one of [holder]'s.
+     */
+    suspend fun keepShowing(holder: Holder.Session): String? {
+        // Chrome's selected tab reports itself visible even with Chrome hidden, so check first.
+        if (!inFront(CHROME_PACKAGE)) return null
+        val mine = owners.filterValues { it.holder == holder }.keys
+        // The tab it last brought forward is the likely one, so it is asked about first.
+        val front = fronts[holder]?.takeIf { it in mine }
+        val shown =
+            (listOfNotNull(front) + (mine - setOfNotNull(front))).firstOrNull { base.showing(it) }
+                ?: return null
+        mutex.withLock {
+            owners.computeIfPresent(shown) { _, owner ->
+                if (owner.holder == holder) owner.copy(opened = false) else owner
+            }
+            // The startup sweep closes only opened tabs, so this one survives a restart too.
+            saveOpened()
+        }
+        return shown
+    }
+
     /** Closes the tabs [holder] opened and gives back those it claimed. */
     suspend fun end(holder: Holder.Session) {
         ended += holder
