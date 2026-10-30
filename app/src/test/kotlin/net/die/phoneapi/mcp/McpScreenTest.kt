@@ -22,7 +22,12 @@ import org.junit.jupiter.api.Test
 class McpScreenTest {
     @Test
     fun `notes reach any call`() = runBlocking {
-        val lease = ScreenLease(CoroutineScope(Dispatchers.Unconfined), cleanup = { emptyList() })
+        val lease =
+            ScreenLease(
+                CoroutineScope(Dispatchers.Unconfined),
+                cleanup = { emptyList() },
+                lockedNow = { true },
+            )
         val holder = Holder.Session("a")
         lease.addNote(holder, "the screen went elsewhere")
         val result =

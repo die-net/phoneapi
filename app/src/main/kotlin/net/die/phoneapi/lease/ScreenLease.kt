@@ -58,10 +58,16 @@ data class Screened<T>(val value: T, val notes: List<String>)
  * A session that has made no screen call for [graceMs] while someone waits loses the screen to
  * them, with cleanup, and is told on its next screen call, which waits like any other. So a client
  * that keeps its session open between tasks cannot keep others off the screen.
+ *
+ * Cleanup locks the phone only when the screen goes free and sessions found it locked, as
+ * [lockedNow] tells when each gets it. Locking before a waiter gets the screen would only make it
+ * unlock again with the same stored PIN, and a phone its owner left unlocked is left to Android's
+ * own timeout. [cleanup] is told whether to lock.
  */
 class ScreenLease(
     private val scope: CoroutineScope,
-    private val cleanup: suspend () -> List<String>,
+    private val cleanup: suspend (lock: Boolean) -> List<String>,
+    private val lockedNow: () -> Boolean,
     private val now: () -> Long = System::currentTimeMillis,
     private val waitMs: Long = WAIT_MS,
     private val graceMs: Long = GRACE_MS,
@@ -76,6 +82,13 @@ class ScreenLease(
     private val taken = HashSet<Job>()
     private val started = AtomicLong()
     private var cleaning = false
+    /**
+     * Whether the phone was locked when sessions started using it, and has not been locked again
+     * since, so cleanup owes it a lock once no one waits.
+     */
+    private var owesLock = false
+    /** Whether the cleanup now running locks the phone. */
+    private var locking = false
     /** A note for whoever gets the screen next, about the state the last holder left it in. */
     private var forNext: String? = null
     /** When the holder last started or finished a screen call, or got the screen. */
@@ -178,7 +191,7 @@ class ScreenLease(
      */
     suspend fun release(holder: Holder, cleanup: Boolean = true) {
         val clean = mutex.withLock { letGo(holder, cleanup) }
-        if (clean) scope.launch { finishCleanup(runCleanup()) }
+        if (clean) scope.launch { cleanUp() }
     }
 
     /**
@@ -208,6 +221,8 @@ class ScreenLease(
         if (note != null) forNext = note
         if (!clean) grantNext()
         cleaning = clean
+        // A phone that is already locked is locked again, which only turns its screen off.
+        if (clean) locking = queue.isEmpty() && (owesLock || lockedNow())
         return clean
     }
 
@@ -222,7 +237,7 @@ class ScreenLease(
                     continue
                 }
                 val clean = mutex.withLock { if (idleLeft() == 0L) yieldIdle() else false }
-                if (clean) finishCleanup(runCleanup())
+                if (clean) cleanUp()
             }
         }
     }
@@ -243,8 +258,9 @@ class ScreenLease(
         note(
             holder,
             "The screen went to another client after this session made no screen call for " +
-                "${graceMs / MS_PER_S} s while it waited, and was cleaned up: home and locked. " +
-                "Your next call that needs the screen waits for it. Check the screen before acting.",
+                "${graceMs / MS_PER_S} s while it waited, and was cleaned up: keyboard hidden " +
+                "and home. Your next call that needs the screen waits for it. Check the screen " +
+                "before acting.",
         )
         return letGo(holder, cleanup = true)
     }
@@ -260,9 +276,21 @@ class ScreenLease(
         if (queue.isNotEmpty()) watchIdle()
     }
 
-    private suspend fun runCleanup(): List<String> =
+    /**
+     * Runs cleanup, then gives the screen to the next waiter. When cleanup left the phone unlocked
+     * for a waiter that has since gone, and a lock is owed, it runs again to lock.
+     */
+    private suspend fun cleanUp() {
+        var again = true
+        while (again) {
+            val lock = mutex.withLock { locking }
+            again = finishCleanup(runCleanup(lock), lock)
+        }
+    }
+
+    private suspend fun runCleanup(lock: Boolean): List<String> =
         try {
-            cleanup()
+            cleanup(lock)
         } catch (e: CancellationException) {
             throw e
         } catch (
@@ -271,23 +299,34 @@ class ScreenLease(
             listOf(e.message ?: "cleanup failed")
         }
 
-    private suspend fun finishCleanup(failed: List<String>) {
+    /**
+     * Ends a cleanup that [locked] the phone or did not, and gives the screen to the next waiter.
+     * True when no one was left to take it and the phone still owes a lock, so cleanup runs again.
+     */
+    private suspend fun finishCleanup(failed: List<String>, locked: Boolean): Boolean =
         mutex.withLock {
-            cleaning = false
+            if (locked && lockedNow()) owesLock = false
             // The next holder hears about cleanup either way, so a home screen and a locked
             // phone are no surprise.
-            val message =
-                if (failed.isEmpty()) {
-                    "The screen was cleaned up after the last holder: keyboard hidden, home " +
-                        "screen, locked. Unlock it before acting."
-                } else {
-                    "Cleanup after the last holder did not finish: ${failed.joinToString("; ")}. " +
-                        "Check the screen before acting."
+            forNext =
+                when {
+                    failed.isNotEmpty() ->
+                        "Cleanup after the last holder did not finish: " +
+                            "${failed.joinToString("; ")}. Check the screen before acting."
+                    locked ->
+                        "The screen was cleaned up after the last holder: keyboard hidden, home " +
+                            "screen, locked. Unlock it before acting."
+                    else ->
+                        "The screen was cleaned up after the last holder: keyboard hidden, home " +
+                            "screen. It was not locked, so check the screen before acting."
                 }
-            forNext = message
-            grantNext()
+            if (grantNext() == null && !locked && lockOwed()) {
+                locking = true
+                return@withLock true
+            }
+            cleaning = false
+            false
         }
-    }
 
     /** Forgets [holder], as when its session ends or its socket closes. */
     suspend fun forget(holder: Holder) {
@@ -371,7 +410,11 @@ class ScreenLease(
         }
     }
 
+    /** Whether the phone is unlocked and owes a lock. */
+    private fun lockOwed(): Boolean = owesLock && !lockedNow()
+
     private fun grant(holder: Holder) {
+        if (holder is Holder.Session && !owesLock) owesLock = lockedNow()
         _state.value = LeaseState(holder, now())
         lastCallMs = now()
         if (queue.isNotEmpty()) watchIdle()

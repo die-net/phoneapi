@@ -64,9 +64,10 @@ internal suspend fun releaseScreen(
     if (request.cleanup) {
         services.lease.release(holder)
         return if (held) {
-            "Released the screen. PhoneAPI hides the keyboard, goes home, and locks the phone " +
-                "before the next client gets it. Your tabs stay yours, and your next call that " +
-                "needs the screen takes it again, waiting if someone else has it."
+            "Released the screen. PhoneAPI hides the keyboard and goes home before the next " +
+                "client gets it, and locks the phone if no one is waiting and it was locked " +
+                "before. Your tabs stay yours, and your next call that needs the screen takes it " +
+                "again, waiting if someone else has it."
         } else {
             "This session did not hold the screen."
         }

@@ -38,14 +38,20 @@ class ScreenCleanupTest {
 
     @Test
     fun `the clipboard is cleared last`() = runTest {
-        assertEquals(emptyList<String>(), cleanup.run())
+        assertEquals(emptyList<String>(), cleanup.run(lock = true))
         assertEquals(listOf("hideIme", "placeholder", "HOME", "lock", "clearOwn"), steps)
+    }
+
+    @Test
+    fun `a hand-off skips the lock`() = runTest {
+        assertEquals(emptyList<String>(), cleanup.run(lock = false))
+        assertEquals(listOf("hideIme", "placeholder", "HOME", "clearOwn"), steps)
     }
 
     @Test
     fun `a failed clear is reported`() = runTest {
         clearClip = { throw ApiException.helperUnavailable("no helper") }
-        val failed = cleanup.run()
+        val failed = cleanup.run(lock = true)
         assertEquals(1, failed.size)
         assertTrue(failed.single().startsWith("clear the clipboard:"), failed.single())
         assertEquals("lock", steps[steps.size - 2])
