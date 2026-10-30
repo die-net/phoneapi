@@ -238,6 +238,8 @@ internal class FakeApi(leaseWaitMs: Long = ScreenLease.WAIT_MS) {
                         clipPasted = paste
                         return acted()
                     }
+
+                    override suspend fun clearOwn(): ActionResult = acted()
                 },
             tokens = tokens,
             ioDispatcher = Dispatchers.Unconfined,

@@ -211,7 +211,12 @@ class AppGraph(
         ScreenLease(
             scope,
             cleanup =
-                ScreenCleanup(input, power, showPlaceholder = { tabs.showPlaceholder() })::run,
+                ScreenCleanup(
+                    input,
+                    power,
+                    clipboard,
+                    showPlaceholder = { tabs.showPlaceholder() },
+                )::run,
         )
     private val tabs: Tabs =
         Tabs(
