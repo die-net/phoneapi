@@ -91,7 +91,11 @@ class AbstractHttpEngine(
             val connection =
                 ServerIncomingConnection(
                     input = socket.inputStream.toByteReadChannel(),
-                    output = socket.outputStream.asByteWriteChannel(),
+                    output =
+                        ShutdownOnClose(socket.outputStream.asByteWriteChannel()) {
+                            // The client may have closed the socket already.
+                            runCatching { socket.shutdownOutput() }
+                        },
                     remoteAddress = null,
                     localAddress = null,
                 )
