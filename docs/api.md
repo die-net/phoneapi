@@ -53,7 +53,7 @@ A REST call that acts on the phone or its tabs runs as a session, as an MCP clie
 
 ### Screen lease
 
-One client at a time holds the screen, as [sharing.md](sharing.md) describes. Calls that act on the screen or show what is on it take the lease: input, IME, apps and intents, wake, unlock, lock, orientation, the UI tree, screenshots, waits with any condition that is not `browser.*` or with a `snapshot`, browser input with `input` `touch` (and `cdp` for pointer input), and browser reads and snapshots with `show`. Reading a tab, and `cdp` keys, text, and `cdp-mouse` taps, need no lease.
+One client at a time holds the screen, as [sharing.md](sharing.md) describes. Calls that act on the screen or show what is on it take the lease: input, IME, apps and intents, wake, unlock, lock, orientation, the UI tree, screenshots, waits with any condition that is not `browser.*` or with a `snapshot`, browser input with `input` `touch` (and `cdp` for pointer input), browser reads and snapshots with `show`, and opening an incognito tab, which gives the screen back after unless the session already had it. Reading a tab, and `cdp` keys, text, and `cdp-mouse` taps, need no lease.
 
 - A session keeps the screen from its first such call until the session ends, it calls `screen_release`, or it makes no screen call for 30 s while someone else waits. Then cleanup runs and the waiter gets the screen; the session keeps its tabs, and its next screen call waits again and gets a note. REST sessions follow the same rules.
 - A call that needs the screen while someone else has it waits up to 60 s, then fails with 409 `screen_busy`, saying how long the screen has been held.
@@ -227,7 +227,7 @@ A session, from MCP or REST, owns the tabs it opens, popups they open, and unown
 | Method | Path | Scope | Summary |
 | --- | --- | --- | --- |
 | `GET` | `/v1/browser/targets` | browser | Tabs and debuggable WebViews |
-| `POST` | `/v1/browser/tabs` | browser | Open tab (`OpenTabRequest`). `tookScreen` is true when Chrome was on screen and switched to it. `capture` records the page's JSON responses from the start of its load, as under [Recorded responses](#recorded-responses). `incognito` opens it in Chrome's incognito profile, with none of the phone's logins; that takes the screen, and screenshots show the tab black, as in [sharing.md](sharing.md#incognito-tabs) |
+| `POST` | `/v1/browser/tabs` | browser | Open tab (`OpenTabRequest`). `tookScreen` is true when Chrome was on screen and switched to it. `capture` records the page's JSON responses from the start of its load, as under [Recorded responses](#recorded-responses). `incognito` opens it in Chrome's incognito profile, with none of the phone's logins; that takes the screen while the tab opens and gives it back after unless the session already had it, and screenshots show the tab black, as in [sharing.md](sharing.md#incognito-tabs) |
 | `POST` | `/v1/browser/targets/{id}/navigate` | browser | `NavigateRequest` |
 | `POST` | `/v1/browser/targets/{id}/close` | browser | Close the tab without bringing it forward → `ActionResult` |
 | `GET` | `/v1/browser/targets/{id}/snapshot` | browser | Compact AX outline → `BrowserSnapshot`. `maxNodes` (default 400, up to 5000) and `maxChars` cap it; cuts are reported as for the UI snapshot. `show` brings the tab on screen first. `shown` and `pending` as for `read` |
@@ -330,7 +330,7 @@ Run `phoneapi server` and point a Streamable HTTP client at `http://127.0.0.1:<p
 | `open_intent` | control | Start an intent (needs helper) |
 | `device_wake` / `device_unlock` / `device_lock` | control | Power / keyguard |
 | `device_orientation` | control | Auto-rotate, or lock the screen to the current or a named rotation |
-| `browser_targets` / `browser_open` / `browser_navigate` / `browser_close` | browser | Tab list, navigation, and closing a tab. `browser_open` with `incognito` opens an incognito tab, which takes the screen |
+| `browser_targets` / `browser_open` / `browser_navigate` / `browser_close` | browser | Tab list, navigation, and closing a tab. `browser_open` with `incognito` opens an incognito tab, which takes the screen while it opens |
 | `browser_snapshot` | browser | AX outline |
 | `browser_tap` / `browser_swipe` / `browser_gesture` | browser | Pointer input. `input` `auto` (default), `touch`, `cdp`, or `cdp-mouse` (tap only) |
 | `browser_key` / `browser_type` | browser | Key presses and typing. `cdp` stays on a background tab; device keys such as HOME need `touch` |

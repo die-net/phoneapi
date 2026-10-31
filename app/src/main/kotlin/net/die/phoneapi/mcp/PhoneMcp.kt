@@ -264,7 +264,7 @@ private suspend fun callTool(
             return sessionConflict(it)
         }
     }
-    return leased(services.lease, holder, screen) {
+    return leased(services.lease, holder, screen, tool.name in BRIEF_SCREEN_TOOLS) {
         val call = suspend { tool.call(services, scopes, request) }
         when {
             screen -> services.tabs.screenCall(holder, tool.name in CLAIMING_TOOLS, call)

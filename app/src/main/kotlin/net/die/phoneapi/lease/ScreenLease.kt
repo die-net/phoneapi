@@ -68,6 +68,10 @@ data class Screened<T>(val value: T, val notes: List<String>)
  * runs [ready] before its first screen call does anything else. That empties the clipboard, which a
  * person may have used since the last cleanup. Steps that fail are tried again on the next screen
  * call, and noted.
+ *
+ * A call that needs the screen only while it runs, such as opening an incognito tab, asks
+ * [withScreen] to give it back. A session that did not have the screen before the call then lets it
+ * go with cleanup when the call ends, unless another of its screen calls is still running.
  */
 class ScreenLease(
     private val scope: CoroutineScope,
@@ -111,11 +115,16 @@ class ScreenLease(
     /**
      * Runs [block] holding the screen for [holder], waiting for it first when someone else has it.
      * Throws `screen_busy` when the wait runs out and `screen_taken` when a viewer has taken the
-     * screen from this holder.
+     * screen from this holder. With [giveBack], a holder that did not have the screen before the
+     * call lets it go with cleanup afterwards.
      */
-    suspend fun <T> withScreen(holder: Holder, block: suspend () -> T): Screened<T> {
+    suspend fun <T> withScreen(
+        holder: Holder,
+        giveBack: Boolean = false,
+        block: suspend () -> T,
+    ): Screened<T> {
         val asked = now()
-        acquire(holder)
+        val had = acquire(holder)
         val waited = now() - asked
         if (waited >= WAITED_NOTE_MS) {
             addNote(
@@ -125,11 +134,28 @@ class ScreenLease(
             )
         }
         val value =
-            runTracked(holder) {
-                readyFor(holder)
-                block()
+            try {
+                runTracked(holder) {
+                    readyFor(holder)
+                    block()
+                }
+            } finally {
+                if (giveBack && !had) withContext(NonCancellable) { giveBack(holder) }
             }
         return Screened(value, takeNotes(holder))
+    }
+
+    /**
+     * Lets [holder]'s screen go with cleanup after a call that needed it only while it ran, unless
+     * another of its screen calls is still running and so still uses it.
+     */
+    private suspend fun giveBack(holder: Holder) {
+        val clean = mutex.withLock {
+            _state.value.holder == holder &&
+                running[holder].isNullOrEmpty() &&
+                letGo(holder, cleanup = true)
+        }
+        if (clean) scope.launch { cleanUp() }
     }
 
     /**
@@ -379,14 +405,15 @@ class ScreenLease(
         mutex.withLock { notes.remove(holder) }
     }
 
-    private suspend fun acquire(holder: Holder) {
+    /** Gets [holder] the screen, waiting for it if needed. True when it had the screen already. */
+    private suspend fun acquire(holder: Holder): Boolean {
         val waiter = mutex.withLock {
             val current = _state.value
             if (current.takenFrom == holder) throw taken(current)
-            if (current.holder == holder) return
+            if (current.holder == holder) return true
             if (current.holder == null && !cleaning && queue.isEmpty()) {
                 grant(holder)
-                return
+                return false
             }
             Waiter(holder, CompletableDeferred()).also {
                 queue.addLast(it)
@@ -408,6 +435,7 @@ class ScreenLease(
             }
         // The grant can land just as the wait runs out. Then the screen is this holder's.
         if (!granted && !withContext(NonCancellable) { leaveQueue(waiter) }) throw busy()
+        return false
     }
 
     /** Takes [waiter] out of the queue. True when it had already been granted the screen. */

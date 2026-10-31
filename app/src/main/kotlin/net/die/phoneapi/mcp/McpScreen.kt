@@ -82,6 +82,12 @@ private fun flag(args: JsonObject?, name: String): Boolean =
     (args?.get(name) as? JsonPrimitive)?.booleanOrNull == true
 
 /**
+ * Tools that need the screen only while they run, so a session that did not have it before gives it
+ * back after.
+ */
+internal val BRIEF_SCREEN_TOOLS = setOf("browser_open")
+
+/**
  * Tools that, without the screen, could still make a page launch an app, so the foreground watch
  * watches the top task around them.
  */
@@ -162,12 +168,14 @@ private fun errorResult(e: ApiException) =
 
 /**
  * Runs [call] holding the screen for [holder] when [needed], and puts the holder's notes first in
- * the result. `screen_busy` and `screen_taken` come back as tool errors.
+ * the result. With [giveBack], a holder that did not have the screen lets it go after the call.
+ * `screen_busy` and `screen_taken` come back as tool errors.
  */
 internal suspend fun leased(
     lease: ScreenLease,
     holder: Holder,
     needed: Boolean,
+    giveBack: Boolean = false,
     call: suspend () -> CallToolResult,
 ): CallToolResult {
     // A call that needs no screen still shows the notes waiting for its session, such as the
@@ -175,7 +183,7 @@ internal suspend fun leased(
     if (!needed) return withNotes(call(), lease.takeNotes(holder))
     val screened =
         try {
-            lease.withScreen(holder) { call() }
+            lease.withScreen(holder, giveBack) { call() }
         } catch (e: CancellationException) {
             throw e
         } catch (e: ApiException) {
