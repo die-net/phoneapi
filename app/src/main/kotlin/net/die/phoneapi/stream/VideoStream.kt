@@ -1,6 +1,7 @@
 package net.die.phoneapi.stream
 
 import android.content.Context
+import android.graphics.BitmapFactory
 import android.hardware.display.DisplayManager
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
@@ -16,6 +17,7 @@ import io.ktor.server.websocket.DefaultWebSocketServerSession
 import io.ktor.websocket.CloseReason
 import io.ktor.websocket.Frame
 import io.ktor.websocket.close
+import java.io.FileInputStream
 import java.io.IOException
 import java.nio.ByteBuffer
 import java.util.concurrent.CopyOnWriteArrayList
@@ -212,6 +214,7 @@ internal class VideoStream(
             running = true
             codec = encoder
             val frames = FrameRelay(surface, width, height)
+            frames.onMissingFrame = { captureStill(frames) }
             relay = frames
             val started =
                 helper.require().startMirror(frames.input, width, height, Display.DEFAULT_DISPLAY)
@@ -400,7 +403,38 @@ internal class VideoStream(
             Log.w(TAG, "sync frame", e)
         }
         // The request waits for the next input frame, which a still screen never sends.
+        // With no mirror frame yet, the relay draws a screencap instead of waiting.
         relay?.redraw()
+    }
+
+    /**
+     * A fresh app has no mirrored frame yet. Draw a screencap into the encoder. The mirror surface
+     * stays connected. Called on the relay thread.
+     */
+    private fun captureStill(target: FrameRelay) {
+        val proxy = helper.getOrNull() ?: return
+        val png =
+            try {
+                val pipe = proxy.screencap() ?: return
+                try {
+                    FileInputStream(pipe.fileDescriptor).use { it.readBytes() }
+                } finally {
+                    pipe.close()
+                }
+            } catch (e: IOException) {
+                Log.w(TAG, "capture", e)
+                return
+            } catch (e: RemoteException) {
+                Log.w(TAG, "capture", e)
+                return
+            }
+        if (png.size < 8 || png[0] != 0x89.toByte()) return
+        val bitmap = BitmapFactory.decodeByteArray(png, 0, png.size) ?: return
+        try {
+            target.drawCapture(bitmap)
+        } finally {
+            bitmap.recycle()
+        }
     }
 
     private fun emitFrame(frame: ByteArray) {
