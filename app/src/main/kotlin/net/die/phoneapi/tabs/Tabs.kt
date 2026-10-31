@@ -50,6 +50,11 @@ class Tabs(
     private val ended: MutableSet<Holder.Session> = ConcurrentHashMap.newKeySet()
     private val mutex = Mutex()
     private val placeholderMutex = Mutex()
+    /**
+     * Held from closing the incognito tabs no session owns until the new incognito tab has an
+     * owner, so one session's open cannot close another's new tab.
+     */
+    private val incognitoMutex = Mutex()
 
     /** The tab Chrome shows when the screen holder has none forward. */
     @Volatile private var placeholder: String? = null
@@ -178,11 +183,15 @@ class Tabs(
                 )
             }
         }
-        val tab = base.openTab(url, capture, incognito)
-        mutex.withLock {
-            owners[tab.id] = Owner(holder, opened = true)
-            saveOpened()
-        }
+        val tab =
+            if (incognito) {
+                incognitoMutex.withLock {
+                    freshIncognito(holder)
+                    base.openTab(url, capture, incognito = true).also { own(holder, it) }
+                }
+            } else {
+                base.openTab(url, capture).also { own(holder, it) }
+            }
         if (lease.holds(holder)) {
             fronts[holder] = tab.id
             return tab
@@ -200,6 +209,33 @@ class Tabs(
             )
         }
         return tab.copy(tookScreen = false)
+    }
+
+    private suspend fun own(holder: Holder.Session, tab: BrowserTarget) {
+        mutex.withLock {
+            owners[tab.id] = Owner(holder, opened = true)
+            saveOpened()
+        }
+    }
+
+    /**
+     * Before [holder] opens an incognito tab. Chrome has one incognito profile, kept until its last
+     * tab closes, so an incognito tab no session owns, such as a person's or one kept for a person
+     * to finish, would carry its cookies into the new tab. When no session owns an incognito tab,
+     * they all close, and the new tab starts empty. When another session owns one, nothing can
+     * separate the two, so [holder] is told.
+     */
+    private suspend fun freshIncognito(holder: Holder.Session) {
+        val open = base.incognitoTabs()
+        val users = open.mapNotNull { owners[it]?.holder }.toSet()
+        when {
+            users.isEmpty() ->
+                open.forEach {
+                    closeQuietly(it)
+                    closed(it)
+                }
+            users.any { it != holder } -> lease.addNote(holder, SHARED_INCOGNITO)
+        }
     }
 
     internal suspend fun closed(id: String) {
@@ -469,6 +505,10 @@ class Tabs(
         const val PER_SESSION = 4
         const val TOTAL = 8
         private const val BLANK = "about:blank"
+        private const val SHARED_INCOGNITO =
+            "Another session has incognito tabs open, and Chrome has one incognito profile, so " +
+                "this tab shares their cookies and site data until they close. A site can tie " +
+                "the two sessions' visits together."
 
         /** How long Chrome takes to switch tabs before this checks. */
         private const val SELECT_MS = 200L

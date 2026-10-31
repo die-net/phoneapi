@@ -113,6 +113,35 @@ class TabsTest {
     }
 
     @Test
+    fun `incognito closes unowned ones`() = runBlocking {
+        val tabs = tabs()
+        // A person's incognito tab, and a normal tab no one owns.
+        val person = browser.add("person").also { browser.incognito += it }
+        val normal = browser.add("normal")
+        val tab = tabs.browserFor(a).openTab("https://example.com/", incognito = true)
+        assertEquals(listOf(person), browser.closed)
+        assertTrue(browser.open.any { it.id == normal })
+        assertEquals(
+            listOf(tab.id),
+            tabs.browserFor(a).targets().filter { it.owned == true }.map { it.id },
+        )
+        assertEquals(emptyList<String>(), lease.takeNotes(a))
+    }
+
+    @Test
+    fun `shared incognito is noted`() = runBlocking {
+        val tabs = tabs()
+        val theirs = tabs.browserFor(b).openTab("https://example.com/", incognito = true)
+        // A session's own incognito tabs share with nobody else.
+        tabs.browserFor(b).openTab("https://example.com/", incognito = true)
+        assertEquals(emptyList<String>(), lease.takeNotes(b))
+        tabs.browserFor(a).openTab("https://example.com/", incognito = true)
+        assertEquals(emptyList<String>(), browser.closed)
+        assertTrue(browser.open.any { it.id == theirs.id })
+        assertTrue(lease.takeNotes(a).single().contains("Another session has incognito tabs"))
+    }
+
+    @Test
     fun `recording stays with its owner`() = runBlocking {
         val tabs = tabs()
         val mine = tabs.browserFor(a).openTab("https://example.com/", capture = true)
@@ -354,6 +383,8 @@ class TabsTest {
     private class RecordingBrowser(private val chromeInFront: () -> Boolean) : BrowserService {
         val open = mutableListOf<BrowserTarget>()
         val closed = mutableListOf<String>()
+        /** The tabs in Chrome's incognito profile. */
+        val incognito = mutableSetOf<String>()
         private var next = 0
 
         fun add(
@@ -399,12 +430,15 @@ class TabsTest {
         ): BrowserTarget {
             if (capture) captures += "new" to true
             val id = add("t${next++}")
+            if (incognito) this.incognito += id
             open[open.lastIndex] = open.last().copy(url = url)
             if (chromeInFront()) shown = id
             return open.last()
         }
 
         override suspend fun navigate(id: String, url: String) = open.first { it.id == id }
+
+        override suspend fun incognitoTabs() = open.map { it.id }.filter { it in incognito }.toSet()
 
         override suspend fun closeTab(id: String): ActionResult {
             closed += id

@@ -86,6 +86,28 @@ class BrowserIncognitoTest {
         assertTrue(error?.message.orEmpty().contains("incognito"), error?.message)
     }
 
+    @Test
+    @Suppress("MissingUseCall") // The service closes each socket it opens.
+    fun `lists incognito tabs`() {
+        val replies =
+            ArrayDeque(
+                listOf(
+                    created("blank"),
+                    targets(page("a", "normal"), page("blank", "normal")),
+                    reply("""{"success":true}"""),
+                    targets(page("a", "normal"), page("inc", "private")),
+                )
+            )
+        val service =
+            harness.service(
+                byteArrayOf(),
+                sockets = BrowserServiceTest.CHROME,
+                open = { BrowserServiceTest.ScriptedSocket(replies.removeFirst()) },
+            )
+        assertEquals(setOf("chrome_devtools_remote~inc"), runBlocking { service.incognitoTabs() })
+        assertTrue(replies.isEmpty())
+    }
+
     private fun reply(result: String): ByteArray =
         harness.switched() + harness.serverTextFrame("""{"id":1,"result":$result}""")
 
