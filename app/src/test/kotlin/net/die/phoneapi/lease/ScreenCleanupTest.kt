@@ -57,6 +57,19 @@ class ScreenCleanupTest {
         assertEquals("lock", steps[steps.size - 2])
     }
 
+    @Test
+    fun `ready clears any clip`() = runTest {
+        assertEquals(emptyList<String>(), cleanup.ready())
+        assertEquals(listOf("clear"), steps)
+    }
+
+    @Test
+    fun `a failed ready is reported`() = runTest {
+        clearClip = { throw ApiException.helperUnavailable("no helper") }
+        val failed = cleanup.ready()
+        assertTrue(failed.single().startsWith("clear the clipboard:"), failed.single())
+    }
+
     private inner class Input : InputService {
         override suspend fun tap(request: TapRequest) = unused()
 
@@ -107,6 +120,11 @@ class ScreenCleanupTest {
 
         override suspend fun clearOwn(): ActionResult {
             steps += "clearOwn"
+            return clearClip()
+        }
+
+        override suspend fun clear(): ActionResult {
+            steps += "clear"
             return clearClip()
         }
     }

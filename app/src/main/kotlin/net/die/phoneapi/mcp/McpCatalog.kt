@@ -199,7 +199,7 @@ private val TOOLS: List<McpTool> =
         McpTool(
             name = "clipboard_read",
             description =
-                "Read the phone's clipboard as text, with its MIME types, or as an image when it holds one. copy true presses KEYCODE_COPY first, so the app in front copies what is selected on screen, and changed says whether the clipboard changed. A selection made by script in a background tab is not on screen, so it is not copied. The clipboard is the phone user's and can hold a password (sensitive true): read it only for the task at hand. Requires the shell helper.",
+                "Read the phone's clipboard as text, with its MIME types, or as an image when it holds one. copy true presses KEYCODE_COPY first, so the app in front copies what is selected on screen, and changed says whether the clipboard changed. A selection made by script in a background tab is not on screen, so it is not copied. The clipboard is emptied when a session gets the screen, so it holds only what was copied since. It is the phone user's and can hold a password (sensitive true): read it only for the task at hand. Requires the shell helper.",
             scope = Scope.CONTROL,
             available = Capabilities::clipboard,
             arguments = serializer<ClipboardReadRequest>(),

@@ -63,6 +63,11 @@ data class Screened<T>(val value: T, val notes: List<String>)
  * [lockedNow] tells when each gets it. Locking before a waiter gets the screen would only make it
  * unlock again with the same stored PIN, and a phone its owner left unlocked is left to Android's
  * own timeout. [cleanup] is told whether to lock.
+ *
+ * A session that gets the screen, whether it was free, handed on, or handed back after a take over,
+ * runs [ready] before its first screen call does anything else. That empties the clipboard, which a
+ * person may have used since the last cleanup. Steps that fail are tried again on the next screen
+ * call, and noted.
  */
 class ScreenLease(
     private val scope: CoroutineScope,
@@ -71,11 +76,14 @@ class ScreenLease(
     private val now: () -> Long = System::currentTimeMillis,
     private val waitMs: Long = WAIT_MS,
     private val graceMs: Long = GRACE_MS,
+    private val ready: suspend () -> List<String> = { emptyList() },
 ) {
     private data class Waiter(val holder: Holder, val granted: CompletableDeferred<Unit>)
 
     private val mutex = Mutex()
     private val gate = Mutex()
+    /** Held while [ready] runs, so a holder's other screen calls wait for it. */
+    private val readying = Mutex()
     private val queue = ArrayDeque<Waiter>()
     private val notes = HashMap<Holder, MutableList<String>>()
     private val running = HashMap<Holder, MutableSet<Job>>()
@@ -87,6 +95,8 @@ class ScreenLease(
      * since, so cleanup owes it a lock once no one waits.
      */
     private var owesLock = false
+    /** The session that got the screen and has not run [ready] since. */
+    private var unready: Holder.Session? = null
     /** Whether the cleanup now running locks the phone. */
     private var locking = false
     /** A note for whoever gets the screen next, about the state the last holder left it in. */
@@ -114,7 +124,11 @@ class ScreenLease(
                     "used it.",
             )
         }
-        val value = runTracked(holder, block)
+        val value =
+            runTracked(holder) {
+                readyFor(holder)
+                block()
+            }
         return Screened(value, takeNotes(holder))
     }
 
@@ -272,8 +286,39 @@ class ScreenLease(
                 "Check the screen before acting.",
         )
         _state.value = LeaseState(back, now())
+        unready = back
         lastCallMs = now()
         if (queue.isNotEmpty()) watchIdle()
+    }
+
+    /**
+     * Runs [ready] if [holder] has not since it got the screen. Inside the holder's screen call,
+     * which keeps the screen until it ends or a take over cancels it, so the screen cannot change
+     * hands before [ready] is marked done.
+     */
+    private suspend fun readyFor(holder: Holder) = readying.withLock {
+        if (mutex.withLock { unready != holder }) return@withLock
+        val failed =
+            try {
+                ready()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (
+                @Suppress("TooGenericExceptionCaught") // A failed step is reported, not thrown.
+                e: Exception) {
+                listOf(e.message ?: "it failed")
+            }
+        mutex.withLock {
+            if (failed.isEmpty()) {
+                if (unready == holder) unready = null
+            } else {
+                note(
+                    holder,
+                    "Readying the screen for this session did not finish: " +
+                        "${failed.joinToString("; ")}. It is tried again on the next screen call.",
+                )
+            }
+        }
     }
 
     /**
@@ -414,7 +459,10 @@ class ScreenLease(
     private fun lockOwed(): Boolean = owesLock && !lockedNow()
 
     private fun grant(holder: Holder) {
-        if (holder is Holder.Session && !owesLock) owesLock = lockedNow()
+        if (holder is Holder.Session) {
+            if (!owesLock) owesLock = lockedNow()
+            unready = holder
+        }
         _state.value = LeaseState(holder, now())
         lastCallMs = now()
         if (queue.isNotEmpty()) watchIdle()
@@ -431,8 +479,10 @@ class ScreenLease(
         return next.holder
     }
 
+    /** Leaves [holder] a note, once: a step retried on every call does not repeat it. */
     private fun note(holder: Holder, message: String) {
-        notes.getOrPut(holder) { mutableListOf() } += message
+        val waiting = notes.getOrPut(holder) { mutableListOf() }
+        if (message !in waiting) waiting += message
     }
 
     /** Takes the notes waiting for [holder], so its next result shows them once. */

@@ -96,6 +96,12 @@ interface ClipboardService {
      * has replaced it since. A clip the phone's owner or an app copied is left alone.
      */
     suspend fun clearOwn(): ActionResult
+
+    /**
+     * Empties the clipboard, whoever copied the clip, so a session that just got the screen cannot
+     * read what a person or an earlier holder left there.
+     */
+    suspend fun clear(): ActionResult
 }
 
 /** An image from the clipboard, and its MIME type. */
