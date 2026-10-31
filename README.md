@@ -1,90 +1,40 @@
 # PhoneAPI
 
-PhoneAPI is an Android app that lets a paired client drive the device and its Chrome tabs. The HTTP and WebSocket API, plus an on-device [MCP](https://modelcontextprotocol.io) server, listen on an abstract local socket named after the package while the listener is running. A computer reaches that socket with `adb forward` (USB or Wireless Debugging).
+PhoneAPI lets an AI agent use your Android phone the way you would: read the screen, tap and type, run your apps, and browse in Chrome with your own logins (or the agent's own, if you prefer). Install the app, plug in a computer, and point an MCP client such as Claude Code or Cursor at it. Then ask for something concrete:
 
-The shell helper reads the UI through UiAutomation, injects input, captures the screen, and runs privileged app commands. It is started over USB, or on Android 11 or newer over Wireless Debugging. Chrome DevTools uses the same split. On Android 11 and newer adbd opens Chrome's socket, because the helper is not allowed to. On Android 10 the helper connects to an adb reverse socket, and the computer forwards that to Chrome. Video and audio are encoded on the device and played in a browser.
+> On the phone, use Chrome to open https://github.com/die-net/phoneapi/ and go to the Releases page.
 
-Android 10 and newer (minSdk 29). Wireless Debugging and helper restart without a USB cable need Android 11.
+## What it does
 
-- HTTP, WebSocket, and MCP surface: [docs/api.md](docs/api.md) (includes OpenAPI)
-- How the pieces fit together: [docs/architecture.md](docs/architecture.md)
-- Building from source: [docs/development.md](docs/development.md)
+**Reads pages as text and data, not pixels.** Rather than reading screenshots or the raw DOM, an agent reads a Chrome page as markdown, cleaned up by Mozilla's Readability, a slice at a time, or searches it for text and links. JSON a page embeds (Next.js data, JSON-LD, state blobs in scripts) or fetches after it loads can be outlined and queried by path, so prices, listings, and search results come back as data. Apps are read through Android's accessibility tree as compact lines like `[e12] button "Sign in"`. Screenshots are there as a last resort.
 
-## Requirements
+**Keeps the agent's context small.** Every outline and read is capped and says what it left out. A read of a page that has not changed comes back as one line. Links come once each, without tracking parameters. One call can open a page, read it, and close it, or act, wait for the result, and show it. Password and one-time-code fields are masked in screen outlines.
 
-- A phone or emulator with USB debugging (and Wireless Debugging on Android 11+ if you want to drop the cable later)
-- On the computer, `adb`, `jq`, and `curl` on your `PATH`. `phoneapi` (pair, server, helper, and papi) shells out to these. Most machines already have `curl`; `adb` and `jq` usually need a separate install — for example `brew install android-platform-tools jq` on macOS, or [platform-tools](https://developer.android.com/tools/releases/platform-tools) from Google plus your OS package for `jq`
-- An [MCP](https://modelcontextprotocol.io) client (for example Cursor or Claude Code) if you want an agent to drive the phone
+**Looks like a person on their own phone.** Taps and keys arrive as a real touchscreen, with slight variation in position and timing, and typing taps the keyboard's keys. Scripts that read a page run in an isolated world and leave nothing in the page. PhoneAPI doesn't change Chrome's user agent, viewport, or settings. Sites and apps that act differently under automation see a person, not a test harness.
 
-## Install
+**Shares the phone.** Several agents, scripts, and a person can use the phone at once. Each gets its own Chrome tabs, and those tabs work in the background while someone else has the screen. One client holds the screen at a time, the others wait their turn, and the screen is tidied between them: keyboard hidden, back to home, and locked again if it was locked. An agent can start separate sessions for subagents working in parallel. Incognito tabs keep a page away from the phone's accounts.
 
-1. Download a release APK from the project's GitHub Releases page (`phoneapi-v*.apk`).
-2. Copy [`scripts/phoneapi`](scripts/phoneapi) somewhere on your `PATH` (for example `~/bin/phoneapi`). It does not need the rest of the repo.
-3. Install the APK. Optionally grant `WRITE_SECURE_SETTINGS` so the app can turn Wireless Debugging on itself (handy after reboot; without it you enable that toggle in Developer options):
+**Lets you watch and step in.** A viewer in your desktop browser plays the phone's screen and sound. You can tap, type, and copy and paste between computer and phone, or take over when an agent hits a CAPTCHA or a login, then hand the screen back.
+
+**Stays on your cable.** The API is reachable only through ADB, over USB or Wireless Debugging. No network port opens on the phone. Each computer has its own token, which you can remove in the app.
+
+It also launches and stops apps, sends intents, wakes the phone and unlocks it with a stored PIN, reads and writes the clipboard, and waits for windows, screen elements, page loads, or network requests.
+
+## Get started
+
+You need a phone running Android 10 or newer with USB debugging on, and `adb`, `jq`, and `curl` on your computer.
+
+1. Download the APK from [Releases](https://github.com/die-net/phoneapi/releases), and copy [`scripts/phoneapi`](scripts/phoneapi) onto your `PATH`.
+2. Install it, pair, and start it:
 
 ```sh
 adb install -r -g phoneapi-vX.Y.Z.apk
-adb shell pm grant net.die.phoneapi android.permission.WRITE_SECURE_SETTINGS
-```
-
-4. Pair, expose the server, and start the helper:
-
-```sh
 phoneapi pair --name laptop
 phoneapi server
 phoneapi helper
 ```
 
-`phoneapi` targets the release package (`net.die.phoneapi`) and stores pairing state in `~/.config/phoneapi/pairing.json` (or `$XDG_CONFIG_HOME/phoneapi`). Override the package with `PHONEAPI_PKG`, the directory that holds the pairing and session files with `PHONEAPI_STATE`, or the pairing file alone with `PAPI_PAIRING`. `pair` writes the pairing file and does not print the token. `server` forwards the on-device API to localhost; run it again if the tunnel drops.
-
-Open PhoneAPI for screen reading and taps, wireless debugging, and the computers that have access. That switch starts the helper and shuts it down. On Android 11 and newer the same screen can turn Wireless Debugging on and pair it. You can remove a computer's access there at any time.
-
-## Pairing
-
-A paired computer holds its own bearer token. Mint one with `phoneapi pair`. The shell user is already trusted, so no approval on the phone is needed:
-
-```sh
-phoneapi pair --name laptop
-phoneapi server
-```
-
-The saved JSON looks like this (`scheme` `http`, host `127.0.0.1`):
-
-```json
-{"scheme":"http","host":"127.0.0.1","port":41234,"token":"pa_…","name":"laptop"}
-```
-
-Every request needs `Authorization: Bearer <token>`. Scopes, the `access_token` query exception, token admin, and error shapes are documented in [docs/api.md](docs/api.md).
-
-## Helper
-
-The helper is a separate `app_process` that registers a binder with the app. `/v1/device` reports it as `running`, `starting`, `needs_pairing`, `needs_usb`, or `stopped`. `capabilities` shrinks to what works in the current state.
-
-| Status | Meaning |
-| --- | --- |
-| `running` | The helper is connected. |
-| `starting` | A launch is in progress. |
-| `needs_pairing` | Android 11+ and no paired Wireless Debugging key yet. |
-| `needs_usb` | Android 10. Relaunch from a computer. |
-| `stopped` | The automatic restart gave up after repeated failures. |
-
-Launch it once from the computer:
-
-```sh
-phoneapi helper
-```
-
-`phoneapi helper <package>` starts it for another install, such as a debug build. The process detaches, so the command returns while the helper keeps running. That USB start does not survive a reboot; run it again after reboot, or start the listener and helper over Wireless Debugging. On Android 11+, after pairing Wireless Debugging once, the app restarts the helper itself after a crash or a package update while its process is running. Turning the helper switch off shuts that process down and leaves it stopped until the switch is turned on again. A successful launch leaves Wireless Debugging on, because that connection is also how the browser API reaches Chrome. The optional `WRITE_SECURE_SETTINGS` grant lets the app flip that switch; without it, turn Wireless Debugging on in Developer options when it drops (for example after reboot).
-
-On Android 10, browser calls use a USB tunnel instead. `phoneapi helper` sets that up.
-
-To pair Wireless Debugging from the phone (Android 11+), tap "Pair wireless debugging" in the app. It opens Developer options and watches mDNS for this phone's pairing service. When the system "Pair device with pairing code" dialog opens, a heads-up notification asks for the code inline. The dialog has to stay in front: Android closes the pairing port when it is dismissed, including when the user switches apps. On Android 10 that row is hidden.
-
-Snapshots, injected input, screenshots, logcat, browser routes, and streams need the helper. App launch and wake still run without it (with limited fallbacks). See [docs/api.md](docs/api.md) for which routes require the helper or the browser scope.
-
-## Usage
-
-Start the helper (`phoneapi helper`) and `phoneapi server`, then point an MCP client at `http://127.0.0.1:<port>/mcp` with the bearer token, both from the pairing file. In Claude Code (project `.mcp.json`, or user scope in `~/.claude.json`):
+3. Add the phone to your MCP client, with the port and token from `~/.config/phoneapi/pairing.json`. For Claude Code:
 
 ```json
 {
@@ -98,17 +48,22 @@ Start the helper (`phoneapi helper`) and `phoneapi server`, then point an MCP cl
 }
 ```
 
-Cursor takes the same entry without `type`. Each client gets its own session, and clients share the phone's screen one at a time, as [docs/sharing.md](docs/sharing.md) describes.
+[docs/setup.md](docs/setup.md) covers each step, Wireless Debugging so you can drop the cable, getting going again after a reboot, and opening the viewer.
 
-Then ask the agent something concrete, for example:
+## Limits
 
-> On the phone, use Chrome to open https://github.com/die-net/phoneapi/ and go to the Releases page.
+- A computer has to reach the phone over ADB. Wireless Debugging, and restarting PhoneAPI's helper without a cable, need Android 11.
+- Windows an app marks secure, such as many banking apps and Chrome's incognito tabs, show black in screenshots and the viewer.
+- It uses Android internals that OEM skins and new Android releases can change. It is sideloaded, not a Play Store app.
+- Apps that check device integrity can still notice USB debugging is on.
 
-Tool list, resources, and scopes are in [docs/api.md](docs/api.md).
+## Learn more
 
-### HTTP and WebSocket API
-
-You can also call the REST and WebSocket API directly (`curl`, your own client, or `phoneapi papi` while developing). Calls that act on the phone need a session from `POST /v1/sessions`, named in the `Mcp-Session-Id` header; `phoneapi papi` keeps one for you. Run `phoneapi server` first so localhost reaches the on-device socket. Auth, routes, and OpenAPI are in [docs/api.md](docs/api.md). The viewer at `http://127.0.0.1:<port>/viewer` plays video and audio streams with WebCodecs (stream scope).
+- [Setup](docs/setup.md): install, pairing, the helper, Wireless Debugging, the viewer, and calling the API from the command line.
+- [API](docs/api.md): MCP tools, REST and WebSocket routes, scopes, errors, and OpenAPI.
+- [Sharing the phone](docs/sharing.md): sessions, the screen queue, tab ownership, and how Chrome treats background tabs.
+- [Architecture](docs/architecture.md): how the app, the shell helper, and Chrome DevTools fit together.
+- [Development](docs/development.md): building from source, tests, and emulators.
 
 ## AI Disclosure
 
