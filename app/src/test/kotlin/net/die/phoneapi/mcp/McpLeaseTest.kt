@@ -70,6 +70,25 @@ class McpLeaseTest {
     }
 
     @Test
+    fun `incognito open gives it back`() = testApplication {
+        application { phoneApiModule(api.services) }
+        apiClient().use { http ->
+            val session = initialize(http)
+            val opened =
+                call(
+                    http,
+                    session,
+                    "browser_open",
+                    """{"url":"https://a.test/","incognito":true}""",
+                )
+            assertFalse(opened.contains("isError\":true"), opened)
+            settle { api.cleanups == 1 }
+            assertEquals(1, api.cleanups)
+            assertEquals(null, api.lease.state.value.holder)
+        }
+    }
+
+    @Test
     fun `rest waits for sessions`() = testApplication {
         application { phoneApiModule(api.services) }
         apiClient().use { http ->
