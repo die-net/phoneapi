@@ -24,9 +24,9 @@ Scopes on a token:
 
 | Scope | Use |
 | --- | --- |
-| `observe` | Device info, UI tree, screenshot, events, OpenAPI, wait (non-browser) |
+| `observe` | Device info, UI tree, screenshot, events, logcat, OpenAPI, waits that watch the UI |
 | `control` | Input, IME, wake/unlock/lock, app launch/stop/clear, intents |
-| `browser` | Chrome/WebView CDP helpers; also required for `browser.*` wait conditions |
+| `browser` | Chrome/WebView CDP helpers, and `browser.*` wait conditions. A wait with only those needs no other scope |
 | `stream` | Viewer page and video/audio WebSockets |
 | `admin` | Token CRUD and stored unlock PIN |
 
@@ -85,7 +85,7 @@ Compact text looks like `[e12] button "Sign in"`. When anything is left out, the
 
 `POST /v1/wait` body `WaitRequest`: `all` and/or `any` lists of conditions, `timeoutMs` (default 10000), optional `settleMs`, optional fresh `snapshot` / `snapshotFormat` in the result, cut and masked by `snapshotOptions` (`windowId`, `maxDepth`, `maxNodes`, `maxChars`, `textOnly`, `redact`, as for the snapshot above). MCP `wait_for` takes those as `window`, `maxNodes` (default 400), `maxChars`, `textOnly`, and `redact` (default `true`), and `screenshot` adds a PNG to the result, so one call waits for an action's result and shows it.
 
-Condition `type` values include `node`, `window`, `ime`, `idle`, `screen`, `keyguard`, and `browser.url`, `browser.lifecycle`, `browser.networkIdle`, `browser.element`, `browser.request`, `browser.dialog`, `browser.newTarget`, `browser.log`, `browser.settled`. Browser conditions need the **browser** scope. `screen` takes `on`, `person`, or both: `person` true matches while a person holds the screen in the viewer, and false while nobody does. It is the state now, so `person` true does not match once the person has finished; to know a person finished a page, wait for the page to change. A wait whose only non-browser conditions are `screen` with `person` alone does not take the screen, so it can watch a person use it. A page showing a dialog answers DevTools nothing until it is dismissed, and Chrome reports only dialogs that open during the wait, so `browser.dialog` counts one already open by finding it on screen: Chrome's dialog whose title names the page's host.
+Condition `type` values include `node`, `window`, `ime`, `idle`, `screen`, `keyguard`, and `browser.url`, `browser.lifecycle`, `browser.networkIdle`, `browser.element`, `browser.request`, `browser.dialog`, `browser.newTarget`, `browser.log`, `browser.settled`. Browser conditions need the **browser** scope. Other conditions, `snapshot`, and `settleMs` watch the UI and need **observe**. So a token with only browser can wait on its pages, and its result leaves out `state`, which names the app in front. `screen` takes `on`, `person`, or both: `person` true matches while a person holds the screen in the viewer, and false while nobody does. It is the state now, so `person` true does not match once the person has finished; to know a person finished a page, wait for the page to change. A wait whose only non-browser conditions are `screen` with `person` alone does not take the screen, so it can watch a person use it. A page showing a dialog answers DevTools nothing until it is dismissed, and Chrome reports only dialogs that open during the wait, so `browser.dialog` counts one already open by finding it on screen: Chrome's dialog whose title names the page's host.
 
 ### Events
 
@@ -216,7 +216,7 @@ The clipboard calls need the shell helper (`clipboard`), which reads the clip as
 
 | Method | Path | Scope | Summary |
 | --- | --- | --- | --- |
-| `POST` | `/v1/wait` | observe (+ browser for `browser.*`) | `WaitRequest` → `WaitResult` |
+| `POST` | `/v1/wait` | observe and/or browser, by condition | `WaitRequest` → `WaitResult` |
 
 ### Browser (CDP helpers)
 
@@ -315,8 +315,8 @@ Run `phoneapi server` and point a Streamable HTTP client at `http://127.0.0.1:<p
 | Tool | Scope | Summary |
 | --- | --- | --- |
 | `device_info` | observe | Device + helper + capabilities |
-| `screen_release` | observe | Let the screen go for now, with cleanup; tabs stay the session's. `cleanup` false leaves it as it is, such as for a person, and keeps its tab on screen after it ends. The description gives the hand-off steps: bring the tab on screen, unlock, release with `cleanup` false, tell the person, and `wait_for` the page after it, or `screen` with `person` |
-| `session_start` / `session_end` | observe | A separate session for a subagent or parallel task, with its own turn at the screen and its own tabs. Every other tool takes `session` with the id `session_start` returns; without it a call acts as the caller's own session |
+| `screen_release` | any | Let the screen go for now, with cleanup; tabs stay the session's. `cleanup` false leaves it as it is, such as for a person, and keeps its tab on screen after it ends. The description gives the hand-off steps: bring the tab on screen, unlock, release with `cleanup` false, tell the person, and `wait_for` the page after it, or `screen` with `person` |
+| `session_start` / `session_end` | any | A separate session for a subagent or parallel task, with its own turn at the screen and its own tabs. Every other tool takes `session` with the id `session_start` returns; without it a call acts as the caller's own session |
 | `ui_snapshot` | observe | Compact UI outline, up to `maxNodes` (default 400) |
 | `ui_find` | observe | Find by selector, masked unless `redact` is false |
 | `ui_act` | control | Action on a ref; `mode` `real` or `semantic` |
@@ -325,7 +325,7 @@ Run `phoneapi server` and point a Streamable HTTP client at `http://127.0.0.1:<p
 | `type_text` | control | `mode` auto / keyboard / keyevent / setText |
 | `press_key` | control | Key names |
 | `clipboard_read` / `clipboard_write` | control | The clipboard's text, or its image as image content (up to 1.5 MB) on a read. `copy` presses `KEYCODE_COPY` first, which copies what is selected on screen in the app in front; `paste` presses `KEYCODE_PASTE` after. Writes take text only (needs helper) |
-| `wait_for` | observe | Same conditions as `/v1/wait`. `snapshot` adds a capped, masked outline and `screenshot` a PNG. `target` names the tab for browser conditions that name none |
+| `wait_for` | observe or browser | Same conditions and scopes as `/v1/wait`. `snapshot` adds a capped, masked outline and `screenshot` a PNG; both need observe. `target` names the tab for browser conditions that name none |
 | `keyboard_hide` / `keyboard_show` | control | Soft keyboard |
 | `app_launch` / `app_stop` / `app_clear` | control | Package control (`stop`/`clear` need helper) |
 | `open_intent` | control | Start an intent (needs helper) |

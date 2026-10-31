@@ -213,6 +213,7 @@ internal suspend fun waitFor(
                 ),
         )
     requireWaitAccess(wait, scopes)
+    if (args.screenshot && Scope.OBSERVE !in scopes) throw ApiException.forbidden(Scope.OBSERVE)
     val result = services.waits.wait(wait, scopes)
     val header =
         "matched=${result.matched} timedOut=${result.timedOut} elapsedMs=${result.elapsedMs}"

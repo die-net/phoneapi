@@ -36,6 +36,18 @@ class McpCatalogTest {
     }
 
     @Test
+    fun `browser alone waits and shares`() {
+        val browser = visibleMcpTools(setOf(Scope.BROWSER), allOn()).map { it.name }
+        for (name in listOf("wait_for", "session_start", "session_end", "screen_release")) {
+            assertTrue(name in browser, name)
+        }
+        assertFalse("device_info" in browser)
+        assertFalse("screenshot" in browser)
+        val stream = visibleMcpTools(setOf(Scope.STREAM), allOn()).map { it.name }
+        assertEquals(listOf("screen_release", "session_end", "session_start"), stream.sorted())
+    }
+
+    @Test
     fun `hides browser without cdp`() {
         val names =
             visibleMcpTools(setOf(Scope.OBSERVE, Scope.BROWSER), allOn().copy(browserCdp = false))

@@ -38,8 +38,13 @@ internal fun mcpInstructions(scopes: Set<Scope>): String = buildList {
     add("")
     add(
         "Each call re-reads your whole context, so the number of calls costs more than the size " +
-            "of each result. One step is an action and one wait_for with snapshot or screenshot " +
-            "true. Act by selector rather than taking a snapshot first."
+            "of each result. " +
+            if (Scope.OBSERVE in scopes) {
+                "One step is an action and one wait_for with snapshot or screenshot true. "
+            } else {
+                "One step is an action and one wait_for on a browser condition. "
+            } +
+            "Act by selector rather than taking a snapshot first."
     )
 }
     .joinToString("\n")

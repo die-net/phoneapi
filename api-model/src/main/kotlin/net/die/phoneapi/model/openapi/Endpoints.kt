@@ -308,8 +308,8 @@ public val phoneApiEndpoints: List<ApiEndpoint> =
         endpoint(
             ApiMethod.POST,
             "/v1/wait",
-            Scope.OBSERVE,
-            "Wait until conditions match.",
+            null,
+            "Wait until conditions match. browser.* conditions need the browser scope. Other conditions, snapshot, and settleMs need observe. A wait with only browser.* conditions needs only browser, and its result leaves out state.",
             serializer<WaitRequest>(),
             serializer<WaitResult>(),
         ),
