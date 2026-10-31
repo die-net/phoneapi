@@ -4,6 +4,11 @@ import net.die.phoneapi.model.ApiException
 
 internal const val CHROME_SOCKET = "chrome_devtools_remote"
 internal const val CHROME_PACKAGE = "com.android.chrome"
+/**
+ * The intent action behind Chrome's "New Incognito tab" shortcut. Chrome opens a new incognito tab
+ * for it; DevTools cannot, since Chrome on Android ignores createTarget's browserContextId.
+ */
+internal const val OPEN_PRIVATE_TAB = "org.chromium.chrome.browser.incognito.OPEN_PRIVATE_TAB"
 
 /** One path segment: the socket name, then Chrome's target id. */
 internal fun browserTargetId(socket: String, chromeId: String): String =

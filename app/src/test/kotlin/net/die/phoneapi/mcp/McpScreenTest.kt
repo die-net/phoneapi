@@ -71,6 +71,8 @@ class McpScreenTest {
         assertTrue(takesScreen("wait_for", args("""{$browserWait,"screenshot":true}""")))
         assertFalse(takesScreen("wait_for", args("""{$browserWait,"snapshot":false}""")))
         assertFalse(takesScreen("device_info", null))
+        assertFalse(takesScreen("browser_open", args("""{"url":"https://example.com/"}""")))
+        assertTrue(takesScreen("browser_open", args("""{"incognito":true}""")))
     }
 
     @Test
@@ -117,7 +119,6 @@ class McpScreenTest {
                 "session_end",
                 "logcat_tail",
                 "browser_targets",
-                "browser_open",
                 "browser_navigate",
                 "browser_close",
                 "browser_find",

@@ -392,7 +392,11 @@ class TabsTest {
             return BrowserCaptureResult(capturing = on)
         }
 
-        override suspend fun openTab(url: String, capture: Boolean): BrowserTarget {
+        override suspend fun openTab(
+            url: String,
+            capture: Boolean,
+            incognito: Boolean,
+        ): BrowserTarget {
             if (capture) captures += "new" to true
             val id = add("t${next++}")
             open[open.lastIndex] = open.last().copy(url = url)

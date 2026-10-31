@@ -47,6 +47,7 @@ internal val SCREEN_TOOLS =
 internal val SOMETIMES_SCREEN_TOOLS =
     setOf(
         "wait_for",
+        "browser_open",
         "browser_tap",
         "browser_swipe",
         "browser_gesture",
@@ -73,6 +74,7 @@ internal fun takesScreen(tool: String, args: JsonObject?): Boolean =
         "browser_type" -> input(args) in setOf("touch", "auto")
         "browser_read",
         "browser_snapshot" -> flag(args, "show")
+        "browser_open" -> flag(args, "incognito")
         else -> false
     }
 

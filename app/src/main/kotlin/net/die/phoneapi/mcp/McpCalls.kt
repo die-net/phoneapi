@@ -36,6 +36,7 @@ import net.die.phoneapi.model.ConsoleRequest
 import net.die.phoneapi.model.DEFAULT_TAP_WAIT_MS
 import net.die.phoneapi.model.EvalRequest
 import net.die.phoneapi.model.FindRequest
+import net.die.phoneapi.model.INCOGNITO_OPEN_DOC
 import net.die.phoneapi.model.ImeShowRequest
 import net.die.phoneapi.model.IntentRequest
 import net.die.phoneapi.model.KeyRequest
@@ -312,7 +313,7 @@ internal suspend fun browserOpen(
     request: CallToolRequest,
 ): CallToolResult = runTool {
     val args = request.args<BrowserOpenArgs>()
-    jsonText(services.browser.openTab(args.url, args.capture))
+    jsonText(services.browser.openTab(args.url, args.capture, args.incognito))
 }
 
 internal suspend fun browserCapture(
@@ -630,6 +631,7 @@ internal data class PackageArgs(
 internal data class BrowserOpenArgs(
     val url: String,
     @Doc(CAPTURE_OPEN_DOC) val capture: Boolean = false,
+    @Doc(INCOGNITO_OPEN_DOC) val incognito: Boolean = false,
 )
 
 @Serializable

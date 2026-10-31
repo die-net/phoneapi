@@ -567,6 +567,7 @@ class BrowserServiceTest {
         inFront: suspend (String) -> Boolean = { true },
         showPackage: suspend (String) -> Unit = {},
         pageDialog: suspend () -> Boolean = { false },
+        openPrivateTab: suspend (String) -> Unit = {},
     ) =
         BrowserServiceImpl(
             io = Dispatchers.IO,
@@ -586,6 +587,7 @@ class BrowserServiceTest {
             inFront = inFront,
             showPackage = showPackage,
             pageDialog = pageDialog,
+            openPrivateTab = openPrivateTab,
         )
 
     internal class ScriptedSocket(

@@ -32,6 +32,7 @@ public data class BrowserTarget(
 public data class OpenTabRequest(
     val url: String,
     @Doc(CAPTURE_OPEN_DOC) val capture: Boolean = false,
+    @Doc(INCOGNITO_OPEN_DOC) val incognito: Boolean = false,
 )
 
 @Serializable public data class NavigateRequest(val url: String)
@@ -186,6 +187,9 @@ public data class EvalResult(
     val value: JsonElement? = null,
     val exception: String? = null,
 )
+
+public const val INCOGNITO_OPEN_DOC: String =
+    "Open the tab in Chrome's incognito mode, with none of the phone's logins, cookies, or history. Use it for a page that needs no account. It takes the screen, since Chrome comes forward, and the phone's screenshots and the viewer show incognito tabs black; browser_read and browser_snapshot still work."
 
 public const val CAPTURE_OPEN_DOC: String =
     "Record the JSON responses the page fetches from the start of its load, as browser_capture does, so scope data reads them."

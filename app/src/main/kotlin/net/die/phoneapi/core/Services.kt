@@ -156,9 +156,14 @@ interface BrowserService {
 
     /**
      * Opens a tab on [url]. With [capture], the tab records the JSON responses its page fetches
-     * from the start of its load, as [capture] does.
+     * from the start of its load, as [capture] does. With [incognito], the tab is in Chrome's
+     * incognito profile, which brings Chrome forward, so the caller holds the screen.
      */
-    suspend fun openTab(url: String, capture: Boolean = false): BrowserTarget
+    suspend fun openTab(
+        url: String,
+        capture: Boolean = false,
+        incognito: Boolean = false,
+    ): BrowserTarget
 
     suspend fun navigate(id: String, url: String): BrowserTarget
 
