@@ -24,7 +24,17 @@ class OpenApiTest {
             assertEquals(true, operation["x-websocket"]!!.jsonPrimitive.content.toBoolean())
         }
         val device = paths["/v1/device"]!!.jsonObject["get"]!!.jsonObject
-        assertEquals("observe", device["x-scope"]!!.jsonPrimitive.content)
+        assertEquals(
+            listOf("observe"),
+            device["x-scopes"]!!.jsonArray.map { it.jsonPrimitive.content },
+        )
+        val unlock = paths["/v1/device/unlock"]!!.jsonObject["post"]!!.jsonObject
+        assertEquals(
+            listOf("control", "browser"),
+            unlock["x-scopes"]!!.jsonArray.map { it.jsonPrimitive.content },
+        )
+        val session = paths["/v1/sessions"]!!.jsonObject["post"]!!.jsonObject
+        assertEquals(0, session["x-scopes"]!!.jsonArray.size)
         assertTrue(
             document["components"]!!.jsonObject["schemas"]!!.jsonObject.containsKey("DeviceInfo")
         )

@@ -2,9 +2,11 @@ package net.die.phoneapi.model.openapi
 
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.serializer
 import net.die.phoneapi.model.Scope
 import net.die.phoneapi.model.schema.JsonSchemas
@@ -89,11 +91,16 @@ private fun operationKey(endpoint: ApiEndpoint): String =
     }
 
 private fun operation(endpoint: ApiEndpoint, schemas: JsonSchemas): JsonObject = buildJsonObject {
-    val scope = endpoint.scope?.let(::scopeName)
+    val scopes = endpoint.scopes.sorted().map(::scopeName)
     put("summary", endpoint.summary)
-    val needs = if (scope == null) " Any token may call it." else " Requires the $scope scope."
+    val needs =
+        if (scopes.isEmpty()) {
+            " Any token may call it."
+        } else {
+            " Requires the ${scopes.joinToString(" or ")} scope."
+        }
     put("description", endpoint.summary + needs)
-    put("x-scope", scope ?: "any")
+    putJsonArray("x-scopes") { scopes.forEach(::add) }
     if (endpoint.method == ApiMethod.WEBSOCKET) put("x-websocket", true)
     pathParameters(endpoint.path)?.let { put("parameters", it) }
     endpoint.request?.let { request ->

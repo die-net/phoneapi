@@ -91,6 +91,15 @@ Checked on the Android 16 emulator with Chrome 133 on 2026-10-31, with the helpe
 - With an incognito tab opened outside PhoneAPI holding a cookie, an incognito open closed it, and the new tab, opened right after, was in a new browser context with no cookies. A second session's open kept the first session's tab, saw its cookie, and got the note.
 - The Incognito Screenshot flag was in `chrome://flags`. It stayed on after Relaunch; Chrome writes flags as it shuts down, so a force stop loses the change. With it on, the video and `/v1/screenshot` showed an incognito tab's page and Chrome's incognito icon.
 
+## Starting Chrome
+
+Chrome opens `chrome_devtools_remote` only while it runs. A tab open with Chrome stopped starts it from its launcher entry, as tapping its icon would, and waits for the socket, as [sharing.md](sharing.md) describes.
+
+Checked on the Android 16 emulator with Chrome 133 on 2026-10-31, after `am force-stop com.android.chrome`:
+
+- The socket appeared and `POST /v1/browser/tabs` returned in 2.1 to 3.2 s over four runs, and MCP `browser_open` in 2.0 s. Chrome restored its earlier tabs as it started.
+- A session without the screen got it for the open and gave it back. Cleanup sent Chrome home about 5.5 s after the open returned, the same as after an incognito open. One that held the screen kept it.
+
 ## The top task
 
 PhoneAPI asks for the top task before and after calls that could launch an app. The first build ran `dumpsys activity activities`. It took about 8 ms on the emulator but 90 to 140 ms on the phone, where any `dumpsys` costs that much to start, adding about a quarter second to each background input. The helper now calls `IActivityTaskManager.getTasks` directly, choosing the overload as it does for input injection, and falls back to `dumpsys` if that call fails. The same call answers the "is Chrome in front" checks behind the placeholder tab.
@@ -149,6 +158,7 @@ MCP's stateless revision (2026-07-28) drops protocol sessions: servers that need
 - Whether a hidden tab's timers also stop while Chrome itself is in front, with the tab behind another, or only while Chrome is in the background.
 - That `show` brings a background tab on screen, including when Chrome is behind another app, and that `shown` and `pending` match what is on screen.
 - Whether Android 11 applies a change to `cached_apps_freezer` as quickly as Android 16 does.
+- How long Chrome takes on the Moto G Power to open its DevTools socket after a tab open starts it, against the 10 s limit, and whether a first-run or sign-in screen keeps it from opening one.
 
 ## Checked on the phone
 

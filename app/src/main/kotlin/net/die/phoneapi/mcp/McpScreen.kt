@@ -11,6 +11,7 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import net.die.phoneapi.browser.touchAllowed
 import net.die.phoneapi.core.ApiJson
+import net.die.phoneapi.core.BrowserService
 import net.die.phoneapi.lease.Holder
 import net.die.phoneapi.lease.ScreenLease
 import net.die.phoneapi.model.ApiException
@@ -88,6 +89,39 @@ private fun flag(args: JsonObject?, name: String): Boolean =
  * back after.
  */
 internal val BRIEF_SCREEN_TOOLS = setOf("browser_open")
+
+/**
+ * Whether a call to [tool] with [args] opens a tab, which starts Chrome first when it is not
+ * running. Reading or snapshotting a `url` opens one.
+ */
+internal fun opensTab(tool: String, args: JsonObject?): Boolean =
+    when (tool) {
+        "browser_open" -> true
+        "browser_read",
+        "browser_snapshot" -> (args?.get("url") as? JsonPrimitive)?.contentOrNull != null
+        else -> false
+    }
+
+/** Whether a call takes the screen, and whether it takes it only while it runs. */
+internal data class ScreenUse(val needed: Boolean, val brief: Boolean)
+
+/**
+ * How a call to [tool] with [args] uses the screen. Its arguments decide, as [takesScreen] says,
+ * except that opening a tab while [browser] has Chrome stopped starts Chrome, which brings it
+ * forward, so that call takes the screen while the tab opens.
+ */
+internal suspend fun screenUse(
+    tool: String,
+    args: JsonObject?,
+    browser: BrowserService,
+): ScreenUse {
+    val byArguments = takesScreen(tool, args)
+    val startsChrome = opensTab(tool, args) && browser.chromeStopped()
+    return ScreenUse(
+        needed = byArguments || startsChrome,
+        brief = tool in BRIEF_SCREEN_TOOLS || (startsChrome && !byArguments),
+    )
+}
 
 /**
  * Tools that, without the screen, could still make a page launch an app, so the foreground watch

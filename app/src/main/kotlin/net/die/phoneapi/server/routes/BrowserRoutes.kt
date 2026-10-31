@@ -53,12 +53,13 @@ fun Route.browserRoutes(services: ServerServices) {
         post("/v1/browser/tabs") {
             val request = call.receive<OpenTabRequest>()
             call.respond(
-                // Chrome's incognito shortcut brings Chrome forward, so only that takes the screen,
-                // and only while the tab opens. The tab works in the background after.
+                // Chrome's incognito shortcut and starting Chrome bring it forward, so only those
+                // take the screen, and only while the tab opens. The tab works in the background
+                // after.
                 withScreen(
                     call,
                     services,
-                    needed = request.incognito,
+                    needed = request.incognito || services.browser.chromeStopped(),
                     launching = true,
                     giveBack = true,
                 ) {

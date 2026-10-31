@@ -74,7 +74,7 @@ class BrowserServiceTest {
         val service = service(byteArrayOf(), sockets = "[]")
         val error = assertThrows(ApiException::class.java) { runBlocking { service.targets() } }
         assertEquals("browser_unavailable", error.error)
-        assertTrue(error.message.orEmpty().contains("Start Chrome"))
+        assertTrue(error.message.orEmpty().contains("starts Chrome"))
     }
 
     @Test
@@ -568,10 +568,11 @@ class BrowserServiceTest {
         showPackage: suspend (String) -> Unit = {},
         pageDialog: suspend () -> Boolean = { false },
         openPrivateTab: suspend (String) -> Unit = {},
+        listSockets: () -> String = { sockets },
     ) =
         BrowserServiceImpl(
             io = Dispatchers.IO,
-            listSockets = { sockets },
+            listSockets = listSockets,
             open = open,
             websocketKey = { KEY },
             contentBounds = content,

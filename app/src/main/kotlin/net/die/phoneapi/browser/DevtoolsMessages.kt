@@ -70,8 +70,8 @@ private fun chromeGap(chromeInstalled: Boolean, usbDebugging: Boolean): String =
                 "options and USB debugging, then start Chrome. Chrome opens " +
                 "chrome_devtools_remote only while both are true."
         else ->
-            "Chrome's DevTools socket is not open. Start Chrome. The socket stays up only while " +
-                "Chrome is running and USB debugging is on."
+            "Chrome's DevTools socket is not open. It stays up only while Chrome is running and " +
+                "USB debugging is on."
     }
 
 private fun socketsGap(chromeInstalled: Boolean, usbDebugging: Boolean): String {
@@ -87,7 +87,9 @@ private fun socketsGap(chromeInstalled: Boolean, usbDebugging: Boolean): String 
             "No DevTools sockets are open. USB debugging is off, so Chrome does not open " +
                 "chrome_devtools_remote. Turn on Developer options and USB debugging, then " +
                 "start Chrome. $webView"
-        else -> "No DevTools sockets are open. Start Chrome with USB debugging on. $webView"
+        else ->
+            "No DevTools sockets are open. Opening a tab starts Chrome, which opens its socket " +
+                "while USB debugging is on. $webView"
     }
 }
 

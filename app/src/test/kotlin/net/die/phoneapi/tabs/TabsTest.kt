@@ -387,6 +387,8 @@ class TabsTest {
         val incognito = mutableSetOf<String>()
         private var next = 0
 
+        override suspend fun chromeStopped() = false
+
         fun add(
             name: String,
             opener: String? = null,

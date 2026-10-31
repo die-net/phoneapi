@@ -6,7 +6,7 @@ After `phoneapi server`, the base URL is `http://127.0.0.1:<port>` from the pair
 phoneapi papi GET /v1/openapi.json
 ```
 
-That document is generated from the same Kotlin types as the handlers and MCP tool schemas (`api-model`). Each operation has `x-scope`. WebSocket routes are marked `x-websocket`. The `bearer` security scheme is Bearer auth. Prefer OpenAPI (or this page’s summary) over guessing field names.
+That document is generated from the same Kotlin types as the handlers and MCP tool schemas (`api-model`). Each operation has `x-scopes`, the scopes any one of which lets a token call it, empty when any token may. WebSocket routes are marked `x-websocket`. The `bearer` security scheme is Bearer auth. Prefer OpenAPI (or this page’s summary) over guessing field names.
 
 Install, pairing, and the helper lifecycle are in [setup.md](setup.md). Design background is in [architecture.md](architecture.md).
 
@@ -26,7 +26,7 @@ Scopes on a token:
 | --- | --- |
 | `observe` | Device info, UI tree, screenshot, events, logcat, OpenAPI, waits that watch the UI |
 | `control` | Input, IME, wake/unlock/lock, app launch/stop/clear, intents |
-| `browser` | Chrome/WebView CDP helpers, and `browser.*` wait conditions. A wait with only those needs no other scope |
+| `browser` | Chrome/WebView CDP helpers, `browser.*` wait conditions, and wake/unlock, which browser touch input needs. A wait with only browser conditions needs no other scope |
 | `stream` | Viewer page and video/audio WebSockets |
 | `admin` | Token CRUD and stored unlock PIN |
 
@@ -147,7 +147,7 @@ Authenticated errors are JSON:
 | 502 | `stream_error` | The helper stopped during video or audio capture |
 | 503 | `helper_unavailable` | Helper down or dropped; message may say starting / needs pairing / needs USB / stopped |
 | 503 | `helper_error` | A helper call, or a shell command it ran, failed; the message has its output |
-| 503 | `browser_unavailable` | No DevTools socket: Chrome is not running or not publishing one |
+| 503 | `browser_unavailable` | No DevTools socket: Chrome is not running, or did not publish one within 10 s of a tab open starting it |
 | 503 | `browser_frozen` | Android froze Chrome in the background, so nothing in it answers |
 | 503 | `cdp_error` | DevTools cannot be reached: wireless debugging is not paired, or Android 10 has no USB tunnel |
 | 503 | `cdp_timeout` | DevTools did not answer in time |
@@ -162,8 +162,8 @@ Authenticated errors are JSON:
 | Method | Path | Scope | Summary |
 | --- | --- | --- | --- |
 | `GET` | `/v1/device` | observe | `DeviceInfo`: display, helper status, capabilities, whether Android's app freezer is on (`appFreezer`), whether PhoneAPI holds Chrome's Custom Tabs binding, which keeps the freezer off Chrome while the helper runs (`chromeKept`), and who has the screen (`screenHolder`: `you` when `Mcp-Session-Id` names the holder, `parent` or `subagent` for a session related by `session_start`, `agent`, `person`, or `script`) and for how long (`screenHeldMs`) |
-| `POST` | `/v1/device/wake` | control | Turn the screen on → `ActionResult` |
-| `POST` | `/v1/device/unlock` | control | Dismiss keyguard (`UnlockRequest`, optional) |
+| `POST` | `/v1/device/wake` | control or browser | Turn the screen on → `ActionResult` |
+| `POST` | `/v1/device/unlock` | control or browser | Dismiss keyguard (`UnlockRequest`, optional) |
 | `POST` | `/v1/device/lock` | control | Lock the device |
 | `POST` | `/v1/device/orientation` | control | Auto-rotate, or lock to `lock` / `0` / `90` / `180` / `270` (`OrientationRequest`) |
 | `PUT` | `/v1/device/pin` | admin | Store unlock PIN (`SetPinRequest`) → `PinStatus` |
@@ -216,7 +216,7 @@ The clipboard calls need the shell helper (`clipboard`), which reads the clip as
 
 | Method | Path | Scope | Summary |
 | --- | --- | --- | --- |
-| `POST` | `/v1/wait` | observe and/or browser, by condition | `WaitRequest` → `WaitResult` |
+| `POST` | `/v1/wait` | observe or browser, by condition | `WaitRequest` → `WaitResult` |
 
 ### Browser (CDP helpers)
 
@@ -227,7 +227,7 @@ A session, from MCP or REST, owns the tabs it opens, popups they open, and unown
 | Method | Path | Scope | Summary |
 | --- | --- | --- | --- |
 | `GET` | `/v1/browser/targets` | browser | Tabs and debuggable WebViews |
-| `POST` | `/v1/browser/tabs` | browser | Open tab (`OpenTabRequest`). `tookScreen` is true when Chrome was on screen and switched to it. `capture` records the page's JSON responses from the start of its load, as under [Recorded responses](#recorded-responses). `incognito` opens it in Chrome's incognito profile, with none of the phone's logins. It first closes incognito tabs no session owns, and notes when it shares the profile with another session's. That takes the screen while the tab opens and gives it back after unless the session already had it, and screenshots show the tab black unless the owner turned on Chrome's Incognito Screenshot flag, as in [sharing.md](sharing.md#incognito-tabs) |
+| `POST` | `/v1/browser/tabs` | browser | Open tab (`OpenTabRequest`). When Chrome is not running, it starts Chrome first, which takes the screen while the tab opens and gives it back after unless the session already had it. `tookScreen` is true when Chrome was on screen and switched to it. `capture` records the page's JSON responses from the start of its load, as under [Recorded responses](#recorded-responses). `incognito` opens it in Chrome's incognito profile, with none of the phone's logins. It first closes incognito tabs no session owns, and notes when it shares the profile with another session's. That takes the screen while the tab opens and gives it back after unless the session already had it, and screenshots show the tab black unless the owner turned on Chrome's Incognito Screenshot flag, as in [sharing.md](sharing.md#incognito-tabs) |
 | `POST` | `/v1/browser/targets/{id}/navigate` | browser | `NavigateRequest` |
 | `POST` | `/v1/browser/targets/{id}/close` | browser | Close the tab without bringing it forward → `ActionResult` |
 | `GET` | `/v1/browser/targets/{id}/snapshot` | browser | Compact AX outline → `BrowserSnapshot`. `maxNodes` (default 400, up to 5000) and `maxChars` cap it; cuts are reported as for the UI snapshot. `show` brings the tab on screen first. `shown` and `pending` as for `read` |
@@ -329,9 +329,10 @@ Run `phoneapi server` and point a Streamable HTTP client at `http://127.0.0.1:<p
 | `keyboard_hide` / `keyboard_show` | control | Soft keyboard |
 | `app_launch` / `app_stop` / `app_clear` | control | Package control (`stop`/`clear` need helper) |
 | `open_intent` | control | Start an intent (needs helper) |
-| `device_wake` / `device_unlock` / `device_lock` | control | Power / keyguard |
+| `device_wake` / `device_unlock` | control or browser | Screen on / keyguard |
+| `device_lock` | control | Lock |
 | `device_orientation` | control | Auto-rotate, or lock the screen to the current or a named rotation |
-| `browser_targets` / `browser_open` / `browser_navigate` / `browser_close` | browser | Tab list, navigation, and closing a tab. `browser_open` with `incognito` opens an incognito tab, which takes the screen while it opens |
+| `browser_targets` / `browser_open` / `browser_navigate` / `browser_close` | browser | Tab list, navigation, and closing a tab. `browser_open` with `incognito` opens an incognito tab, which takes the screen while it opens. Opening a tab while Chrome is not running starts Chrome, which also takes the screen while the tab opens |
 | `browser_snapshot` | browser | AX outline |
 | `browser_tap` / `browser_swipe` / `browser_gesture` | browser | Pointer input. `input` `auto` (default), `touch`, `cdp`, or `cdp-mouse` (tap only) |
 | `browser_key` / `browser_type` | browser | Key presses and typing. `cdp` stays on a background tab; device keys such as HOME need `touch`, and `browser_key` with `touch` needs the control scope too |
