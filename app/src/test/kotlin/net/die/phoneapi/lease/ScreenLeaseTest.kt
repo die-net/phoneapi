@@ -444,6 +444,60 @@ class ScreenLeaseTest {
         assertEquals("b", waiting.await().value)
     }
 
+    @Test
+    fun `a brief call gives it back`() = runTest {
+        val lease = lease()
+        val waiting = async { lease.withScreen(b) { "b ran" } }
+        lease.withScreen(a, giveBack = true) {}
+        runCurrent()
+        assertEquals(1, cleanups)
+        assertEquals("b ran", waiting.await().value)
+        assertTrue(lease.holds(b))
+    }
+
+    @Test
+    fun `a failed brief call too`() = runTest {
+        val lease = lease()
+        val error = apiError {
+            lease.withScreen(a, giveBack = true) {
+                throw ApiException.unavailable("browser_unavailable", "no tab")
+            }
+        }
+        runCurrent()
+        assertEquals("browser_unavailable", error.error)
+        assertNull(lease.state.value.holder)
+        assertEquals(1, cleanups)
+    }
+
+    @Test
+    fun `a brief call keeps a held one`() = runTest {
+        val lease = lease()
+        lease.withScreen(a) {}
+        lease.withScreen(a, giveBack = true) {}
+        runCurrent()
+        assertTrue(lease.holds(a))
+        assertEquals(0, cleanups)
+    }
+
+    @Test
+    fun `a running call keeps it`() = runTest {
+        // The session's other screen call, still running when the brief one ends, keeps the screen.
+        val lease = lease()
+        val briefDone = CompletableDeferred<Unit>()
+        val otherDone = CompletableDeferred<Unit>()
+        val brief = async { lease.withScreen(a, giveBack = true) { briefDone.await() } }
+        runCurrent()
+        val other = async { lease.withScreen(a) { otherDone.await() } }
+        runCurrent()
+        briefDone.complete(Unit)
+        brief.await()
+        otherDone.complete(Unit)
+        other.await()
+        runCurrent()
+        assertTrue(lease.holds(a))
+        assertEquals(0, cleanups)
+    }
+
     private suspend fun apiError(block: suspend () -> Unit): ApiException =
         try {
             block()

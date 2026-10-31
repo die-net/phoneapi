@@ -1,11 +1,14 @@
 package net.die.phoneapi.server
 
+import io.ktor.client.HttpClient
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import io.ktor.server.testing.testApplication
+import kotlinx.coroutines.delay
+import net.die.phoneapi.lease.Holder
 import net.die.phoneapi.model.Scope
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
@@ -30,16 +33,49 @@ class BrowserRouteTest {
             assertEquals(HttpStatusCode.OK, normal.status)
             assertNull(api.lease.state.value.holder)
 
-            // Chrome's incognito shortcut brings Chrome forward, so the call holds the screen.
-            val incognito =
-                client.post("/v1/browser/tabs") {
-                    bearer(browser)
-                    session(session)
-                    contentType(ContentType.Application.Json)
-                    setBody("""{"url":"https://example.com/","incognito":true}""")
-                }
+            // Chrome's incognito shortcut brings Chrome forward, so the call holds the screen, and
+            // gives it back after.
+            val incognito = openIncognito(client, browser, session)
             assertEquals(HttpStatusCode.OK, incognito.status)
-            assertNotNull(api.lease.state.value.holder)
+            assertNull(api.lease.state.value.holder)
+            settle { api.cleanups == 1 }
+            assertEquals(1, api.cleanups)
         }
     }
+
+    @Test
+    fun `incognito keeps a held screen`() = testApplication {
+        val api = FakeApi()
+        val all = api.tokens.issue("all", Scope.entries.toSet())
+        application { phoneApiModule(api.services) }
+        apiClient().use { client ->
+            val session = startSession(client, all)
+            client.post("/v1/device/wake") {
+                bearer(all)
+                session(session)
+            }
+            assertNotNull(api.lease.state.value.holder)
+            assertEquals(HttpStatusCode.OK, openIncognito(client, all, session).status)
+            assertEquals(Holder.Session(session), api.lease.state.value.holder)
+            assertEquals(0, api.cleanups)
+        }
+    }
+
+    private suspend fun settle(done: () -> Boolean) {
+        repeat(SETTLE_TRIES) {
+            if (done()) return
+            delay(SETTLE_MS)
+        }
+    }
+
+    private suspend fun openIncognito(client: HttpClient, token: String, session: String) =
+        client.post("/v1/browser/tabs") {
+            bearer(token)
+            session(session)
+            contentType(ContentType.Application.Json)
+            setBody("""{"url":"https://example.com/","incognito":true}""")
+        }
 }
+
+private const val SETTLE_TRIES = 50
+private const val SETTLE_MS = 10L
