@@ -167,6 +167,12 @@ interface BrowserService {
 
     suspend fun navigate(id: String, url: String): BrowserTarget
 
+    /**
+     * The ids of Chrome's incognito tabs, whoever opened them. Only the DevTools browser knows, so
+     * the session and shared views, which never need it, have none.
+     */
+    suspend fun incognitoTabs(): Set<String> = emptySet()
+
     /** Closes a tab over DevTools, without bringing it forward. */
     suspend fun closeTab(id: String): ActionResult
 

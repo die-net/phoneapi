@@ -217,12 +217,7 @@ internal class BrowserServiceImpl(
         // Recording has to start before the page loads, so the tab opens blank and loads after.
         // The blank page stays in the tab's history, so the page sees history.length 2, not 1.
         val recording = capture && pageUrl != BLANK
-        val chrome =
-            socketList().firstOrNull { it.name == CHROME_SOCKET }
-                ?: throw ApiException.unavailable(
-                    "browser_unavailable",
-                    devtoolsGap(BrowserGap.CHROME),
-                )
+        val chrome = chromeSocket()
         // Chrome on Android ignores createTarget's background flag and switches to a new tab
         // while it is in front, so say whether this call took the screen. Chrome's incognito
         // shortcut always brings it forward.
@@ -257,6 +252,19 @@ internal class BrowserServiceImpl(
             tookScreen = tookScreen,
         )
     }
+
+    override suspend fun incognitoTabs(): Set<String> {
+        val chrome = chromeSocket()
+        val normal = normalContext(chrome)
+        return contexts(chrome.name)
+            .filterValues { it != null && it != normal }
+            .keys
+            .mapTo(HashSet()) { browserTargetId(chrome.name, it) }
+    }
+
+    private suspend fun chromeSocket(): DevtoolsSocketInfo =
+        socketList().firstOrNull { it.name == CHROME_SOCKET }
+            ?: throw ApiException.unavailable("browser_unavailable", devtoolsGap(BrowserGap.CHROME))
 
     private suspend fun createTab(socket: String, url: String): String {
         val created =
