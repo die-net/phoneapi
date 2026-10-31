@@ -60,6 +60,44 @@ class WaitRouteTest {
     }
 
     @Test
+    fun `browser alone waits on pages`() = testApplication {
+        val api = FakeApi()
+        val browser = api.tokens.issue("browser", setOf(Scope.BROWSER))
+        val stream = api.tokens.issue("stream", setOf(Scope.STREAM))
+        application { phoneApiModule(api.services) }
+        apiClient().use { client ->
+            val session = startSession(client, browser)
+            suspend fun wait(token: String, body: String) =
+                client.post("/v1/wait") {
+                    bearer(token)
+                    session(session)
+                    contentType(ContentType.Application.Json)
+                    setBody(body)
+                }
+            assertEquals(HttpStatusCode.OK, wait(browser, BROWSER_WAIT).status)
+            assertEquals(setOf(Scope.BROWSER), api.waits.scopes)
+            // What watches the screen's UI needs observe.
+            for (body in
+                listOf(
+                    NODE_WAIT,
+                    BROWSER_WAIT.replace(TIMEOUT, """"snapshot":true,$TIMEOUT"""),
+                    BROWSER_WAIT.replace(TIMEOUT, """"settleMs":100,$TIMEOUT"""),
+                )) {
+                val denied = wait(browser, body)
+                assertEquals(HttpStatusCode.Forbidden, denied.status, body)
+                assertEquals(
+                    "forbidden",
+                    ApiJson.decodeFromString(ApiError.serializer(), denied.bodyAsText()).error,
+                )
+            }
+            // A token with neither scope is refused before the request is checked.
+            assertEquals(HttpStatusCode.Forbidden, wait(stream, """{"all":[]}""").status)
+            assertEquals(HttpStatusCode.Forbidden, wait(stream, BROWSER_WAIT).status)
+            assertEquals(1, api.waits.calls)
+        }
+    }
+
+    @Test
     fun `person wait skips screen`() = testApplication {
         val api = FakeApi()
         val observe = api.tokens.issue("observe", setOf(Scope.OBSERVE))
@@ -86,6 +124,7 @@ class WaitRouteTest {
     }
 
     private companion object {
+        const val TIMEOUT = """"timeoutMs""""
         const val PERSON_WAIT = """{"all":[{"type":"screen","person":false}],"timeoutMs":0}"""
         const val NODE_WAIT = """{"all":[{"type":"node","selector":{"text":"Ok"}}],"timeoutMs":0}"""
         // A session's browser wait names its tab unless the session can see exactly one.

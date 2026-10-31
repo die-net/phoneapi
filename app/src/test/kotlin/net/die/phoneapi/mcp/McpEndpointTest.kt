@@ -70,6 +70,28 @@ class McpEndpointTest {
     }
 
     @Test
+    fun `browser waits without shots`() = testApplication {
+        val api = FakeApi()
+        val browser = api.tokens.issue("browser", setOf(Scope.BROWSER))
+        application { phoneApiModule(api.services) }
+        val page =
+            mapOf(
+                "type" to "browser.url",
+                "target" to "chrome_devtools_remote~t",
+                "contains" to "example",
+            )
+        val (waited, shot) =
+            withMcp(browser) { client ->
+                client.callTool("wait_for", mapOf("all" to listOf(page))) to
+                    client.callTool("wait_for", mapOf("all" to listOf(page), "screenshot" to true))
+            }
+        assertTrue(waited.isError != true, (waited.content.firstOrNull() as? TextContent)?.text)
+        assertEquals(true, shot.isError)
+        assertTrue((shot.content.single() as TextContent).text.contains("forbidden"))
+        assertEquals(1, api.waits.calls)
+    }
+
+    @Test
     fun `lan host reaches mcp`() = testApplication {
         val api = FakeApi()
         val observe = api.tokens.issue("observe", setOf(Scope.OBSERVE))

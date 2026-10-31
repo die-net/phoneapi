@@ -89,7 +89,7 @@ internal class WaitServiceImpl(
                 try {
                     val outcome = await(all, any, deadline, changes)
                     if (outcome.matched) settle(request.settleMs, deadline, changes)
-                    result(request, outcome, SystemClock.uptimeMillis() - started)
+                    result(request, outcome, SystemClock.uptimeMillis() - started, scopes)
                 } finally {
                     pump.cancel()
                 }
@@ -167,10 +167,12 @@ internal class WaitServiceImpl(
         return merge(device, page)
     }
 
+    /** The result. [WaitResult.state] names the foreground app, so only observe gets it. */
     private fun result(
         request: WaitRequest,
         outcome: Outcome,
         elapsedMs: Long,
+        scopes: Set<Scope>,
     ): WaitResult =
         WaitResult(
             matched = outcome.matched,
@@ -185,7 +187,7 @@ internal class WaitServiceImpl(
                 } else {
                     null
                 },
-            state = state.refresh(),
+            state = if (Scope.OBSERVE in scopes) state.refresh() else null,
         )
 
     private fun validate(request: WaitRequest) {

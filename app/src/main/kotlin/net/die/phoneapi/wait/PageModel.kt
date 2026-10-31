@@ -243,10 +243,21 @@ internal class TargetModel {
     }
 }
 
-/** `browser.*` reads DevTools, so it needs the browser scope before any session is opened. */
+/**
+ * The scopes a wait needs, checked before any session is opened. `browser.*` reads DevTools, so it
+ * needs browser. Other conditions, a snapshot, and settleMs watch the screen's UI, so they need
+ * observe. A wait with only browser conditions needs only browser, so a browser token can wait on
+ * its pages. Every wait needs one of the two.
+ */
 internal fun requireWaitAccess(request: WaitRequest, scopes: Set<Scope>) {
-    if ((request.all + request.any).any(::isBrowserCondition) && Scope.BROWSER !in scopes) {
+    val conditions = request.all + request.any
+    if (conditions.any(::isBrowserCondition) && Scope.BROWSER !in scopes) {
         throw ApiException.forbidden(Scope.BROWSER)
+    }
+    val watchesUi =
+        conditions.any { !isBrowserCondition(it) } || request.snapshot || request.settleMs > 0
+    if ((watchesUi || Scope.BROWSER !in scopes) && Scope.OBSERVE !in scopes) {
+        throw ApiException.forbidden(Scope.OBSERVE)
     }
 }
 
