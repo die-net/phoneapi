@@ -30,8 +30,8 @@ import net.die.phoneapi.model.TimedPoint
  */
 internal class PageInput(
     private val touchAt: suspend (Rect, Boolean) -> ActionResult,
-    private val swipeAt: suspend (Point, Point, SwipeSpec) -> ActionResult,
-    private val gestureAt: suspend (List<List<TimedPoint>>, Boolean) -> ActionResult,
+    private val swipeAt: suspend (Point, Point, SwipeSpec, Rect) -> ActionResult,
+    private val gestureAt: suspend (List<List<TimedPoint>>, Boolean, Rect) -> ActionResult,
     private val pressKey: suspend (KeyRequest) -> ActionResult,
     private val typeText: suspend (TextRequest) -> ActionResult,
     private val contentOnScreen: suspend (String?) -> Rect,
@@ -101,6 +101,7 @@ internal class PageInput(
                     screenPoint(ends.first.x, ends.first.y, metrics, content),
                     screenPoint(ends.second.x, ends.second.y, metrics, content),
                     spec,
+                    content,
                 )
             }
             BrowserInput.CDP_MOUSE -> throw mouseOnlyTaps("swipe")
@@ -153,7 +154,7 @@ internal class PageInput(
                             point.copy(x = screen.x, y = screen.y)
                         }
                     }
-                gestureAt(mapped, request.humanize)
+                gestureAt(mapped, request.humanize, content)
             }
             BrowserInput.CDP_MOUSE -> throw mouseOnlyTaps("gesture")
             BrowserInput.CDP -> {

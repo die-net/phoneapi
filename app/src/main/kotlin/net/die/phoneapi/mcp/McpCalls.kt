@@ -12,6 +12,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.serializer
+import net.die.phoneapi.browser.requireTouchAccess
 import net.die.phoneapi.core.ApiJson
 import net.die.phoneapi.core.ScreenshotScale
 import net.die.phoneapi.core.checkLogTag
@@ -23,6 +24,7 @@ import net.die.phoneapi.model.BROWSER_INPUT_DOC
 import net.die.phoneapi.model.BROWSER_WAKE_DOC
 import net.die.phoneapi.model.BrowserGestureRequest
 import net.die.phoneapi.model.BrowserInput
+import net.die.phoneapi.model.BrowserInputKind
 import net.die.phoneapi.model.BrowserKeyRequest
 import net.die.phoneapi.model.BrowserSnapshot
 import net.die.phoneapi.model.BrowserSnapshotOptions
@@ -428,9 +430,11 @@ internal suspend fun browserGesture(
 
 internal suspend fun browserKey(
     services: ServerServices,
+    scopes: Set<Scope>,
     request: CallToolRequest,
 ): CallToolResult = runTool {
     val args = request.args<BrowserKeyArgs>()
+    requireTouchAccess(BrowserInputKind.KEY, args.input, scopes)
     jsonText(
         services.browser.key(
             args.target,

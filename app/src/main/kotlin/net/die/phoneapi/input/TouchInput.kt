@@ -1,6 +1,8 @@
 package net.die.phoneapi.input
 
 import android.view.ViewConfiguration
+import kotlin.math.max
+import kotlin.math.min
 import kotlinx.coroutines.channels.ReceiveChannel
 import net.die.phoneapi.model.DisplayInfo
 import net.die.phoneapi.model.Point
@@ -38,21 +40,29 @@ class TouchInput(
         return perform(listOf(path), fingers)
     }
 
-    suspend fun swipe(from: Point, to: Point, spec: SwipeSpec): TouchOutcome {
+    /** A swipe from [from] to [to], kept inside [within] when given, else on the display. */
+    suspend fun swipe(
+        from: Point,
+        to: Point,
+        spec: SwipeSpec,
+        within: Rect? = null,
+    ): TouchOutcome {
         val rate = display().refreshRate.takeIf { it > 0f } ?: DEFAULT_RATE_HZ
         val tuned = spec.copy(sampleRateHz = rate)
         val path = humanizer.swipe(from, to, tuned)
         val motion = if (tuned.fling) FingerMotion.FLING else FingerMotion.DRAG
         val fingers = listOf(humanizer.finger(path.size, motion, tuned.humanize))
-        return perform(listOf(path), fingers, withEnds = true)
+        return perform(listOf(path), fingers, withEnds = true, within = within)
     }
 
+    /** A gesture along [pointers], kept inside [within] when given, else on the display. */
     suspend fun gesture(
         pointers: List<List<TimedPoint>>,
         humanize: Boolean = true,
+        within: Rect? = null,
     ): TouchOutcome {
         val human = humanizer.humanGesture(pointers, humanize)
-        return perform(human.pointers, human.fingers, withEnds = true)
+        return perform(human.pointers, human.fingers, withEnds = true, within = within)
     }
 
     suspend fun playLive(
@@ -68,13 +78,9 @@ class TouchInput(
         pointers: List<List<TimedPoint>>,
         fingers: List<List<FingerShape>> = emptyList(),
         withEnds: Boolean = false,
+        within: Rect? = null,
     ): TouchOutcome {
-        val d = display()
-        val maxX = (d.widthPx - 1).toFloat()
-        val maxY = (d.heightPx - 1).toFloat()
-        val clamped = pointers.map { path ->
-            path.map { it.copy(x = it.x.coerceIn(0f, maxX), y = it.y.coerceIn(0f, maxY)) }
-        }
+        val clamped = clampPoints(pointers, display(), within)
         val ok = inject.shapedPerform(clamped, fingers)
         val reported = clamped.flatMap { path ->
             if (withEnds && path.size > 1) listOf(path.first(), path.last())
@@ -85,5 +91,29 @@ class TouchInput(
 
     private companion object {
         const val DEFAULT_RATE_HZ = 60f
+    }
+}
+
+/**
+ * Clamps [pointers] to [display], and to [within] when given, so humanized jitter and bow near an
+ * edge stay inside it.
+ */
+internal fun clampPoints(
+    pointers: List<List<TimedPoint>>,
+    display: DisplayInfo,
+    within: Rect?,
+): List<List<TimedPoint>> {
+    var minX = 0f
+    var minY = 0f
+    var maxX = (display.widthPx - 1).toFloat()
+    var maxY = (display.heightPx - 1).toFloat()
+    if (within != null) {
+        minX = max(minX, within.left.toFloat())
+        minY = max(minY, within.top.toFloat())
+        maxX = max(minX, min(maxX, (within.right - 1).toFloat()))
+        maxY = max(minY, min(maxY, (within.bottom - 1).toFloat()))
+    }
+    return pointers.map { path ->
+        path.map { it.copy(x = it.x.coerceIn(minX, maxX), y = it.y.coerceIn(minY, maxY)) }
     }
 }

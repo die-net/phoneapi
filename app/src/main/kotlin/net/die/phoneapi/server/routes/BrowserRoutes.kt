@@ -15,6 +15,8 @@ import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import net.die.phoneapi.browser.DEVTOOLS_CLOSED
+import net.die.phoneapi.browser.requireTouchAccess
+import net.die.phoneapi.browser.touchAllowed
 import net.die.phoneapi.model.ApiException
 import net.die.phoneapi.model.BrowserCaptureRequest
 import net.die.phoneapi.model.BrowserFindRequest
@@ -37,6 +39,7 @@ import net.die.phoneapi.server.ServerServices
 import net.die.phoneapi.server.browser
 import net.die.phoneapi.server.scoped
 import net.die.phoneapi.server.session
+import net.die.phoneapi.server.token
 import net.die.phoneapi.server.withScreen
 
 /**
@@ -149,12 +152,19 @@ private fun Route.browserReadRoutes(services: ServerServices) {
     }
 }
 
-/** `auto` input as it resolves for the calling session, which holds the screen or not. */
+/**
+ * `auto` input as it resolves for the calling session, which holds the screen or not. A token that
+ * may not send [kind] as touch resolves as if it did not hold the screen.
+ */
 private fun ApplicationCall.resolved(
     services: ServerServices,
     input: BrowserInput,
     kind: BrowserInputKind,
-): BrowserInput = input.resolved(kind, services.lease.holds(session()))
+): BrowserInput =
+    input.resolved(
+        kind,
+        services.lease.holds(session()) && touchAllowed(kind, token.scopes),
+    )
 
 /** Pointer, key, and text input. Touch, and cdp pointer input, take the screen. */
 private fun Route.browserInputRoutes(services: ServerServices) {
@@ -190,7 +200,8 @@ private fun Route.browserInputRoutes(services: ServerServices) {
     }
     post("/v1/browser/targets/{id}/key") {
         val asked = call.receive<BrowserKeyRequest>()
-        val input = call.resolved(services, asked.input, BrowserInputKind.KEYS)
+        val input = call.resolved(services, asked.input, BrowserInputKind.KEY)
+        requireTouchAccess(BrowserInputKind.KEY, input, call.token.scopes)
         val request = asked.copy(input = input)
         call.respond(
             withScreen(call, services, input == BrowserInput.TOUCH, launching = true) {
@@ -200,7 +211,7 @@ private fun Route.browserInputRoutes(services: ServerServices) {
     }
     post("/v1/browser/targets/{id}/text") {
         val asked = call.receive<BrowserTextRequest>()
-        val input = call.resolved(services, asked.input, BrowserInputKind.KEYS)
+        val input = call.resolved(services, asked.input, BrowserInputKind.TEXT)
         val request = asked.copy(input = input)
         call.respond(
             withScreen(call, services, input == BrowserInput.TOUCH, launching = true) {

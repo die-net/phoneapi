@@ -3,6 +3,7 @@ package net.die.phoneapi.server
 import io.ktor.client.HttpClient
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
@@ -13,6 +14,7 @@ import net.die.phoneapi.model.Scope
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class BrowserRouteTest {
@@ -58,6 +60,42 @@ class BrowserRouteTest {
             assertEquals(HttpStatusCode.OK, openIncognito(client, all, session).status)
             assertEquals(Holder.Session(session), api.lease.state.value.holder)
             assertEquals(0, api.cleanups)
+        }
+    }
+
+    @Test
+    fun `touch keys need control`() = testApplication {
+        val api = FakeApi()
+        val browser = api.tokens.issue("browser", setOf(Scope.BROWSER))
+        val both = api.tokens.issue("both", setOf(Scope.BROWSER, Scope.CONTROL))
+        application { phoneApiModule(api.services) }
+        apiClient().use { client ->
+            for ((token, status) in
+                listOf(
+                    browser to HttpStatusCode.Forbidden,
+                    both to HttpStatusCode.OK,
+                )) {
+                val session = startSession(client, token)
+                val tab =
+                    client.post("/v1/browser/tabs") {
+                        bearer(token)
+                        session(session)
+                        contentType(ContentType.Application.Json)
+                        setBody("""{"url":"https://example.com/"}""")
+                    }
+                assertEquals(HttpStatusCode.OK, tab.status)
+                val key =
+                    client.post("/v1/browser/targets/chrome_devtools_remote~t/key") {
+                        bearer(token)
+                        session(session)
+                        contentType(ContentType.Application.Json)
+                        setBody("""{"key":"HOME","input":"touch"}""")
+                    }
+                assertEquals(status, key.status, token)
+                if (status == HttpStatusCode.Forbidden) {
+                    assertTrue(key.bodyAsText().contains("forbidden"))
+                }
+            }
         }
     }
 

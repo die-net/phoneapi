@@ -34,7 +34,7 @@ class PageInputTest {
             harness.service(
                 frames,
                 sockets = BrowserServiceTest.CHROME,
-                swipe = { _, _, _ ->
+                swipe = { _, _, _, _ ->
                     swiped = true
                     ActionResult(ok = false, backend = "inject")
                 },
@@ -67,14 +67,16 @@ class PageInputTest {
                 harness.serverTextFrame(harness.metrics(2))
         var from = Point(0f, 0f)
         var to = Point(0f, 0f)
+        var area: Rect? = null
         val service =
             harness.service(
                 frames,
                 sockets = BrowserServiceTest.CHROME,
                 content = { Rect(0, 283, 1080, 2339) },
-                swipe = { start, end, _ ->
+                swipe = { start, end, _, within ->
                     from = start
                     to = end
+                    area = within
                     ActionResult(ok = true, backend = "inject", points = listOf(start, end))
                 },
             )
@@ -94,6 +96,43 @@ class PageInputTest {
         assertEquals(808.00f, from.y, 0.05f)
         assertEquals(787.50f, to.x, 0.05f)
         assertEquals(1333.00f, to.y, 0.05f)
+        assertEquals(Rect(0, 283, 1080, 2339), area)
+    }
+
+    @Test
+    @Suppress("MissingUseCall") // The service closes the socket it opens.
+    fun `touch swipe stays on the page`() {
+        val frames =
+            harness.switched() +
+                harness.serverTextFrame("""{"id":1,"result":{}}""") +
+                harness.serverTextFrame(harness.metrics(2))
+        var swiped = false
+        val service =
+            harness.service(
+                frames,
+                sockets = BrowserServiceTest.CHROME,
+                content = { Rect(0, 283, 1080, 2339) },
+                swipe = { _, _, _, _ ->
+                    swiped = true
+                    ActionResult(ok = true, backend = "inject")
+                },
+            )
+        // From the page's top edge up past it, onto Chrome's toolbar and the status bar.
+        val error =
+            assertThrows(ApiException::class.java) {
+                runBlocking {
+                    service.swipe(
+                        "chrome_devtools_remote~abc",
+                        BrowserSwipeRequest(
+                            from = Point(100f, 10f),
+                            to = Point(100f, -200f),
+                            humanize = false,
+                        ),
+                    )
+                }
+            }
+        assertEquals("offscreen", error.error)
+        assertFalse(swiped)
     }
 
     @Test

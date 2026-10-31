@@ -82,12 +82,13 @@ internal class BrowserServiceImpl(
     private val touchAt: suspend (Rect, Boolean) -> ActionResult = { _, _ ->
         ActionResult(ok = false)
     },
-    private val swipeAt: suspend (Point, Point, SwipeSpec) -> ActionResult = { _, _, _ ->
+    private val swipeAt: suspend (Point, Point, SwipeSpec, Rect) -> ActionResult = { _, _, _, _ ->
         ActionResult(ok = false)
     },
-    private val gestureAt: suspend (List<List<TimedPoint>>, Boolean) -> ActionResult = { _, _ ->
-        ActionResult(ok = false)
-    },
+    private val gestureAt: suspend (List<List<TimedPoint>>, Boolean, Rect) -> ActionResult =
+        { _, _, _ ->
+            ActionResult(ok = false)
+        },
     private val pressKey: suspend (KeyRequest) -> ActionResult = { ActionResult(ok = false) },
     private val typeText: suspend (TextRequest) -> ActionResult = { ActionResult(ok = false) },
     private val targetTimeoutMs: Long = TARGET_LIST_MS,
