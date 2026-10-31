@@ -41,7 +41,8 @@ fun Route.deviceRoutes(services: ServerServices) {
             )
         }
     }
-    scoped(Scope.CONTROL) {
+    // Browser touch input needs an awake, unlocked phone, so a browser token may get one.
+    scoped(Scope.CONTROL, Scope.BROWSER) {
         post("/v1/device/wake") {
             call.respond(withScreen(call, services) { services.power.wake() })
         }
@@ -49,6 +50,8 @@ fun Route.deviceRoutes(services: ServerServices) {
             val request = bodyOrDefault(call, UnlockRequest())
             call.respond(withScreen(call, services) { services.power.unlock(request) })
         }
+    }
+    scoped(Scope.CONTROL) {
         post("/v1/device/lock") {
             call.respond(withScreen(call, services) { services.power.lock() })
         }

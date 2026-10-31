@@ -295,7 +295,7 @@ private val TOOLS: List<McpTool> =
             name = "device_wake",
             description =
                 "Turn the screen on. Leaves the keyguard up. Not needed before other calls: actions, snapshots, and intents wake the screen themselves.",
-            scopes = setOf(Scope.CONTROL),
+            scopes = setOf(Scope.CONTROL, Scope.BROWSER),
             available = always,
             arguments = serializer<EmptyArgs>(),
             annotations = changes,
@@ -305,7 +305,7 @@ private val TOOLS: List<McpTool> =
             name = "device_unlock",
             description =
                 "Dismiss the keyguard. A secure lock uses the stored PIN. needs_user means there is no stored PIN, or the lock is a pattern or password.",
-            scopes = setOf(Scope.CONTROL),
+            scopes = setOf(Scope.CONTROL, Scope.BROWSER),
             available = always,
             arguments = serializer<EmptyArgs>(),
             annotations = changes,
@@ -344,7 +344,7 @@ private val TOOLS: List<McpTool> =
         McpTool(
             name = "browser_open",
             description =
-                "Open a tab and return its target, for every other browser tool. The tab is yours: other sessions cannot see it, and it closes when your session ends. Other sessions work in their own tabs at the same time, so start in the background unless you know the page needs the screen. Prefer it over open_intent for web pages. With Chrome hidden, the tab opens in the background and the screen is untouched. With Chrome on screen, Chrome switches to the new tab, and the result has tookScreen true. url must be http(s) or about:blank. A page that hands off to an installed app loads as a website in the tab. Follow with wait_for on browser.url and browser.settled. To only read or search a page, browser_read or browser_find with url opens it for you. incognito true opens a tab without the phone's logins, for a page that needs no account; it takes the screen only while the tab opens.",
+                "Open a tab and return its target, for every other browser tool. The tab is yours: other sessions cannot see it, and it closes when your session ends. Other sessions work in their own tabs at the same time, so start in the background unless you know the page needs the screen. Prefer it over open_intent for web pages. With Chrome hidden, the tab opens in the background and the screen is untouched. With Chrome not running, it starts Chrome, which takes the screen while the tab opens. With Chrome on screen, Chrome switches to the new tab, and the result has tookScreen true. url must be http(s) or about:blank. A page that hands off to an installed app loads as a website in the tab. Follow with wait_for on browser.url and browser.settled. To only read or search a page, browser_read or browser_find with url opens it for you. incognito true opens a tab without the phone's logins, for a page that needs no account; it takes the screen only while the tab opens.",
             scopes = setOf(Scope.BROWSER),
             available = Capabilities::browserCdp,
             arguments = serializer<BrowserOpenArgs>(),

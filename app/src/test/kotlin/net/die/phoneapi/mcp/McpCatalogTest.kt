@@ -38,11 +38,21 @@ class McpCatalogTest {
     @Test
     fun `browser alone waits and shares`() {
         val browser = visibleMcpTools(setOf(Scope.BROWSER), allOn()).map { it.name }
-        for (name in listOf("wait_for", "session_start", "session_end", "screen_release")) {
+        val shared =
+            listOf(
+                "wait_for",
+                "session_start",
+                "session_end",
+                "screen_release",
+                "device_wake",
+                "device_unlock",
+            )
+        for (name in shared) {
             assertTrue(name in browser, name)
         }
         assertFalse("device_info" in browser)
         assertFalse("screenshot" in browser)
+        assertFalse("device_lock" in browser)
         val stream = visibleMcpTools(setOf(Scope.STREAM), allOn()).map { it.name }
         assertEquals(listOf("screen_release", "session_end", "session_start"), stream.sorted())
     }

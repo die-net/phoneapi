@@ -165,6 +165,12 @@ interface BrowserService {
         incognito: Boolean = false,
     ): BrowserTarget
 
+    /**
+     * Whether Chrome is not running, so opening a tab starts it first. That brings Chrome forward,
+     * so the caller holds the screen while the tab opens. False when it cannot tell.
+     */
+    suspend fun chromeStopped(): Boolean
+
     suspend fun navigate(id: String, url: String): BrowserTarget
 
     /**

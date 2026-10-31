@@ -46,6 +46,29 @@ class BrowserRouteTest {
     }
 
     @Test
+    fun `chrome start takes screen`() = testApplication {
+        val api = FakeApi()
+        val browser = api.tokens.issue("browser", setOf(Scope.BROWSER))
+        api.browser.stopped = true
+        application { phoneApiModule(api.services) }
+        apiClient().use { client ->
+            val session = startSession(client, browser)
+            // Starting Chrome brings it forward, so the call holds the screen and gives it back.
+            val opened =
+                client.post("/v1/browser/tabs") {
+                    bearer(browser)
+                    session(session)
+                    contentType(ContentType.Application.Json)
+                    setBody("""{"url":"https://example.com/"}""")
+                }
+            assertEquals(HttpStatusCode.OK, opened.status)
+            assertNull(api.lease.state.value.holder)
+            settle { api.cleanups == 1 }
+            assertEquals(1, api.cleanups)
+        }
+    }
+
+    @Test
     fun `incognito keeps a held screen`() = testApplication {
         val api = FakeApi()
         val all = api.tokens.issue("all", Scope.entries.toSet())

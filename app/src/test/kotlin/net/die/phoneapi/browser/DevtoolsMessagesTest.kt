@@ -51,7 +51,7 @@ class DevtoolsMessagesTest {
             browserGapMessage(BrowserGap.CHROME, chromeInstalled = false, usbDebugging = true)
         val idle = browserGapMessage(BrowserGap.CHROME, chromeInstalled = true, usbDebugging = true)
         assertTrue(missing.contains("not installed"))
-        assertTrue(idle.contains("Start Chrome"))
+        assertTrue(idle.contains("Chrome is running"))
         assertTrue(idle.contains("USB debugging"))
     }
 }

@@ -103,7 +103,7 @@ One exclusive lease per phone. The first call that needs the screen takes it. A 
 - `wait_for` with any condition that is not `browser.*`, or with `snapshot` or `screenshot`. A `screen` condition with only `person` is the exception: it reads the lease, not the screen.
 - Browser input with `input` `touch`, which brings the tab forward. Pointer input with `input` `cdp` too: Chrome only takes cdp touch on the tab it is showing, so it already needs Chrome in front.
 - `browser_read` and `browser_snapshot` with `show`.
-- `browser_open` with `incognito`, since Chrome's incognito shortcut brings Chrome forward. It needs the screen only while the tab opens, so a session that did not have the screen gives it back after, with cleanup. One that had it keeps it, as does one with another screen call still running.
+- `browser_open` with `incognito`, since Chrome's incognito shortcut brings Chrome forward, and a call that opens a tab while Chrome is not running (`browser_open`, or `browser_read` or `browser_snapshot` with `url`), since starting Chrome does too. It needs the screen only while the tab opens, so a session that did not have the screen gives it back after, with cleanup. One that had it keeps it, as does one with another screen call still running.
 - Anything else that brings Chrome or a tab to the front.
 
 Calls that need no lease: `device_info`, `logcat_tail`, and browser tools on the caller's own tabs with `input` `cdp` (keys and text) or `cdp-mouse`, or no input at all. The REST routes for the same operations follow the same lists.

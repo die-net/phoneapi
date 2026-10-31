@@ -77,6 +77,15 @@ class McpScreenTest {
     }
 
     @Test
+    fun `some tools open tabs`() {
+        assertTrue(opensTab("browser_open", null))
+        assertTrue(opensTab("browser_read", args("""{"url":"https://example.com/"}""")))
+        assertTrue(opensTab("browser_snapshot", args("""{"url":"https://example.com/"}""")))
+        assertFalse(opensTab("browser_read", args("""{"target":"t"}""")))
+        assertFalse(opensTab("browser_navigate", args("""{"url":"https://example.com/"}""")))
+    }
+
+    @Test
     fun `person waits skip screen`() {
         assertFalse(takesScreen("wait_for", args("""{"all":[{"type":"screen","person":true}]}""")))
         assertTrue(takesScreen("wait_for", args("""{"all":[{"type":"screen","on":true}]}""")))

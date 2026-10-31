@@ -133,7 +133,7 @@ internal class RecordingWaits : WaitService {
 internal class FakeApi(leaseWaitMs: Long = ScreenLease.WAIT_MS) {
     val tokens = MemoryTokens()
     val waits = RecordingWaits()
-    private val browser = FakeBrowser()
+    val browser = FakeBrowser()
     var capabilities = allCapabilities()
     var inputTaps = 0
     var imeShow: ImeShowRequest? = null
@@ -400,6 +400,11 @@ internal const val FAILING_SELECTOR = "#fails"
 
 /** A browser with one tab, which [BrowserService.openTab] opens and reads and finds answer. */
 internal open class FakeBrowser : BrowserService {
+    /** Whether Chrome is stopped, so opening a tab starts it and takes the screen. */
+    var stopped = false
+
+    override suspend fun chromeStopped() = stopped
+
     override suspend fun targets(): List<BrowserTarget> = emptyList()
 
     override suspend fun openTab(url: String, capture: Boolean, incognito: Boolean) =

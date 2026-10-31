@@ -1,0 +1,52 @@
+package net.die.phoneapi.browser
+
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.runTest
+import net.die.phoneapi.model.ApiException
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Test
+
+/** Opening a tab while Chrome is not running starts it first. */
+@Suppress("InjectDispatcher") // Scripted sockets are read on a real dispatcher.
+class BrowserChromeStartTest {
+    private val harness = BrowserServiceTest()
+
+    @Test
+    fun `opening starts chrome`() {
+        val shown = mutableListOf<String>()
+        val service =
+            harness.service(
+                harness.switched() +
+                    harness.serverTextFrame("""{"id":1,"result":{"targetId":"abc"}}"""),
+                sockets = "[]",
+                showPackage = { shown += it },
+                // Chrome opens its socket once something has started it.
+                listSockets = { if (shown.isEmpty()) "[]" else BrowserServiceTest.CHROME },
+            )
+        assertTrue(runBlocking { service.chromeStopped() })
+        val target = runBlocking { service.openTab("https://example.com/") }
+        assertEquals(listOf("com.android.chrome"), shown)
+        assertEquals("chrome_devtools_remote~abc", target.id)
+        assertEquals(true, target.tookScreen)
+        assertFalse(runBlocking { service.chromeStopped() })
+    }
+
+    @Test
+    fun `chrome that never opens fails`() = runTest {
+        val shown = mutableListOf<String>()
+        val service = harness.service(byteArrayOf(), sockets = "[]", showPackage = { shown += it })
+        // Virtual time runs the ten seconds of polls.
+        val error =
+            try {
+                service.openTab("https://example.com/")
+                null
+            } catch (e: ApiException) {
+                e
+            }
+        assertEquals("browser_unavailable", error?.error)
+        assertTrue(error?.message.orEmpty().contains("within 10 s of starting"), error?.message)
+        assertEquals(listOf("com.android.chrome"), shown)
+    }
+}

@@ -45,10 +45,6 @@ class RouteScopeTest {
             Scope.entries.associateWith { scope ->
                 api.tokens.issue("has-$scope", setOf(scope))
             }
-        val missing =
-            Scope.entries.associateWith { scope ->
-                api.tokens.issue("missing-$scope", Scope.entries.toSet() - scope)
-            }
         lateinit var app: Application
         application {
             app = this
@@ -58,31 +54,35 @@ class RouteScopeTest {
             client.get("/v1/device")
             val routing = app.plugin(RoutingRoot) as RoutingNode
             val routes = routing.scopedRoutes()
-            val declared = phoneApiEndpoints.map { RegisteredRoute(it.method, it.path, it.scope) }
+            val declared = phoneApiEndpoints.map { RegisteredRoute(it.method, it.path, it.scopes) }
             assertEquals(declared.toSet(), routes.toSet())
             val unscoped =
                 routing.getAllRoutes().filter { it.scopeSelector() == null }.map { it.routePath() }
             assertTrue(unscoped.all { it in UNSCOPED }, "routes without a scope: $unscoped")
 
             routes.forEach { route ->
-                val scope = route.scope
-                if (scope == null) {
+                if (route.scopes.isEmpty()) {
                     // Any token may call it, even one with only the browser scope.
                     val anyone = request(client, route, holding.getValue(Scope.BROWSER))
                     assertTrue(anyone.status != HttpStatusCode.Forbidden, "$route -> $anyone")
                     return@forEach
                 }
-                val denied = request(client, route, missing.getValue(scope))
+                val others = Scope.entries.toSet() - route.scopes
+                val missing = api.tokens.issue("missing-$route", others)
+                val denied = request(client, route, missing)
                 assertEquals(HttpStatusCode.Forbidden, denied.status, route.toString())
                 if (route.method != ApiMethod.WEBSOCKET) {
                     val error = ApiJson.decodeFromString(ApiError.serializer(), denied.body)
                     assertEquals("forbidden", error.error, route.toString())
                 }
-                val allowed = request(client, route, holding.getValue(scope))
-                assertTrue(
-                    allowed.status != HttpStatusCode.Forbidden,
-                    "$route -> ${allowed.status} ${allowed.body}",
-                )
+                // Each of the route's scopes is enough on its own.
+                route.scopes.forEach { scope ->
+                    val allowed = request(client, route, holding.getValue(scope))
+                    assertTrue(
+                        allowed.status != HttpStatusCode.Forbidden,
+                        "$route with $scope -> ${allowed.status} ${allowed.body}",
+                    )
+                }
             }
         }
     }
@@ -91,7 +91,11 @@ class RouteScopeTest {
 /** MCP checks scopes per tool; it is not wrapped in [scoped]. */
 private val UNSCOPED = setOf("/mcp")
 
-private data class RegisteredRoute(val method: ApiMethod, val path: String, val scope: Scope?)
+private data class RegisteredRoute(
+    val method: ApiMethod,
+    val path: String,
+    val scopes: Set<Scope>,
+)
 
 private data class CallResult(val status: HttpStatusCode, val body: String)
 
@@ -137,7 +141,7 @@ private fun HttpRequestBuilder.json(secret: String) {
 private fun RoutingNode.scopedRoutes(): List<RegisteredRoute> =
     getAllRoutes().mapNotNull { node ->
         val selector = node.scopeSelector() ?: return@mapNotNull null
-        RegisteredRoute(node.routeMethod(), node.routePath(), selector.scope)
+        RegisteredRoute(node.routeMethod(), node.routePath(), selector.scopes)
     }
 
 /** The [scoped] or [anyToken] block a route is in, or null for a route in neither. */

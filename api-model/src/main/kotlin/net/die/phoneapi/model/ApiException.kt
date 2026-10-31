@@ -23,8 +23,13 @@ public class ApiException(
         public fun badRequest(message: String, cause: Throwable? = null): ApiException =
             ApiException(400, "bad_request", message, cause = cause)
 
-        public fun forbidden(scope: Scope): ApiException =
-            ApiException(403, "forbidden", "Token lacks the '${scope.name.lowercase()}' scope")
+        public fun forbidden(scope: Scope): ApiException = forbidden(listOf(scope))
+
+        /** A token holds none of [scopes], any one of which would do. */
+        public fun forbidden(scopes: Collection<Scope>): ApiException {
+            val names = scopes.joinToString(" or ") { "'${it.name.lowercase()}'" }
+            return ApiException(403, "forbidden", "Token needs the $names scope")
+        }
 
         public fun notFound(what: String): ApiException = ApiException(404, "not_found", what)
 

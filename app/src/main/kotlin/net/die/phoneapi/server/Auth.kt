@@ -131,26 +131,28 @@ val ApplicationCall.token: TokenInfo
     get() = attributes[TokenKey]
 
 private class ScopePluginConfig {
-    lateinit var scope: Scope
+    var scopes: Set<Scope> = emptySet()
 }
 
 private val RequireScope =
     createRouteScopedPlugin("RequireScope", ::ScopePluginConfig) {
-        val required = pluginConfig.scope
+        val allowed = pluginConfig.scopes
+        val named = allowed.sorted()
         onCall { call ->
             if (call.isHandled) return@onCall
-            if (required !in call.token.scopes) throw ApiException.forbidden(required)
+            if (allowed.none(call.token.scopes::contains)) throw ApiException.forbidden(named)
         }
     }
 
 /**
- * Child routes require [scope]. A route added outside [scoped] has no scope, which the route test
- * rejects.
+ * Child routes require one of [scopes]. A route added outside [scoped] has no scope, which the
+ * route test rejects.
  */
-fun Route.scoped(scope: Scope, build: Route.() -> Unit): Route {
-    val required = scope
-    val child = createChild(ScopeRouteSelector(required))
-    child.install(RequireScope) { this.scope = required }
+fun Route.scoped(vararg scopes: Scope, build: Route.() -> Unit): Route {
+    require(scopes.isNotEmpty()) { "Name a scope, or use anyToken" }
+    val allowed = scopes.toSet()
+    val child = createChild(ScopeRouteSelector(allowed))
+    child.install(RequireScope) { this.scopes = allowed }
     child.build()
     return child
 }
@@ -160,20 +162,21 @@ fun Route.scoped(scope: Scope, build: Route.() -> Unit): Route {
  * session. The route test checks them as it does [scoped] ones.
  */
 fun Route.anyToken(build: Route.() -> Unit): Route {
-    val child = createChild(ScopeRouteSelector(null))
+    val child = createChild(ScopeRouteSelector(emptySet()))
     child.build()
     return child
 }
 
 /**
- * Marks a [scoped] or [anyToken] block, with a null [scope] for the latter. Identity equality keeps
- * two blocks with the same scope from merging.
+ * Marks a [scoped] or [anyToken] block, with no [scopes] for the latter. Identity equality keeps
+ * two blocks with the same scopes from merging.
  */
-internal class ScopeRouteSelector(val scope: Scope?) : RouteSelector() {
+internal class ScopeRouteSelector(val scopes: Set<Scope>) : RouteSelector() {
     override suspend fun evaluate(
         context: RoutingResolveContext,
         segmentIndex: Int,
     ): RouteSelectorEvaluation = RouteSelectorEvaluation.Transparent
 
-    override fun toString(): String = "(scope:${scope?.name?.lowercase() ?: "any"})"
+    override fun toString(): String =
+        "(scope:${scopes.sorted().joinToString("|") { it.name.lowercase() }.ifEmpty { "any" }})"
 }
