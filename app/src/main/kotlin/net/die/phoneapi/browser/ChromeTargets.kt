@@ -44,6 +44,18 @@ internal fun chromeTargets(
     }
 }
 
+/**
+ * Each of Chrome's tabs, by its Chrome target id, with the browser context it belongs to. Normal
+ * tabs share one context and incognito tabs another.
+ */
+internal fun chromeContexts(result: JsonObject): Map<String, String?> =
+    result
+        .decodeCdp<TargetInfos>()
+        ?.targetInfos
+        .orEmpty()
+        .filter { it.type == "page" }
+        .associate { it.targetId to it.browserContextId }
+
 @Serializable private data class TargetInfos(val targetInfos: List<TargetInfo> = emptyList())
 
 @Serializable
@@ -53,6 +65,7 @@ private data class TargetInfo(
     val title: String? = null,
     val url: String? = null,
     val openerId: String? = null,
+    val browserContextId: String? = null,
 )
 
 /**

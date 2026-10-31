@@ -395,7 +395,7 @@ internal const val FAILING_SELECTOR = "#fails"
 internal open class FakeBrowser : BrowserService {
     override suspend fun targets(): List<BrowserTarget> = emptyList()
 
-    override suspend fun openTab(url: String, capture: Boolean) =
+    override suspend fun openTab(url: String, capture: Boolean, incognito: Boolean) =
         BrowserTarget(
             id = "chrome_devtools_remote~t",
             type = "page",

@@ -15,7 +15,7 @@ PhoneAPI owns the rules, because only it knows which calls take the screen and w
 - The next holder starts from a known screen: home, keyboard hidden, locked.
 - Every client gets the same rules: MCP clients on HTTP, a person in `/viewer`, and REST. The `phoneapi mcp` stdio relay is retired, as in [The stdio relay](#the-stdio-relay).
 - Not a privacy boundary. Every client uses the same Google and app accounts on the phone, so Chrome history, Maps searches, and app state are shared whatever cleanup does. `device_info` and the `state` on errors still show the foreground package. Cleanup keeps one conversation's screen from greeting the next.
-- Not isolation between sites. Tab ownership separates tabs, not cookies, logins, or what a site keeps on its servers. Two conversations on one site can log each other out, share a shopping cart, or trip a site that refuses a second open tab. That is the same problem as two threads editing one Google Doc, and a tab lock cannot fix it. Incognito would separate the state, but it would also drop the logged-in accounts that are the point of using the phone.
+- Not isolation between sites. Tab ownership separates tabs, not cookies, logins, or what a site keeps on its servers. Two conversations on one site can log each other out, share a shopping cart, or trip a site that refuses a second open tab. That is the same problem as two threads editing one Google Doc, and a tab lock cannot fix it. Incognito separates the state but drops the logged-in accounts that are the point of using the phone, so it is a choice per tab, `browser_open` with `incognito`, not the default. See [Incognito tabs](#incognito-tabs).
 - Not a security boundary either. Any token with the right scope can act as a viewer or open a session. ADB stays the trust boundary.
 
 ## Holders
@@ -141,6 +141,7 @@ One exclusive lease per phone. The first call that needs the screen takes it. An
 - Observing the screen: `ui_snapshot`, `ui_find`, `screenshot`. These would show another holder's screen.
 - `wait_for` with any condition that is not `browser.*`, or with `snapshot` or `screenshot`. A `screen` condition with only `person` is the exception: it reads the lease, not the screen.
 - Browser input with `input` `touch`, which brings the tab forward. Pointer input with `input` `cdp` too: Chrome only takes cdp touch on the tab it is showing, so it already needs Chrome in front.
+- `browser_open` with `incognito`, since Chrome's incognito shortcut brings Chrome forward.
 - Anything else that brings Chrome or a tab to the front.
 
 Calls that need no lease: `device_info`, `logcat_tail`, and browser tools on the caller's own tabs with `input` `cdp` (keys and text) or `cdp-mouse`, or no input at all.
@@ -148,6 +149,16 @@ Calls that need no lease: `device_info`, `logcat_tail`, and browser tools on the
 Browser input defaults to `auto`: `touch` when the caller holds the screen, and otherwise `cdp-mouse` for a tap and `cdp` for keys and text. A swipe or gesture with `auto` still needs the screen, since cdp touch only reaches a tab on screen. Without this, a tap that left `input` unset would take a free screen and keep it for the rest of the session. Passing `touch` still takes the screen on purpose.
 
 The REST routes for the same operations follow the same list.
+
+### Incognito tabs
+
+`browser_open` and `POST /v1/browser/tabs` take `incognito`, for a page that needs no account. The tab has none of the phone's logins, cookies, or history, so a mistaken click cannot post, buy, or subscribe as the phone's owner, and the site cannot tie the visit to the account. Incognito tabs share one profile with each other, including a person's, until Chrome closes the last one.
+
+DevTools cannot open one. Chrome on Android fails `Target.createBrowserContext` and opens a normal tab when `Target.createTarget` names the incognito tabs' `browserContextId`. So the helper starts Chrome's "New Incognito tab" shortcut, the intent action `org.chromium.chrome.browser.incognito.OPEN_PRIVATE_TAB`, which brings Chrome forward on a new incognito tab. That is why the call takes the screen. PhoneAPI then looks for the new tab in Chrome's target list and checks that its browser context differs from a normal tab's. It learns the normal context once per Chrome process by opening a blank tab with `createTarget` and closing it. A new tab in the normal context, or none within 5 s, fails with `browser_unavailable` instead of handing back a tab with the owner's logins. Then the tab loads the page with `Page.navigate`, and it belongs to the session like any tab it opens.
+
+Chrome marks incognito windows secure, so `screenshot`, the viewer, and the video show them black. The page itself still answers DevTools: `browser_read`, `browser_snapshot`, `browser_eval`, and `cdp-mouse` taps work.
+
+Checked on the Android 16 emulator with Chrome 133 on 2026-10-31, with the helper as the shell user. Over raw DevTools: the shell user can start the shortcut, each start opens a new incognito tab listed with its own `browserContextId`, and `screencap` of it is black. Through `POST /v1/browser/tabs`: an incognito open took 1.5 s the first time, with the blank tab to learn the normal context, and 0.8 s after. A cookie set in a normal tab was not in the incognito tab. `read`, `snapshot`, `evaluate`, and a `cdp-mouse` tap on a link worked on it. Ending the session closed both incognito tabs within 0.5 s in two runs. In an earlier run, the second incognito tab was still listed 2 s after the session ended; that was not seen again.
 
 ### Waiting
 
@@ -417,6 +428,7 @@ Checked on the phone on 2026-10-22, with this branch's dev build beside v0.3.0, 
 - Restarting the dev helper closed both test tabs a live session had: the startup sweep ran on every helper connection. It now runs once per app start. The release build's helper also restarted during cleanup, when the USB connection dropped, and its app relaunched it within 30 seconds.
 
 Still to check on the phone:
+- That Chrome on the phone opens an incognito tab for `OPEN_PRIVATE_TAB` from the shell user and lists it with its own `browserContextId`, and whether Chrome's "Lock Incognito tabs when you leave Chrome" setting blocks a tab after cleanup sends Chrome home.
 - Whether a tab opened while Chrome is in the background becomes Chrome's selected tab. On the Android 16 emulator it does: Chrome selects it as it comes forward, even over a `Page.bringToFront` sent just before, which is why `show` checks that its tab is still showing and tries again. Opening the tab did not bring Chrome forward.
 - That the shell user can clear the clipboard through `IClipboard.clearPrimaryClip` and read `getPrimaryClipDescription` on Android 11. On the Android 16 emulator on 2026-10-29, with the helper as the shell user, cleanup cleared PhoneAPI's own clip, left a clip copied after it, and left the clip after `cleanup` false. As root the emulator refuses the helper any clipboard access.
 - That a session finds the clipboard empty on Android 11 after a person copied something, and that the clear leaves no toast or visible change.

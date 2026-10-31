@@ -14,6 +14,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import net.die.phoneapi.apps.AppsServiceImpl
 import net.die.phoneapi.apps.RESUMED_ACTIVITY_ARGS
+import net.die.phoneapi.apps.parseAmStart
 import net.die.phoneapi.apps.resumedPackage
 import net.die.phoneapi.browser.BrowserServiceImpl
 import net.die.phoneapi.browser.CHROME_PACKAGE
@@ -23,6 +24,7 @@ import net.die.phoneapi.browser.DevtoolsPreconditions
 import net.die.phoneapi.browser.DevtoolsSocket
 import net.die.phoneapi.browser.FREEZER_ARGS
 import net.die.phoneapi.browser.HelperCdpPipes
+import net.die.phoneapi.browser.OPEN_PRIVATE_TAB
 import net.die.phoneapi.browser.TabProbe
 import net.die.phoneapi.browser.USB_DEVTOOLS_SOCKET
 import net.die.phoneapi.browser.UsbDevtools
@@ -349,6 +351,17 @@ class AppGraph(
             )
         )
 
+    private suspend fun openPrivateTab(pkg: String) {
+        val started =
+            parseAmStart(shell.exec(listOf("am", "start", "-a", OPEN_PRIVATE_TAB, "-p", pkg)))
+        if (started.failure != null) {
+            throw ApiException.unavailable(
+                "browser_unavailable",
+                "Chrome would not open an incognito tab: ${started.message ?: started.failure}",
+            )
+        }
+    }
+
     private suspend fun readFreezer(): Boolean? =
         try {
             freezerOn(shell.exec(FREEZER_ARGS).stdout)
@@ -433,6 +446,7 @@ class AppGraph(
             devtoolsGap = DevtoolsPreconditions(context)::explain,
             refreshHz = { deviceInfo.display().refreshRate },
             touchscreen = { touchBackend.touchscreen() },
+            openPrivateTab = { pkg -> openPrivateTab(pkg) },
             scope = scope,
         )
 

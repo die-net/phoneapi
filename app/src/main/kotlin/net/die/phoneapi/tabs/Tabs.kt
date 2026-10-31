@@ -165,6 +165,7 @@ class Tabs(
         holder: Holder.Session,
         url: String,
         capture: Boolean = false,
+        incognito: Boolean = false,
     ): BrowserTarget {
         mutex.withLock {
             val opened = owners.values.filter { it.opened }
@@ -177,7 +178,7 @@ class Tabs(
                 )
             }
         }
-        val tab = base.openTab(url, capture)
+        val tab = base.openTab(url, capture, incognito)
         mutex.withLock {
             owners[tab.id] = Owner(holder, opened = true)
             saveOpened()

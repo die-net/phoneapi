@@ -35,8 +35,8 @@ internal class SessionBrowser(
 ) : BrowserService {
     override suspend fun targets(): List<BrowserTarget> = tabs.visible(holder, base.targets())
 
-    override suspend fun openTab(url: String, capture: Boolean): BrowserTarget =
-        tabs.opened(holder, url, capture)
+    override suspend fun openTab(url: String, capture: Boolean, incognito: Boolean): BrowserTarget =
+        tabs.opened(holder, url, capture, incognito)
 
     override suspend fun navigate(id: String, url: String): BrowserTarget =
         acting(id) { base.navigate(id, url) }
@@ -112,8 +112,8 @@ internal class SharedBrowser(private val tabs: Tabs, private val base: BrowserSe
     BrowserService {
     override suspend fun targets(): List<BrowserTarget> = tabs.sharedTargets()
 
-    override suspend fun openTab(url: String, capture: Boolean): BrowserTarget =
-        base.openTab(url, capture)
+    override suspend fun openTab(url: String, capture: Boolean, incognito: Boolean): BrowserTarget =
+        base.openTab(url, capture, incognito)
 
     override suspend fun navigate(id: String, url: String): BrowserTarget =
         free(id) { base.navigate(id, url) }
