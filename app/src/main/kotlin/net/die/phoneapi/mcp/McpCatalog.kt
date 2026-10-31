@@ -428,12 +428,12 @@ private val TOOLS: List<McpTool> =
         McpTool(
             name = "browser_key",
             description =
-                "Press a key on a browser target. The default input auto is touch while you hold the screen, and cdp otherwise. input touch brings the tab to the front and injects a hardware key. input cdp sends it to the target in the background. Device keys such as HOME need input touch.",
+                "Press a key on a browser target. The default input auto is touch while you hold the screen, and cdp otherwise. input touch brings the tab to the front and injects a hardware key, and needs the control scope. input cdp sends it to the target in the background. Device keys such as HOME need input touch.",
             scope = Scope.BROWSER,
             available = Capabilities::browserCdp,
             arguments = serializer<BrowserKeyArgs>(),
             annotations = changes,
-            call = { graph, _, request -> browserKey(graph, request) },
+            call = { graph, scopes, request -> browserKey(graph, scopes, request) },
         ),
         McpTool(
             name = "browser_type",

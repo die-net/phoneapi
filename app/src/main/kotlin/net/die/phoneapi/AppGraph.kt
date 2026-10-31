@@ -422,8 +422,10 @@ class AppGraph(
                 val outcome = touch.tap(rect, humanize = humanize)
                 touched(outcome)
             },
-            swipeAt = { from, to, spec -> touched(touch.swipe(from, to, spec)) },
-            gestureAt = { pointers, humanize -> touched(touch.gesture(pointers, humanize)) },
+            swipeAt = { from, to, spec, page -> touched(touch.swipe(from, to, spec, page)) },
+            gestureAt = { pointers, humanize, page ->
+                touched(touch.gesture(pointers, humanize, page))
+            },
             pressKey = { request -> input.key(request) },
             typeText = { request -> input.text(request) },
             prepare = { autoWake -> power.prepareForAction(autoWake) },

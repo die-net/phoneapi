@@ -179,15 +179,22 @@ internal fun directionSwipe(
     return directionEnds(box, direction, distance)
 }
 
-/** Maps a CSS viewport point onto the WebView's screen rectangle. */
+/**
+ * Maps a CSS viewport point onto the WebView's screen rectangle. A point off the page is refused:
+ * touch there would land on Chrome's toolbar, the system bars, or another app.
+ */
 internal fun screenPoint(x: Float, y: Float, metrics: JsonObject, content: Rect): Point {
     val frame = viewport(metrics)
     val scaleX = frame.deviceWidth / frame.cssWidth
     val scaleY = frame.deviceHeight / frame.cssHeight
-    return Point(
-        (content.left + x * scaleX).toFloat(),
-        (content.top + y * scaleY).toFloat(),
-    )
+    val point = Point((content.left + x * scaleX).toFloat(), (content.top + y * scaleY).toFloat())
+    if (
+        point.x !in content.left.toFloat()..content.right.toFloat() ||
+            point.y !in content.top.toFloat()..content.bottom.toFloat()
+    ) {
+        throw ApiException(409, "offscreen", "The point ($x, $y) is outside the page on screen")
+    }
+    return point
 }
 
 private fun placed(quad: JsonArray?, content: Rect, scaleX: Double, scaleY: Double): Rect? {

@@ -108,7 +108,7 @@ One exclusive lease per phone. The first call that needs the screen takes it. A 
 
 Calls that need no lease: `device_info`, `logcat_tail`, and browser tools on the caller's own tabs with `input` `cdp` (keys and text) or `cdp-mouse`, or no input at all. The REST routes for the same operations follow the same lists.
 
-Browser input defaults to `auto`: `touch` when the caller holds the screen, and otherwise `cdp-mouse` for a tap and `cdp` for keys and text. A swipe or gesture with `auto` still needs the screen, since cdp touch only reaches a tab on screen. Without this, a tap that left `input` unset would take a free screen and keep it for the rest of the session. Passing `touch` still takes the screen on purpose.
+Browser input defaults to `auto`: `touch` when the caller holds the screen, and otherwise `cdp-mouse` for a tap and `cdp` for keys and text. A swipe or gesture with `auto` still needs the screen, since cdp touch only reaches a tab on screen. Without this, a tap that left `input` unset would take a free screen and keep it for the rest of the session. Passing `touch` still takes the screen on purpose. A token without the control scope gets `cdp` for `auto` keys even while it holds the screen. A touch key goes to whatever window has focus, so it could press HOME or answer a system dialog, which is control's job.
 
 ### Waiting
 

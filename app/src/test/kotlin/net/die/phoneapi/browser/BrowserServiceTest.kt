@@ -553,7 +553,7 @@ class BrowserServiceTest {
         touch: suspend (Rect, Boolean) -> ActionResult = { _, _ ->
             ActionResult(ok = true)
         },
-        swipe: suspend (Point, Point, SwipeSpec) -> ActionResult = { _, _, _ ->
+        swipe: suspend (Point, Point, SwipeSpec, Rect) -> ActionResult = { _, _, _, _ ->
             ActionResult(ok = false)
         },
         press: suspend (KeyRequest) -> ActionResult = { ActionResult(ok = false) },

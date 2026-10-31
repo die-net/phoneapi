@@ -9,12 +9,14 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
+import net.die.phoneapi.browser.touchAllowed
 import net.die.phoneapi.core.ApiJson
 import net.die.phoneapi.lease.Holder
 import net.die.phoneapi.lease.ScreenLease
 import net.die.phoneapi.model.ApiException
 import net.die.phoneapi.model.BrowserInput
 import net.die.phoneapi.model.BrowserInputKind
+import net.die.phoneapi.model.Scope
 import net.die.phoneapi.model.WaitCondition
 import net.die.phoneapi.wait.usesScreen
 
@@ -112,24 +114,26 @@ private val INPUT_KINDS =
         "browser_tap" to BrowserInputKind.TAP,
         "browser_swipe" to BrowserInputKind.POINTER,
         "browser_gesture" to BrowserInputKind.POINTER,
-        "browser_key" to BrowserInputKind.KEYS,
-        "browser_type" to BrowserInputKind.KEYS,
+        "browser_key" to BrowserInputKind.KEY,
+        "browser_type" to BrowserInputKind.TEXT,
     )
 
 /**
  * Replaces `input` `auto`, or no input, with what it means for a caller that [holdsScreen] or not,
- * so [takesScreen] and the tool see the input that will be used.
+ * so [takesScreen] and the tool see the input that will be used. A token whose [scopes] may not
+ * send the tool's input as touch resolves as if it did not hold the screen.
  */
 internal fun resolveInput(
     tool: String,
     request: CallToolRequest,
     holdsScreen: Boolean,
+    scopes: Set<Scope>,
 ): CallToolRequest {
     val kind = INPUT_KINDS[tool] ?: return request
     val args = request.params.arguments ?: JsonObject(emptyMap())
     val asked = input(args)
     if (asked != "auto") return request
-    val resolved = BrowserInput.AUTO.resolved(kind, holdsScreen)
+    val resolved = BrowserInput.AUTO.resolved(kind, holdsScreen && touchAllowed(kind, scopes))
     val wire = ApiJson.encodeToJsonElement(BrowserInput.serializer(), resolved)
     val params = request.params.copy(arguments = JsonObject(args + ("input" to wire)))
     return request.copy(params = params)

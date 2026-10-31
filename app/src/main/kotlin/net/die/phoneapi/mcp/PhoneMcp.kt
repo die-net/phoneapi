@@ -259,7 +259,8 @@ private suspend fun callTool(
             control.resolve(named) ?: return unknownSession()
         }
     val services = if (holder == own.holder) own else shared.forHolder(holder, control)
-    val request = resolveInput(tool.name, withoutSession(asked), services.lease.holds(holder))
+    val request =
+        resolveInput(tool.name, withoutSession(asked), services.lease.holds(holder), scopes)
     val screen = takesScreen(tool.name, request.params.arguments)
     val current = services.lease.state.value.holder as? Holder.Session
     if (screen && current != null) {

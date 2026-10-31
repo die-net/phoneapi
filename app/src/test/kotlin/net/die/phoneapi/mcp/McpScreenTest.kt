@@ -13,6 +13,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import net.die.phoneapi.lease.Holder
 import net.die.phoneapi.lease.ScreenLease
+import net.die.phoneapi.model.Scope
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -92,13 +93,31 @@ class McpScreenTest {
         assertEquals("touch", resolved("browser_swipe", "{}", holds = false))
         assertEquals("cdp", resolved("browser_tap", """{"input":"cdp"}""", holds = true))
         val untouched = request("browser_read", "{}")
-        assertEquals(untouched, resolveInput("browser_read", untouched, holdsScreen = false))
-        val rest = resolveInput("browser_tap", request("browser_tap", "{}"), holdsScreen = false)
+        assertEquals(untouched, resolveInput("browser_read", untouched, false, ALL))
+        val rest = resolveInput("browser_tap", request("browser_tap", "{}"), false, ALL)
         assertFalse(takesScreen("browser_tap", rest.params.arguments))
     }
 
-    private fun resolved(tool: String, json: String, holds: Boolean): String? =
-        resolveInput(tool, request(tool, json), holds)
+    @Test
+    fun `touch keys need control`() {
+        val browser = setOf(Scope.BROWSER)
+        assertEquals("touch", resolved("browser_key", "{}", holds = true))
+        assertEquals("cdp", resolved("browser_key", "{}", holds = true, scopes = browser))
+        assertEquals("touch", resolved("browser_type", "{}", holds = true, scopes = browser))
+        assertEquals("touch", resolved("browser_tap", "{}", holds = true, scopes = browser))
+        assertEquals(
+            "touch",
+            resolved("browser_key", """{"input":"touch"}""", holds = true, scopes = browser),
+        )
+    }
+
+    private fun resolved(
+        tool: String,
+        json: String,
+        holds: Boolean,
+        scopes: Set<Scope> = ALL,
+    ): String? =
+        resolveInput(tool, request(tool, json), holds, scopes)
             .params
             .arguments
             ?.get("input")
@@ -126,5 +145,6 @@ class McpScreenTest {
                 "browser_console",
                 "browser_capture",
             )
+        val ALL = Scope.entries.toSet()
     }
 }

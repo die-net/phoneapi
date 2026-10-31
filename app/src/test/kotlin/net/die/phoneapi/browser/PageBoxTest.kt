@@ -96,6 +96,16 @@ class PageBoxTest {
     }
 
     @Test
+    fun `refuses a point off the page`() {
+        val metrics = metrics(pageY = 0.0)
+        for ((x, y) in listOf(100f to -1f, -1f to 200f, 100f to 5000f, 5000f to 200f)) {
+            val error =
+                assertThrows(ApiException::class.java) { screenPoint(x, y, metrics, CONTENT) }
+            assertEquals("offscreen", error.error)
+        }
+    }
+
+    @Test
     fun `page swipe goes upward`() {
         val (from, to) = directionSwipe(null, metrics(pageY = 0.0), SwipeDirection.UP, 0.6f)
         assertEquals(206.10f, from.x, 0.05f)
