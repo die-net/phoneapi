@@ -2,6 +2,7 @@ package net.die.phoneapi.helper.tree
 
 import android.graphics.Rect
 import android.os.SystemClock
+import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityWindowInfo
 import java.util.concurrent.ConcurrentHashMap
@@ -82,10 +83,13 @@ class UiChangeTracker(
         private set
 
     private val uiChangedPending = AtomicBoolean()
-    private val windowsPending = AtomicBoolean()
     private val pendingWindowChanges = ConcurrentHashMap<Int, Int>()
     private val windowPackages = ConcurrentHashMap<Int, String>()
     @Volatile private var lastUiChangedMs = 0L
+
+    // One refresh at a time, so the IME, foreground and window events go out in order.
+    private val windowsRefresh =
+        SerialDebouncer(scope, dispatcher, WINDOWS_DEBOUNCE_MS, ::refreshWindows)
 
     fun onConnected() {
         scheduleWindowsRefresh()
@@ -152,16 +156,19 @@ class UiChangeTracker(
     }
 
     private fun scheduleWindowsRefresh() {
-        if (windowsPending.getAndSet(true)) return
-        scope.launch(dispatcher) {
-            delay(WINDOWS_DEBOUNCE_MS)
-            windowsPending.set(false)
-            refreshWindows()
-        }
+        windowsRefresh.request()
     }
 
     private fun refreshWindows() {
-        val open = windows()
+        val open =
+            try {
+                windows()
+            } catch (e: IllegalStateException) {
+                // The session can drop, or fail to reconnect, between an event and this refresh.
+                // The next window event refreshes again.
+                Log.w(TAG, "Skipped a window refresh", e)
+                return
+            }
         try {
             updateIme(open)
             sink.setForeground(foregroundPackage(open))
@@ -196,8 +203,8 @@ class UiChangeTracker(
     }
 
     private fun emitWindowChanges(windows: List<AccessibilityWindowInfo>) {
-        for (id in pendingWindowChanges.keys.toList()) {
-            val mask = pendingWindowChanges.remove(id) ?: 0
+        for (id in pendingWindowChanges.keys) {
+            val mask = pendingWindowChanges.remove(id) ?: continue
             val names =
                 WINDOW_CHANGE_NAMES.filter { (bit, _) -> mask and bit != 0 }.map { it.second }
             if (names.isNotEmpty()) emitWindowChange(id, names, windows)
@@ -245,6 +252,7 @@ class UiChangeTracker(
     }
 
     private companion object {
+        const val TAG = "PhoneApiHelper"
         const val UI_CHANGED_INTERVAL_MS = 100L
         const val WINDOWS_DEBOUNCE_MS = 30L
         const val MAX_CACHED_WINDOWS = 64
