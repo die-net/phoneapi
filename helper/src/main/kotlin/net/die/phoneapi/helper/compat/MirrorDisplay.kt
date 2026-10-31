@@ -2,11 +2,13 @@ package net.die.phoneapi.helper.compat
 
 import android.graphics.Rect
 import android.hardware.display.VirtualDisplay
+import android.os.Handler
 import android.os.IBinder
 import android.util.Log
 import android.view.Surface
 import java.lang.reflect.InvocationTargetException
 import java.lang.reflect.Method
+import net.die.phoneapi.helper.HelperDaemon
 
 /**
  * Mirrors a display onto an encoder [Surface]. Prefers the hidden `DisplayManager` method shell can
@@ -101,8 +103,7 @@ internal class MirrorDisplay {
                 as? IBinder ?: error("createDisplay returned null")
         val device = Rect(0, 0, info.width, info.height)
         val target = Rect(0, 0, width, height)
-        invoke(surfaceControl.getMethod("openTransaction"))
-        try {
+        transaction(surfaceControl) {
             invoke(
                 surfaceControl.getMethod(
                     "setDisplaySurface",
@@ -113,20 +114,7 @@ internal class MirrorDisplay {
                 created,
                 surface,
             )
-            invoke(
-                surfaceControl.getMethod(
-                    "setDisplayProjection",
-                    IBinder::class.java,
-                    Int::class.javaPrimitiveType,
-                    Rect::class.java,
-                    Rect::class.java,
-                ),
-                null,
-                created,
-                0,
-                device,
-                target,
-            )
+            setProjection(surfaceControl, created, device, target)
             invoke(
                 surfaceControl.getMethod(
                     "setDisplayLayerStack",
@@ -137,10 +125,70 @@ internal class MirrorDisplay {
                 created,
                 info.layerStack,
             )
+        }
+        Handler(HelperDaemon.looper()).postDelayed({ nudge(created, device, target) }, NUDGE_MS)
+        return created
+    }
+
+    /**
+     * Projects [display] two pixels short and back, in two transactions, so SurfaceFlinger draws it
+     * again with the same content.
+     *
+     * Samsung's Android 10 SurfaceFlinger can leave a new `SurfaceControl` display undrawn until
+     * the screen changes. On a Galaxy S9+ with a still screen, the first frame took over a second
+     * in 9 of 20 starts, and in one it had not come after 8 seconds. With this nudge at [NUDGE_MS],
+     * all 20 had a frame within 340 ms. The cause is in SurfaceFlinger, out of reach, so this works
+     * around it. On a device that already drew, it costs one or two extra frames.
+     */
+    private fun nudge(display: IBinder, device: Rect, target: Rect) {
+        synchronized(lock) {
+            if (token !== display) return
+            try {
+                val surfaceControl = Class.forName("android.view.SurfaceControl")
+                val short = Rect(target.left, target.top, target.right, target.bottom - 2)
+                transaction(surfaceControl) {
+                    setProjection(surfaceControl, display, device, short)
+                }
+                transaction(surfaceControl) {
+                    setProjection(surfaceControl, display, device, target)
+                }
+            } catch (e: ReflectiveOperationException) {
+                Log.w(TAG, "Could not nudge the mirror", unwrap(e))
+            } catch (e: IllegalStateException) {
+                Log.w(TAG, "Could not nudge the mirror", e)
+            }
+        }
+    }
+
+    private fun transaction(surfaceControl: Class<*>, block: () -> Unit) {
+        invoke(surfaceControl.getMethod("openTransaction"))
+        try {
+            block()
         } finally {
             invoke(surfaceControl.getMethod("closeTransaction"))
         }
-        return created
+    }
+
+    private fun setProjection(
+        surfaceControl: Class<*>,
+        display: IBinder,
+        device: Rect,
+        target: Rect,
+    ) {
+        invoke(
+            surfaceControl.getMethod(
+                "setDisplayProjection",
+                IBinder::class.java,
+                Int::class.javaPrimitiveType,
+                Rect::class.java,
+                Rect::class.java,
+            ),
+            null,
+            display,
+            0,
+            device,
+            target,
+        )
     }
 
     private fun destroyDisplay(display: IBinder) {
@@ -187,5 +235,8 @@ internal class MirrorDisplay {
 
     private companion object {
         const val TAG = "PhoneApiHelper"
+
+        /** How long after creating a `SurfaceControl` mirror to [nudge] it. */
+        const val NUDGE_MS = 250L
     }
 }
