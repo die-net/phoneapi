@@ -8,7 +8,7 @@ phoneapi papi GET /v1/openapi.json
 
 That document is generated from the same Kotlin types as the handlers and MCP tool schemas (`api-model`). Each operation has `x-scope`. WebSocket routes are marked `x-websocket`. The `bearer` security scheme is Bearer auth. Prefer OpenAPI (or this page’s summary) over guessing field names.
 
-Install, pairing, and the helper lifecycle are in the [README](../README.md). Design background is in [architecture.md](architecture.md).
+Install, pairing, and the helper lifecycle are in [setup.md](setup.md). Design background is in [architecture.md](architecture.md).
 
 ## Authentication
 

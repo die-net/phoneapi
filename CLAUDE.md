@@ -1,6 +1,6 @@
 # PhoneAPI
 
-PhoneAPI is an Android app that lets a paired computer drive the phone and its Chrome tabs over HTTP, WebSocket, and MCP. Read `docs/architecture.md` first, then `docs/api.md` for the wire surface and `docs/sharing.md` for sessions, the screen lease, and tabs. `docs/development.md` has the build, `phoneapi-dev`, and emulator setup.
+PhoneAPI is an Android app that lets a paired computer drive the phone and its Chrome tabs over HTTP, WebSocket, and MCP. Read `docs/architecture.md` first, then `docs/api.md` for the wire surface and `docs/sharing.md` for sessions, the screen lease, and tabs. `docs/device-notes.md` has what Android and Chrome were measured to do. `docs/development.md` has the build, `phoneapi-dev`, and emulator setup.
 
 The modules are `app/` (Ktor server, MCP, CDP, encoders; `AppGraph` is the composition root), `helper/` (the `app_process` daemon that runs as the shell user), and `api-model/` (the `@Serializable` DTOs shared by both and by the MCP and OpenAPI schemas).
 
@@ -9,7 +9,7 @@ The modules are `app/` (Ktor server, MCP, CDP, encoders; `AppGraph` is the compo
 - Before work is done, run what CI runs: `./gradlew spotlessCheck detektMain detektTest lint testDebugUnitTest :api-model:test assembleDebug buildHealth --continue`. It passes clean, including issues you did not cause. Kotlin and Lint warnings are errors.
 - Format with `./gradlew spotlessApply` (ktfmt, kotlinlang style). Don't hand-format around it.
 - `buildHealth` fails on an unused dependency or one used but not declared. Declare what a module uses directly, in that module.
-- Unit tests can't show what a phone does. A change whose behavior depends on Android, Chrome, or the helper is checked on an emulator or a phone before it is called done, or is listed as unchecked (for example in `docs/sharing.md`'s "To check on the phone").
+- Unit tests can't show what a phone does. A change whose behavior depends on Android, Chrome, or the helper is checked on an emulator or a phone before it is called done, or is listed as unchecked in `docs/device-notes.md`'s "Still to check on the phone". What a check finds about Android or Chrome goes in `docs/device-notes.md`, with its date; the doc that describes the behavior says only what PhoneAPI does and why.
 
 ## Trust boundary
 
@@ -73,4 +73,4 @@ The agent is meant to use the phone the way its owner would. Many apps and sites
 - A commit subject is one imperative sentence about the change in behavior, ending with a period, for example "Refuse cdp input into a tab Chrome has frozen." No Conventional Commits prefixes.
 - Commits, PRs, and docs don't name the people who tested or whose phone it was. Say "the phone" or "the Android 11 test phone".
 - Docs, comments, MCP tool descriptions, and error messages use short, plain sentences.
-- A change to a route, tool, scope, or error updates `docs/api.md` in the same PR. A change to behavior another doc describes updates that doc. A change to `scripts/phoneapi` updates the README or `docs/development.md`.
+- A change to a route, tool, scope, or error updates `docs/api.md` in the same PR. A change to behavior another doc describes updates that doc. A change to `scripts/phoneapi` updates `docs/setup.md` or `docs/development.md`. A user-visible feature gets a line in the README's pitch when it changes what someone can do with PhoneAPI.

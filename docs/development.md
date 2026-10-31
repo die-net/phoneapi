@@ -1,6 +1,6 @@
 # Developing PhoneAPI
 
-This guide is for working on the app from a source checkout. End-user install lives in the [README](../README.md). The HTTP/MCP surface is in [api.md](api.md). Design decisions and system shape are in [architecture.md](architecture.md).
+This guide is for working on the app from a source checkout. Installing a release build is in [setup.md](setup.md). The HTTP/MCP surface is in [api.md](api.md). Design decisions and system shape are in [architecture.md](architecture.md).
 
 ## Prerequisites
 

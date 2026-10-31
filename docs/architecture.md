@@ -24,7 +24,7 @@ flowchart LR
 | **`app/`** | Settings UI, `ListenerService`, Ktor REST/WebSocket/MCP on an abstract local socket, token store, CDP orchestration, encoders, viewer assets |
 | **`helper/`** | Separate `app_process` as shell UID: UiAutomation snapshots, motion/key injection, screencap, display mirror, DevTools socket relay, logcat |
 | **`api-model/`** | Shared `@Serializable` DTOs; same types drive MCP tool schemas and `GET /v1/openapi.json` |
-| **`scripts/phoneapi`** | Production client (pair, server, helper, papi, mcp) |
+| **`scripts/phoneapi`** | Production client (pair, server, helper, papi, session) |
 | **`scripts/phoneapi-dev`** | Repo wrapper: debug package, `.dev/pairing.json`, `setup` |
 
 The app is plain Kotlin: `AppGraph` is the composition root. Ktor and MCP sit on a `ServerServices` boundary so routes can be tested with fakes.
@@ -90,7 +90,8 @@ The app owns the CDP session policy (compact AX snapshots, humanized taps throug
 | `phoneapi pair` | Mint token, save pairing file (no forward, no secret on stdout) |
 | `phoneapi server` | `adb forward` API socket to localhost |
 | `phoneapi helper` | Start listener + helper (and Android 10 CDP tunnel) |
-| `phoneapi papi` | REST / WebSocket calls |
+| `phoneapi papi` | REST / WebSocket calls, in a kept session |
+| `phoneapi session` | Show or end the session `papi` keeps |
 | `phoneapi-dev setup` | Debug build/install/grant/pair/server/helper for developers |
 
 Production defaults to package `net.die.phoneapi` and `~/.config/phoneapi/`. Dev defaults to `net.die.phoneapi.dev` and `.dev/pairing.json`.
@@ -102,7 +103,7 @@ The intended loop for an LLM client:
 1. `ui_snapshot` / `ui_find` (tree)
 2. `tap` / `ui_act` / `type_text` / `press_key`
 3. `wait_for` (window / node / browser conditions)
-4. `browser_*` when the work is in Chrome
+4. `browser_read` / `browser_find` to read a page as markdown or query its JSON, and `browser_*` input when the work is in Chrome
 5. `screenshot` only when the tree is not enough
 
 MCP exposes that curated set. Raw CDP WebSocket, token admin, and media streams stay off the tool catalog.
@@ -148,7 +149,9 @@ Until the mirror draws once, the relay has nothing to redraw. Samsung's Android 
 
 ## Related docs
 
-- End-user install and quick start: [README](../README.md)
+- What PhoneAPI is for: [README](../README.md)
+- Installing a release build, pairing, and the helper: [setup.md](setup.md)
 - HTTP, WebSocket, MCP, and OpenAPI: [api.md](api.md)
 - Building, `phoneapi-dev`, tests and linters: [development.md](development.md)
 - Sharing the phone between clients, sessions, and the screen lease: [sharing.md](sharing.md)
+- What Android and Chrome were measured to do, and what is still to check on a phone: [device-notes.md](device-notes.md)
