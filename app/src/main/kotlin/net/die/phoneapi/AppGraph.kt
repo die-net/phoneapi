@@ -207,16 +207,13 @@ class AppGraph(
     val browser: BrowserService = browserService()
     // Cleanup runs only after a holder lets go, long after tabs exists.
     @Suppress("PropertyUsedBeforeDeclaration")
+    private val screenCleanup =
+        ScreenCleanup(input, power, clipboard, showPlaceholder = { tabs.showPlaceholder() })
     private val screenLease: ScreenLease =
         ScreenLease(
             scope,
-            cleanup =
-                ScreenCleanup(
-                    input,
-                    power,
-                    clipboard,
-                    showPlaceholder = { tabs.showPlaceholder() },
-                )::run,
+            cleanup = screenCleanup::run,
+            ready = screenCleanup::ready,
             lockedNow = { state.refresh().keyguard.locked },
         )
     private val tabs: Tabs =

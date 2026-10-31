@@ -27,6 +27,10 @@ class ScreenLeaseTest {
     private var failures = emptyList<String>()
     /** Whether each cleanup was told to lock, in order. */
     private val locks = mutableListOf<Boolean>()
+    /** What each screen call and ready did, in order. */
+    private val events = mutableListOf<String>()
+    /** What ready returns, which is the steps that failed. */
+    private var readyFails = emptyList<String>()
     /** The keyguard the fake phone shows. A cleanup that locks puts it up. */
     private var locked = true
 
@@ -41,7 +45,13 @@ class ScreenLeaseTest {
             },
             lockedNow = { locked },
             now = { testScheduler.currentTime },
+            ready = {
+                events += "ready"
+                readyFails
+            },
         )
+
+    private fun readies() = events.count { it == "ready" }
 
     @Test
     fun `session keeps the screen`() = runTest {
@@ -244,6 +254,102 @@ class ScreenLeaseTest {
         val next = lease.withScreen(a) {}
         assertEquals(0, cleanups)
         assertTrue(next.notes.single().contains("A person used the screen"), next.notes.single())
+    }
+
+    @Test
+    fun `ready runs before first call`() = runTest {
+        val lease = lease()
+        lease.withScreen(a) { events += "a" }
+        lease.withScreen(a) { events += "a" }
+        assertEquals(listOf("ready", "a", "a"), events)
+        lease.release(a)
+        runCurrent()
+        lease.withScreen(a) {}
+        assertEquals(2, readies())
+    }
+
+    @Test
+    fun `a granted waiter readies`() = runTest {
+        val lease = lease()
+        lease.withScreen(a) {}
+        val waiting = async { lease.withScreen(b) { events += "b" } }
+        runCurrent()
+        lease.release(a)
+        waiting.await()
+        assertEquals(listOf("ready", "ready", "b"), events)
+    }
+
+    @Test
+    fun `a person does not ready`() = runTest {
+        val lease = lease()
+        assertTrue(lease.viewerInput(person))
+        lease.release(person)
+        runCurrent()
+        assertEquals(0, readies())
+        lease.withScreen(a) {}
+        assertEquals(1, readies())
+    }
+
+    @Test
+    fun `a hand back readies again`() = runTest {
+        val lease = lease()
+        lease.withScreen(a) {}
+        lease.takeOver(person)
+        lease.release(person)
+        assertTrue(lease.holds(a))
+        lease.withScreen(a) { events += "a" }
+        assertEquals(listOf("ready", "ready", "a"), events)
+    }
+
+    @Test
+    fun `a claim readies on next call`() = runTest {
+        val lease = lease()
+        assertTrue(lease.claim(a))
+        assertEquals(0, readies())
+        lease.withScreen(a) {}
+        assertEquals(1, readies())
+    }
+
+    @Test
+    fun `other calls wait for ready`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val lease =
+            ScreenLease(
+                scope = backgroundScope,
+                cleanup = { emptyList() },
+                lockedNow = { true },
+                now = { testScheduler.currentTime },
+                ready = {
+                    gate.await()
+                    events += "ready"
+                    emptyList()
+                },
+            )
+        val first = async { lease.withScreen(a) { events += "first" } }
+        runCurrent()
+        val second = async { lease.withScreen(a) { events += "second" } }
+        runCurrent()
+        assertEquals(emptyList<String>(), events)
+        gate.complete(Unit)
+        first.await()
+        second.await()
+        assertEquals(listOf("ready", "first", "second"), events)
+    }
+
+    @Test
+    fun `a failed ready retries`() = runTest {
+        val lease = lease()
+        readyFails = listOf("clear the clipboard: no helper")
+        val failed = apiError {
+            lease.withScreen(a) { throw ApiException.helperUnavailable("down") }
+        }
+        assertEquals("helper_unavailable", failed.error)
+        val next = lease.withScreen(a) {}
+        assertTrue(next.notes.single().contains("no helper"), next.notes.single())
+        readyFails = emptyList()
+        assertEquals(emptyList<String>(), lease.withScreen(a) {}.notes)
+        lease.withScreen(a) {}
+        assertEquals(3, readies())
     }
 
     @Test

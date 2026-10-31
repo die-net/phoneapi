@@ -118,6 +118,14 @@ class ClipboardServiceImpl(
         return ActionResult(ok = true, backend = BACKEND)
     }
 
+    override suspend fun clear(): ActionResult {
+        // An empty clipboard is left alone, so keyboards and apps see no change.
+        if (call { primaryClipTimestamp() } < 0) return ActionResult(ok = true, backend = BACKEND)
+        call { clearPrimaryClip() }
+        own.forget()
+        return ActionResult(ok = true, backend = BACKEND)
+    }
+
     /** Remembers the clip PhoneAPI just put on the clipboard, by its timestamp. */
     private suspend fun mark() {
         own.put(call { primaryClipTimestamp() })
