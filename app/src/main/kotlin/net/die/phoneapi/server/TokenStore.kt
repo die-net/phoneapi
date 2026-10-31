@@ -81,6 +81,17 @@ class TokenStore(dir: File) : TokenGateway {
     }
 
     @Synchronized
+    override fun setScopes(id: String, scopes: Set<Scope>): TokenInfo? {
+        ensureLoaded()
+        val found = tokens.firstOrNull { it.id == id } ?: return null
+        val updated = found.copy(scopes = scopes)
+        tokens = tokens.map { if (it.id == id) updated else it }
+        persist()
+        bumpRevision()
+        return updated.info()
+    }
+
+    @Synchronized
     override fun revoke(id: String): Boolean {
         ensureLoaded()
         val before = tokens.size

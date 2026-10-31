@@ -7,7 +7,7 @@ set -Eeuo pipefail
 
 USAGE="\
 Usage: $(basename "$0") <command> [<options>]
-    pair      - Mint a token and save the pairing file
+    pair      - Mint a token and save the pairing file (pair [--name name] [--scopes a,b])
     server    - Expose the on-device PhoneAPI server on localhost
     papi      - Call the HTTP/WebSocket API
     session   - Show or end the session papi keeps (session id|end)
@@ -49,7 +49,8 @@ command:pair() {
 
     local PKG="$PHONEAPI_PKG"
     local RECEIVER="$PKG/net.die.phoneapi.ShellCommandReceiver"
-    local name out json port
+    local name scopes="" out json port error
+    local -a extras
     name="$(hostname -s 2>/dev/null || hostname)"
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -57,15 +58,27 @@ command:pair() {
                 name="${2:?--name needs a value}"
                 shift 2
                 ;;
+            --scopes)
+                scopes="${2:?--scopes needs a value}"
+                shift 2
+                ;;
             *) die "unknown arg $1" ;;
         esac
     done
     # adb shell joins arguments into one remote command line, so keep the name shell-safe.
     name="${name//[^A-Za-z0-9._-]/-}"
+    extras=(--es name "$name")
+    if [[ -n $scopes ]]; then
+        [[ $scopes =~ ^[A-Za-z,]+$ ]] \
+            || die "--scopes takes names separated by commas, such as observe,control"
+        extras+=(--es scopes "$scopes")
+    fi
 
-    out="$(adb shell am broadcast -n "$RECEIVER" -a net.die.phoneapi.CREATE_TOKEN --es name "$name" | tr -d '\r')"
+    out="$(adb shell am broadcast -n "$RECEIVER" -a net.die.phoneapi.CREATE_TOKEN "${extras[@]}" | tr -d '\r')"
     json="$(sed -n 's/.*result=0, data="\(.*\)"$/\1/p' <<<"$out")"
     if [[ -z $json ]]; then
+        error="$(sed -n 's/.*result=1, data="\(.*\)"$/\1/p' <<<"$out")"
+        [[ -z $error ]] || die "CREATE_TOKEN failed: $error"
         die "CREATE_TOKEN failed. Is PhoneAPI installed as $PKG?"
     fi
     port="$(sed -n 's/.*"port":\([0-9]*\).*/\1/p' <<<"$json")"
