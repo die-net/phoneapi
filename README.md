@@ -16,7 +16,7 @@ PhoneAPI lets an AI agent use your Android phone the way you would: read the scr
 
 **Lets you watch and step in.** A viewer in your desktop browser plays the phone's screen and sound. You can tap, type, and copy and paste between computer and phone, or take over when an agent hits a CAPTCHA or a login, then hand the screen back.
 
-**Stays on your cable.** The API is reachable only through ADB, over USB or Wireless Debugging. No network port opens on the phone. Each computer has its own token, which you can remove in the app.
+**Stays on your cable.** The API is reachable only through ADB, over USB or Wireless Debugging. No network port opens on the phone. Each client gets its own token, which you can remove in the app. A token can be limited to some of what PhoneAPI does: reading the screen, acting on it, Chrome, the viewer, and managing tokens. So an agent can get Chrome without the rest of the phone, or a viewer only the screen.
 
 It also launches and stops apps, sends intents, wakes the phone and unlocks it with a stored PIN, reads and writes the clipboard, and waits for windows, screen elements, page loads, or network requests.
 
