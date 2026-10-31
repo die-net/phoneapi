@@ -6,10 +6,12 @@ import io.ktor.server.response.respond
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
+import io.ktor.server.routing.patch
 import io.ktor.server.routing.post
 import net.die.phoneapi.model.ApiException
 import net.die.phoneapi.model.CreateTokenRequest
 import net.die.phoneapi.model.Scope
+import net.die.phoneapi.model.UpdateTokenRequest
 import net.die.phoneapi.server.ServerServices
 import net.die.phoneapi.server.scoped
 
@@ -18,9 +20,17 @@ fun Route.tokenRoutes(services: ServerServices) {
         get("/v1/tokens") { call.respond(services.tokens.list()) }
         post("/v1/tokens") {
             val req = call.receive<CreateTokenRequest>()
-            if (req.scopes.isEmpty())
-                throw ApiException.badRequest("At least one scope is required")
+            requireScopes(req.scopes)
             call.respond(HttpStatusCode.Created, services.tokens.create(req.name, req.scopes))
+        }
+        patch("/v1/tokens/{id}") {
+            val id = call.parameters["id"] ?: throw ApiException.badRequest("id required")
+            val req = call.receive<UpdateTokenRequest>()
+            requireScopes(req.scopes)
+            val info =
+                services.tokens.setScopes(id, req.scopes)
+                    ?: throw ApiException.notFound("token $id")
+            call.respond(info)
         }
         delete("/v1/tokens/{id}") {
             val id = call.parameters["id"] ?: throw ApiException.badRequest("id required")
@@ -28,4 +38,8 @@ fun Route.tokenRoutes(services: ServerServices) {
             call.respond(HttpStatusCode.NoContent)
         }
     }
+}
+
+private fun requireScopes(scopes: Set<Scope>) {
+    if (scopes.isEmpty()) throw ApiException.badRequest("At least one scope is required")
 }

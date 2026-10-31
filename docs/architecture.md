@@ -87,7 +87,7 @@ The app owns the CDP session policy (compact AX snapshots, humanized taps throug
 
 | Command | Job |
 | --- | --- |
-| `phoneapi pair` | Mint token, save pairing file (no forward, no secret on stdout) |
+| `phoneapi pair` | Mint token (every scope, or `--scopes`), save pairing file (no forward, no secret on stdout) |
 | `phoneapi server` | `adb forward` API socket to localhost |
 | `phoneapi helper` | Start listener + helper (and Android 10 CDP tunnel) |
 | `phoneapi papi` | REST / WebSocket calls, in a kept session |

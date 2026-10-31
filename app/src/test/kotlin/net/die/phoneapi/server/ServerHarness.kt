@@ -101,6 +101,13 @@ internal class MemoryTokens : TokenGateway {
         return CreatedToken(info, secret)
     }
 
+    override fun setScopes(id: String, scopes: Set<Scope>): TokenInfo? {
+        val entry = bySecret.entries.firstOrNull { it.value.id == id } ?: return null
+        val updated = entry.value.copy(scopes = scopes)
+        entry.setValue(updated)
+        return updated
+    }
+
     override fun revoke(id: String): Boolean {
         val secret = bySecret.entries.firstOrNull { it.value.id == id }?.key ?: return false
         bySecret.remove(secret)

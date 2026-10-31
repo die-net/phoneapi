@@ -16,6 +16,7 @@ import net.die.phoneapi.lease.Holder
 import net.die.phoneapi.lease.LeaseState
 import net.die.phoneapi.model.ApiException
 import net.die.phoneapi.model.DeviceInfo
+import net.die.phoneapi.model.Scope
 import net.die.phoneapi.model.SessionInfo
 import net.die.phoneapi.server.TokenGateway
 
@@ -35,6 +36,7 @@ internal class McpSession(
     val startedAtMs: Long,
     val parentId: String? = null,
     val rest: Boolean = false,
+    scopes: Set<Scope> = emptySet(),
 ) {
     @Volatile
     var transport: StreamableHttpServerTransport? = transport
@@ -44,10 +46,19 @@ internal class McpSession(
     var server: Server? = server
         private set
 
-    /** Gives a REST session the MCP transport an `initialize` made for it. */
-    fun attach(transport: StreamableHttpServerTransport, server: Server) {
+    /**
+     * The scopes [server]'s tools were built for. Empty without a server, since REST checks the
+     * token's scopes on every request.
+     */
+    @Volatile
+    var scopes: Set<Scope> = scopes
+        private set
+
+    /** Gives a REST session the MCP transport an `initialize` made for it, with [scopes]' tools. */
+    fun attach(transport: StreamableHttpServerTransport, server: Server, scopes: Set<Scope>) {
         this.transport = transport
         this.server = server
+        this.scopes = scopes
     }
 
     @Volatile
@@ -62,9 +73,9 @@ internal class McpSession(
 
 /**
  * The MCP sessions on `/mcp`, keyed by the `Mcp-Session-Id` PhoneAPI picks. A session ends on
- * `DELETE`, after [idleMs] without a request, or when its token is revoked, and [onEnd] then
- * releases what it held. Logs name a session only by [hashOf] its id, since `logcat_tail` lets any
- * session read the log.
+ * `DELETE`, after [idleMs] without a request, or when its token is revoked or loses a scope its
+ * tools were built for, and [onEnd] then releases what it held. Logs name a session only by
+ * [hashOf] its id, since `logcat_tail` lets any session read the log.
  */
 class McpSessions(
     private val tokens: TokenGateway,
@@ -81,7 +92,7 @@ class McpSessions(
     private val sessions = ConcurrentHashMap<String, McpSession>()
     private val random = SecureRandom()
 
-    /** Starts the sweep that ends idle sessions and those whose token was revoked. */
+    /** Starts the sweep that ends idle sessions and those whose token was revoked or narrowed. */
     fun start() {
         scope.launch {
             while (isActive) {
@@ -116,13 +127,19 @@ class McpSessions(
         return true
     }
 
-    /** Ends idle sessions and those whose token no longer exists. */
+    /**
+     * Ends idle sessions, those whose token no longer exists, and those whose tools need a scope
+     * the token no longer has. A token that gains a scope leaves its sessions running; the new
+     * tools show up at the client's next `initialize`.
+     */
     suspend fun sweep() {
         val at = now()
-        val live = tokens.list().map { it.id }.toSet()
+        val live = tokens.list().associate { it.id to it.scopes }
         for (session in sessions.values.toList()) {
+            val scopes = live[session.tokenId]
             when {
-                session.tokenId !in live -> end(session.id, "its token was revoked")
+                scopes == null -> end(session.id, "its token was revoked")
+                !scopes.containsAll(session.scopes) -> end(session.id, "its token lost a scope")
                 at - session.lastActiveMs > idleMs -> end(session.id, "it was idle")
             }
         }

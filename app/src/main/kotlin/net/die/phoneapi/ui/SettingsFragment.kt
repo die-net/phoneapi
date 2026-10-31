@@ -22,6 +22,7 @@ import net.die.phoneapi.PhoneApiApp
 import net.die.phoneapi.R
 import net.die.phoneapi.helperclient.notificationsAllowed
 import net.die.phoneapi.model.HelperStatus
+import net.die.phoneapi.model.Scope
 import net.die.phoneapi.model.TokenInfo
 
 /** Helper, wireless debugging, pairing, and tokens. */
@@ -157,7 +158,7 @@ class SettingsFragment : PreferenceFragmentCompat() {
         Preference(preferenceManager.context).apply {
             key = "token-${info.id}"
             title = info.name
-            summary = getString(R.string.revoke)
+            summary = getString(R.string.token_summary, scopesLabel(info.scopes))
             setOnPreferenceClickListener {
                 viewLifecycleOwner.lifecycleScope.launch {
                     withContext(graph.ioDispatcher) { graph.tokens.revoke(info.id) }
@@ -165,6 +166,11 @@ class SettingsFragment : PreferenceFragmentCompat() {
                 true
             }
         }
+
+    /** "All scopes" for a token that has every one, else its scope names in API order. */
+    private fun scopesLabel(scopes: Set<Scope>): String =
+        if (scopes.containsAll(Scope.entries)) getString(R.string.token_scopes_all)
+        else Scope.entries.filter { it in scopes }.joinToString(", ") { it.name.lowercase() }
 
     private fun pairWireless() {
         val context = requireContext()

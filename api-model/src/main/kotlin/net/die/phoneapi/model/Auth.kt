@@ -32,6 +32,9 @@ public data class CreateTokenRequest(
     val scopes: Set<Scope> = Scope.entries.toSet(),
 )
 
+/** Replaces a token's scopes. The token keeps its secret, so its clients go on using it. */
+@Serializable public data class UpdateTokenRequest(val scopes: Set<Scope>)
+
 /** Returned once on creation; [token] is never retrievable again. */
 @Serializable public data class CreatedToken(val info: TokenInfo, val token: String)
 

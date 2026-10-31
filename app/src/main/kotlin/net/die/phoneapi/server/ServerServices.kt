@@ -76,6 +76,9 @@ interface TokenGateway {
 
     fun create(name: String, scopes: Set<Scope>): CreatedToken
 
+    /** Replaces the scopes of token [id] and returns its info, or null when there is none. */
+    fun setScopes(id: String, scopes: Set<Scope>): TokenInfo?
+
     fun revoke(id: String): Boolean
 }
 

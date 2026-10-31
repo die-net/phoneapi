@@ -53,6 +53,7 @@ import net.die.phoneapi.model.TextRequest
 import net.die.phoneapi.model.TokenInfo
 import net.die.phoneapi.model.UiSnapshot
 import net.die.phoneapi.model.UnlockRequest
+import net.die.phoneapi.model.UpdateTokenRequest
 import net.die.phoneapi.model.WaitRequest
 import net.die.phoneapi.model.WaitResult
 
@@ -60,6 +61,7 @@ public enum class ApiMethod {
     GET,
     POST,
     PUT,
+    PATCH,
     DELETE,
     WEBSOCKET,
 }
@@ -470,6 +472,14 @@ public val phoneApiEndpoints: List<ApiEndpoint> =
             serializer<CreateTokenRequest>(),
             serializer<CreatedToken>(),
             status = 201,
+        ),
+        endpoint(
+            ApiMethod.PATCH,
+            "/v1/tokens/{id}",
+            Scope.ADMIN,
+            "Replace a token's scopes. Its sessions that used a scope it lost end within 30 s.",
+            serializer<UpdateTokenRequest>(),
+            serializer<TokenInfo>(),
         ),
         endpoint(
             ApiMethod.DELETE,

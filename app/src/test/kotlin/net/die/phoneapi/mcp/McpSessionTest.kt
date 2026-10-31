@@ -168,6 +168,24 @@ class McpSessionTest {
     }
 
     @Test
+    fun `losing a scope ends them`() = testApplication {
+        val made = start()
+        apiClient().use { http ->
+            val id = initialize(http, alice)
+            initialize(http, bob)
+            api.tokens.setScopes(bob, Scope.entries.toSet())
+            api.tokens.setScopes(alice, Scope.entries.toSet() - Scope.BROWSER)
+            made.sessions.sweep()
+            assertEquals(listOf(id), ended)
+            val narrowed = api.tokens.issue("narrowed", setOf(Scope.OBSERVE))
+            initialize(http, narrowed)
+            api.tokens.setScopes(narrowed, setOf(Scope.OBSERVE, Scope.CONTROL))
+            made.sessions.sweep()
+            assertEquals(listOf(id), ended)
+        }
+    }
+
+    @Test
     fun `admins list and end sessions`() = testApplication {
         start()
         apiClient().use { http ->

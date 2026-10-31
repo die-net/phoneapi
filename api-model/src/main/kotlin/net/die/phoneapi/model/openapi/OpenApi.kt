@@ -84,6 +84,7 @@ private fun operationKey(endpoint: ApiEndpoint): String =
         ApiMethod.WEBSOCKET -> "get"
         ApiMethod.POST -> "post"
         ApiMethod.PUT -> "put"
+        ApiMethod.PATCH -> "patch"
         ApiMethod.DELETE -> "delete"
     }
 

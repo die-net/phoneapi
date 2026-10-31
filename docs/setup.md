@@ -46,6 +46,8 @@ The saved JSON looks like this (`scheme` `http`, host `127.0.0.1`):
 {"scheme":"http","host":"127.0.0.1","port":41234,"token":"pa_…","name":"laptop"}
 ```
 
+The token gets every scope unless `--scopes` limits it, for example `phoneapi pair --name viewer --scopes stream,observe`. An admin token can change a token's scopes later with `PATCH /v1/tokens/{id}`, and the app's settings screen shows each token's scopes.
+
 Every request needs `Authorization: Bearer <token>`. Scopes, the `access_token` query exception, token admin, and error shapes are in [api.md](api.md).
 
 ## Helper

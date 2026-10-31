@@ -37,8 +37,9 @@ import net.die.phoneapi.server.token
  * Stateful Streamable HTTP MCP at `/mcp`. `initialize` starts a session with an id PhoneAPI picks;
  * later requests carry it in `Mcp-Session-Id` along with the token that started it. POSTs are
  * answered with JSON, GET is refused since PhoneAPI sends nothing unprompted, and `DELETE` ends the
- * session. Tools and resources follow the caller's scopes at `initialize`. DNS rebinding protection
- * stays off: the rest of the API is a superset of these tools and does not check Host.
+ * session. Tools and resources follow the caller's scopes at `initialize`, and the session ends if
+ * the token later loses one of them. DNS rebinding protection stays off: the rest of the API is a
+ * superset of these tools and does not check Host.
  */
 internal fun Application.installPhoneMcp(services: ServerServices, sessions: McpSessions) {
     routing {
@@ -100,6 +101,7 @@ private suspend fun startSession(
             transport = transport,
             server = server,
             startedAtMs = sessions.clock(),
+            scopes = token.scopes,
         )
     transport.setOnSessionInitialized { sessions.add(session) }
     transport.setOnSessionClosed { sessions.closed(it) }
@@ -124,8 +126,9 @@ private suspend fun attachSession(
     val transport = newTransport()
     transport.setSessionIdGenerator { session.id }
     val control = sessions.control(session.id, session.tokenId, session.tokenName)
-    val server = phoneServer(services, call.token.scopes, Holder.Session(session.id), control)
-    transport.setOnSessionInitialized { session.attach(transport, server) }
+    val scopes = call.token.scopes
+    val server = phoneServer(services, scopes, Holder.Session(session.id), control)
+    transport.setOnSessionInitialized { session.attach(transport, server, scopes) }
     transport.setOnSessionClosed { sessions.closed(it) }
     server.createSession(transport)
     session.touch(sessions.clock())

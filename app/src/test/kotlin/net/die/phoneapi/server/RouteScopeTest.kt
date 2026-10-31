@@ -6,6 +6,7 @@ import io.ktor.client.plugins.websocket.webSocket
 import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.delete
 import io.ktor.client.request.get
+import io.ktor.client.request.patch
 import io.ktor.client.request.post
 import io.ktor.client.request.put
 import io.ktor.client.request.setBody
@@ -120,6 +121,7 @@ private suspend fun request(
             ApiMethod.GET -> client.get(path) { bearer(secret) }
             ApiMethod.POST -> client.post(path) { json(secret) }
             ApiMethod.PUT -> client.put(path) { json(secret) }
+            ApiMethod.PATCH -> client.patch(path) { json(secret) }
             ApiMethod.DELETE -> client.delete(path) { bearer(secret) }
             ApiMethod.WEBSOCKET -> error(route)
         }
@@ -159,6 +161,7 @@ private fun RoutingNode.routeMethod(): ApiMethod {
         HttpMethod.Get -> ApiMethod.GET
         HttpMethod.Post -> ApiMethod.POST
         HttpMethod.Put -> ApiMethod.PUT
+        HttpMethod.Patch -> ApiMethod.PATCH
         HttpMethod.Delete -> ApiMethod.DELETE
         else -> error(method.value)
     }
